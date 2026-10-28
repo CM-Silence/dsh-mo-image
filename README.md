@@ -91,6 +91,37 @@ $DSH_HOME/mo-image/config.json
 
 API Key 只保存在本机，不会写入生成的图片。
 
+## 模型适配层
+
+不同平台的生图接口「长得不一样」：字段名不同（`size` / `width,height` / `image_size` / `aspect_ratio`）、取值范围不同（有的只认固定几个尺寸，有的有最小像素预算）、回应形状不同（`b64_json` / `url` / 直接二进制）。
+
+插件把这些差异收进 `lib/adapters.js` 的适配器描述符里，调用方只认一套规范参数：
+
+| 字段 | 作用 |
+|---|---|
+| `send[]` | 白名单：只有列出来的字段才会写进请求体，没列的一律不发 |
+| `size` | 尺寸怎么编码、该模型接受哪些尺寸（`allowed` 白名单，或用 `minPixels` / `maxPixels` / `multiple` 约束） |
+| `quality` | 规范 quality 如何映射成该平台的值（例如 DALL·E 3 的 `high → hd`） |
+| `transport` | `json` 或 `multipart` |
+| `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
+| `async` + `poll` | 异步入队型：提交拿 `task_id`，轮询到成功再下载 |
+| `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
+
+内置适配器：`openai-images`（通用兜底）、`gpt-image`、`dall-e-3`、`siliconflow`、`volcengine-ark`、`stability`、`dashscope-wanx`。
+
+两种交互形态都覆盖：
+
+- **同步**：一次请求直接返回图片
+- **异步入队**：提交返回 `task_id`，按 `poll.intervalMs` 轮询 `GET /tasks/{taskId}`，`SUCCEEDED` 后下载结果；`FAILED` / 超时会带回上游原因
+
+选择规则：`provider.adapter` 显式指定 → 按 API 域名匹配 → 按模型 ID 匹配 → 落到 `openai-images`。设置页不需要新增选项。
+
+**尺寸自动适配**：你写 `256x256` 而模型最小只能出 `1024x1024` 时，插件会按最近的合法尺寸生成，再把结果缩回 `256x256`（内置零依赖 PNG 缩放）。缩放发生过会写进 `$DSH_HOME/mo-image/host.log`。
+
+**错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；报尺寸超限时往上抬一档重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
+
+新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
+
 ## 常见问题
 
 **设置里没有“生图模型”**

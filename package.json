@@ -1,6 +1,6 @@
 {
   "name": "dsh-mo-image",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "DSH plugin: generate and edit images with a configured OpenAI-compatible image model",
   "type": "module",
   "main": "lib/index.js",
