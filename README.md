@@ -1,4 +1,4 @@
-# dsh-mo-image
+<img width="863" height="1920" alt="dfdf7c4c73c2fcf20e6df39087156288" src="https://github.com/user-attachments/assets/9a90bd40-c7b8-4b25-ae72-27f6589d087b" /># dsh-mo-image
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 用的生图插件。
 
@@ -22,17 +22,15 @@
 从 GitHub 安装：
 
 ~~~bash
-git clone https://github.com/YOUR_GITHUB_NAME/dsh-mo-image.git
+git clone https://github.com/CM-Silence/dsh-mo-image.git
 dsh plugin --profile desktop add link:./dsh-mo-image
 ~~~
 
 也可以直接使用仓库地址：
 
 ~~~bash
-dsh plugin --profile desktop add github:YOUR_GITHUB_NAME/dsh-mo-image
+dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 ~~~
-
-把 YOUR_GITHUB_NAME 换成实际的 GitHub 用户名。
 
 安装后确认 profile 的 dsh.profile.bundles 中包含：
 
@@ -58,7 +56,7 @@ dsh plugin --profile desktop add github:YOUR_GITHUB_NAME/dsh-mo-image
 
 保存后，在对话输入框右侧选择当前生图模型。
 
-内置了几家官方或大型模型平台：OpenAI、火山方舟、阿里云百炼、硅基流动、智谱 BigModel。也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
+内置了几家官方或大型模型平台，也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
 
 ## 使用
 
