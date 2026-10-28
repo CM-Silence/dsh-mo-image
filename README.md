@@ -1,4 +1,4 @@
-<img width="863" height="1920" alt="dfdf7c4c73c2fcf20e6df39087156288" src="https://github.com/user-attachments/assets/9a90bd40-c7b8-4b25-ae72-27f6589d087b" /># dsh-mo-image
+# dsh-mo-image
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 用的生图插件。
 
