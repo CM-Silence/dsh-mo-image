@@ -119,6 +119,31 @@ test('hydrate reports done once and clears the marker', async () => {
   assert.equal(service.status().state, 'idle');
 });
 
+test('apply resolves a plugin manager that becomes available later', async () => {
+  const installs = [];
+  const manager = {
+    async listBundles() { return [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image' }]; },
+    async installBundle(spec) { installs.push(spec); return { result: { application: 'restart-required' } }; },
+    async removeBundle() {}
+  };
+  let current = null;
+  const service = createUpdateService({
+    currentVersion: '0.3.1',
+    markerFile: '',
+    request: async () => releaseResponse('v0.4.0', '- 新'),
+    pluginManager: () => current,
+    log() {},
+    sleep: async () => {},
+    installDelayMs: 0
+  });
+  await service.refresh();
+  current = manager;
+  const out = await service.apply('0.4.0');
+  assert.deepEqual(out, { ok: true });
+  await service.settled();
+  assert.deepEqual(installs, ['github:CM-Silence/dsh-mo-image#v0.4.0']);
+});
+
 test('apply is idempotent while an install is in flight', async () => {
   const { service, installs } = makeService();
   await service.refresh();
