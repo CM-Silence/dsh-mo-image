@@ -26,6 +26,16 @@ test('nextVersion bumps the right segment', () => {
   assert.throws(() => nextVersion('0.3.1', 'banana'), /unknown/i);
 });
 
+test('nextVersion accepts explicit tag-style versions with a suffix', () => {
+  assert.equal(nextVersion('0.3.1', '0.9.0-rc1'), '0.9.0-rc1');
+  assert.equal(nextVersion('0.9.0-rc1', 'v0.9.0-rc2'), '0.9.0-rc2');
+  assert.equal(nextVersion('0.9.0-rc2', '0.9.0'), '0.9.0');
+  assert.equal(nextVersion('0.9.0-b1', '0.9.0-b2'), '0.9.0-b2');
+  assert.throws(() => nextVersion('0.9.0-rc2', '0.9.0-rc1'), /newer/i);
+  assert.throws(() => nextVersion('0.9.0-b2', '0.9.0-a3'), /newer/i);
+  assert.throws(() => nextVersion('0.3.1', '0.4'), /unknown/i);
+});
+
 test('renderNotes groups commits by type', () => {
   const notes = renderNotes([
     { type: 'feat', text: 'add searchable model picker' },

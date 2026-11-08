@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   compareVersions, tagToVersion, classifySource, judgeMarker,
-  readMarker, clearMarker, fetchLatestRelease
+  readMarker, clearMarker, fetchLatestRelease, isHiddenPrerelease
 } from '../lib/update.js';
 
 test('compareVersions orders releases, prereleases and junk', () => {
@@ -84,6 +84,30 @@ test('fetchLatestRelease reads the api, falls back to the redirect, else null', 
 
   const none = await fetchLatestRelease({ apiBase: `${base}/x`, releasesBase: `${base}/y`, request: fetch });
   assert.equal(none, null);
+});
+
+test('alpha and beta releases never count as an update', async (t) => {
+  const tags = { value: 'v0.9.0-b2' };
+  const server = createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ tag_name: tags.value, body: '- beta', html_url: 'u' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const reasons = [];
+  const beta = await fetchLatestRelease({ apiBase: base, releasesBase: `${base}/rel`, request: fetch, onError: (r) => reasons.push(r) });
+  assert.equal(beta, null);
+  assert.match(reasons[0], /alpha\/beta/);
+
+  tags.value = 'v0.9.0-rc1';
+  const rc = await fetchLatestRelease({ apiBase: base, releasesBase: `${base}/rel`, request: fetch });
+  assert.equal(rc.version, '0.9.0-rc1');
+
+  assert.equal(isHiddenPrerelease('0.9.0-a1'), true);
+  assert.equal(isHiddenPrerelease('0.9.0-b2'), true);
+  assert.equal(isHiddenPrerelease('0.9.0-rc1'), false);
+  assert.equal(isHiddenPrerelease('0.9.0'), false);
 });
 
 test('fetchLatestRelease reports why both addresses failed', async (t) => {

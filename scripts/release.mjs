@@ -17,12 +17,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compareVersions } from '../lib/update.js';
+import { compareVersions, isHiddenPrerelease } from '../lib/update.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
 const REPO = 'CM-Silence/dsh-mo-image';
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+// 允许明确指定 vX.Y.Z / vX.Y.Z-a1 / vX.Y.Z-b2 / vX.Y.Z-rc1（示例里的版本样式）。
+const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-((?:a|b|rc)\d+))?$/;
 const BRANCH = 'master';
 
 /**
@@ -55,13 +56,15 @@ export function parseArgs(argv) {
 export function nextVersion(current, kind) {
   const match = SEMVER.exec(String(current || ''));
   if (!match) throw new Error(`current version is not semver: ${current}`);
-  const [major, minor, patch] = match.slice(1).map(Number);
+  const [major, minor, patch] = match.slice(1, 4).map(Number);
   if (kind === 'patch') return `${major}.${minor}.${patch + 1}`;
   if (kind === 'minor') return `${major}.${minor + 1}.0`;
   if (kind === 'major') return `${major + 1}.0.0`;
-  if (SEMVER.test(String(kind || ''))) {
-    if (compareVersions(kind, current) !== 1) throw new Error(`${kind} is not newer than ${current}`);
-    return String(kind);
+  const explicit = SEMVER.exec(String(kind || ''));
+  if (explicit) {
+    const normalized = `${explicit[1]}.${explicit[2]}.${explicit[3]}${explicit[4] ? '-' + explicit[4] : ''}`;
+    if (compareVersions(normalized, current) !== 1) throw new Error(`${normalized} is not newer than ${current}`);
+    return normalized;
   }
   throw new Error(`unknown release kind: ${kind}`);
 }
@@ -165,11 +168,11 @@ function collectCommits(sinceTag) {
 }
 
 /** 用 token 走 REST API 建 Release：脚本写到临时文件再执行，避免命令行引号问题。 */
-function createReleaseWithToken(tag, notes) {
+function createReleaseWithToken(tag, notes, prerelease) {
   const dir = os.tmpdir();
   const payload = path.join(dir, `dsh-release-${Date.now()}.json`);
   const script = path.join(dir, `dsh-release-${Date.now()}.mjs`);
-  writeFileSync(payload, JSON.stringify({ tag_name: tag, name: tag, body: notes }), 'utf8');
+  writeFileSync(payload, JSON.stringify({ tag_name: tag, name: tag, body: notes, prerelease: !!prerelease }), 'utf8');
   writeFileSync(script, [
     "import { readFileSync } from 'node:fs';",
     'const [file] = process.argv.slice(2);',
@@ -200,15 +203,21 @@ function createReleaseWithToken(tag, notes) {
  */
 export function createRelease(version, notes, options = {}) {
   const tag = `v${version}`;
+  // alpha / beta 标成 prerelease：GitHub 的 /releases/latest 会跳过它，
+  // 已装用户也就不会收到更新提示。rc 照常发布。
+  const prerelease = isHiddenPrerelease(version);
   if (options.dryRun) return true;
   const file = path.join(os.tmpdir(), `dsh-mo-image-${tag}.md`);
   writeFileSync(file, notes + '\n', 'utf8');
   try {
     if (hasGh()) {
-      return run('gh', ['release', 'create', tag, '--title', tag, '--notes-file', file]).status === 0;
+      const args = ['release', 'create', tag, '--title', tag, '--notes-file', file];
+      if (prerelease) args.push('--prerelease');
+      return run('gh', args).status === 0;
     }
-    if (String(process.env.GITHUB_TOKEN || '').trim()) return createReleaseWithToken(tag, notes);
-    console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。`);
+    if (String(process.env.GITHUB_TOKEN || '').trim()) return createReleaseWithToken(tag, notes, prerelease);
+    const hint = prerelease ? '\n（这是 alpha/beta，记得在页面上勾选 "Set as a pre-release"）' : '';
+    console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。${hint}`);
     console.log(`打开这个地址，正文粘贴下面的内容，点 Create release：`);
     console.log(`  https://github.com/${REPO}/releases/new?tag=${tag}&title=${tag}\n`);
     console.log('----- 正文开始 -----');
@@ -260,7 +269,7 @@ export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.releaseOnly) return releaseOnly(args);
   if (args.help || !args.kind) {
-    console.log('usage: node scripts/release.mjs <patch|minor|major|x.y.z> [--dry-run] [--notes "..."] [--notes-file file]');
+    console.log('usage: node scripts/release.mjs <patch|minor|major|x.y.z|x.y.z-rc1> [--dry-run] [--notes "..."] [--notes-file file]');
     console.log('       node scripts/release.mjs --release-only   # 补建 Release');
     return args.help ? 0 : 2;
   }
@@ -268,6 +277,9 @@ export function main(argv = process.argv.slice(2)) {
   const next = nextVersion(current, args.kind);
   if (next === current) throw new Error('the new version equals the current one');
   const tag = `v${next}`;
+  if (isHiddenPrerelease(next)) {
+    console.log(`${next} 是 alpha/beta：会标成 prerelease，已装用户不会收到更新提示。`);
+  }
 
   // 说明必须在打 tag 之前收：打完 tag 再 describe 拿到的就是新 tag，区间为空。
   const notes = args.notesFile
