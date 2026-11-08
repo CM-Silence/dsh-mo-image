@@ -95,7 +95,8 @@ test('the update route reports status and starts an install', async (t) => {
   assert.ok(requests.some((url) => url.includes('/repos/CM-Silence/dsh-mo-image/releases/latest')));
 
   const applyRes = makeRes();
-  await route.handler(jsonReq('POST', { action: 'apply', version: '0.4.0' }), applyRes);
+  // 客户端给的版本不可信：服务端只用自己查到的 latest。
+  await route.handler(jsonReq('POST', { action: 'apply', version: 'v9.9.9' }), applyRes);
   assert.equal(applyRes.status, 200);
   assert.equal(JSON.parse(applyRes.body).ok, true);
   await new Promise((resolve) => setTimeout(resolve, 30));
