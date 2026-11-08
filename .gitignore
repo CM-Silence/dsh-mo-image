@@ -1,0 +1,6 @@
+# runtime output
+generated-images/
+*.log
+
+# local sandboxes
+.tmp-*/
