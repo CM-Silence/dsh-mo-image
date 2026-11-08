@@ -202,6 +202,23 @@ test('the dialog lays out title, version, notes and the two actions', () => {
   assert.match(text, /update\.apply/);
 });
 
+test('apply registers the overlay toast host', () => {
+  const { registrations } = createHarness();
+  const overlay = registrations.find(({ definition }) => definition.name === 'shell.overlay');
+  assert.ok(overlay, 'missing shell.overlay registration');
+  assert.equal(overlay.definition.id, 'mo-image-update-toast');
+});
+
+test('pushing a toast keeps only the newest message', () => {
+  const { api } = createHarness();
+  api.__test.toastQueue.push('update.starting', 'info');
+  assert.equal(api.__test.toastQueue.current().text, 'update.starting');
+  api.__test.toastQueue.push('update.doneRestart', 'success');
+  assert.equal(api.__test.toastQueue.current().text, 'update.doneRestart');
+  api.__test.toastQueue.clear();
+  assert.equal(api.__test.toastQueue.current(), null);
+});
+
 test('the settings section asks the host for update status when it mounts', async () => {
   const harness = createHarness({ status: { ok: true, state: 'available', current: '0.3.1', latest: '0.4.0' } });
   await new Promise((resolve) => setImmediate(resolve));
