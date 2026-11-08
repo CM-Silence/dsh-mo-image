@@ -12,7 +12,7 @@
  *   npm run release -- minor --dry-run  # 只打印要做的事
  *   npm run release -- minor --notes-file notes.md
  */
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -149,8 +149,38 @@ export function commandAvailable(name) {
   return !result.error && result.status === 0;
 }
 
-function hasGh() {
-  return commandAvailable('gh');
+// gh 装在 PATH 之外是常态（尤其是刚装完、宿主进程还拿着旧 PATH 的时候）。
+const GH_FALLBACKS = [
+  path.join(process.env.ProgramFiles || 'C:\\Program Files', 'GitHub CLI', 'gh.exe'),
+  path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'GitHub CLI', 'gh.exe'),
+  path.join(process.env.LOCALAPPDATA || '', 'GitHub CLI', 'gh.exe')
+];
+
+/**
+ * 找到可用的 gh 可执行文件（PATH 上没有就试常见安装位置）。
+ * @returns {string} 可用时返回命令或绝对路径，找不到返回空串
+ */
+export function resolveGh() {
+  if (commandAvailable('gh')) return 'gh';
+  for (const candidate of GH_FALLBACKS) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+/**
+ * 装了且已登录才返回可用的 gh；只装了没登录时返回空串，让调用方退回 token / 手动。
+ * @returns {string}
+ */
+function ghReady() {
+  const gh = resolveGh();
+  if (!gh) return '';
+  const status = run(gh, ['auth', 'status'], { capture: true });
+  return !status.error && status.status === 0 ? gh : '';
+}
+
+function hasGhInstalled() {
+  return resolveGh() !== '';
 }
 
 function readVersion() {
@@ -210,21 +240,27 @@ export function createRelease(version, notes, options = {}) {
   const file = path.join(os.tmpdir(), `dsh-mo-image-${tag}.md`);
   writeFileSync(file, notes + '\n', 'utf8');
   try {
-    if (hasGh()) {
+    const gh = ghReady();
+    if (gh) {
       const args = ['release', 'create', tag, '--title', tag, '--notes-file', file];
       if (prerelease) args.push('--prerelease');
-      return run('gh', args).status === 0;
+      return run(gh, args).status === 0;
     }
     if (String(process.env.GITHUB_TOKEN || '').trim()) return createReleaseWithToken(tag, notes, prerelease);
     const hint = prerelease ? '\n（这是 alpha/beta，记得在页面上勾选 "Set as a pre-release"）' : '';
-    console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。${hint}`);
+    console.log(`\ntag ${tag} 已经推送，但没找到可用的 GitHub 凭据。${hint}`);
+    if (hasGhInstalled()) console.log('检测到 gh 已安装但没登录：先在终端跑 gh auth login，再执行下面的补建命令。');
     console.log(`打开这个地址，正文粘贴下面的内容，点 Create release：`);
     console.log(`  https://github.com/${REPO}/releases/new?tag=${tag}&title=${tag}\n`);
     console.log('----- 正文开始 -----');
     console.log(notes);
     console.log('----- 正文结束 -----\n');
-    console.log('装好 gh（winget install GitHub.cli）或设置 GITHUB_TOKEN 后，也可以跑：');
-    console.log(`  node scripts/release.mjs --release-only\n`);
+    if (hasGhInstalled()) {
+      console.log('补建命令（先在终端 gh auth login）：');
+    } else {
+      console.log('装好 gh（winget install GitHub.cli）或设置 GITHUB_TOKEN 后，也可以跑：');
+    }
+    console.log(`  node scripts/release.mjs --release-only --notes-file <上面那份 md>\n`);
     return false;
   } finally {
     try { rmSync(file, { force: true }); } catch (_error) { /* 同上 */ }
@@ -315,7 +351,8 @@ export function main(argv = process.argv.slice(2)) {
     console.error(`tag ${tag} already exists`);
     return 1;
   }
-  if (hasGh() && run('gh', ['release', 'view', tag], { capture: true }).status === 0) {
+  const ghCli = ghReady();
+  if (ghCli && run(ghCli, ['release', 'view', tag], { capture: true }).status === 0) {
     console.error(`release ${tag} already exists`);
     return 1;
   }
