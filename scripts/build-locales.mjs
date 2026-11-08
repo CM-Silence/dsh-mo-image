@@ -98,7 +98,8 @@ export function parseCsv(text) {
  * @returns {{ locales: string[], keys: string[], messages: Record<string, Record<string, string>> }}
  */
 export function parseMessages(text) {
-  const rows = parseCsv(text.replace(/^\uFEFF/, ''));
+  // CRLF 的 CSV（Windows 检出）不先归一，最后一列会带一个 \r。
+  const rows = parseCsv(String(text).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'));
   if (rows.length === 0) throw new Error('locale/messages.csv is empty');
 
   const header = rows[0].cells.map((cell) => cell.trim());
@@ -206,7 +207,9 @@ export function checkLocaleBlock(source, parsed) {
   const actual = extractLocaleBlock(source);
   if (!actual) return { ok: false, message: 'lib/client.js has no generated locale block; run npm run build:locales' };
   const expected = renderLocaleBlock(parsed);
-  if (actual !== expected) return { ok: false, message: 'lib/client.js locale block is out of date; run npm run build:locales' };
+  // 检出时可能被 git 换成 CRLF，生成块用 LF；比较前统一，免得干净工作区误报。
+  const normalize = (text) => String(text).replace(/\r\n/g, '\n');
+  if (normalize(actual) !== normalize(expected)) return { ok: false, message: 'lib/client.js locale block is out of date; run npm run build:locales' };
   return { ok: true, message: '' };
 }
 

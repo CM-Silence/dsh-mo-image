@@ -1,2 +1,11 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Generated blocks and locale tables are compared byte for byte, so keep the
+# working tree at LF on every platform.
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
