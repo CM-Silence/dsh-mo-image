@@ -8,3 +8,6 @@ generated-images/
 # local-only release helpers (never committed)
 push.js
 push.sh
+
+# local working docs: design notes, plans, release notes
+/docs/
