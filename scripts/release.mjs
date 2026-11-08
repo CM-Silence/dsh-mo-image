@@ -305,7 +305,13 @@ export function main(argv = process.argv.slice(2)) {
     console.error('working tree is not clean; commit or stash first');
     return 1;
   }
-  if (capture('git', ['tag', '--list', tag])) {
+
+  // 上一次发版可能已经 bump + 打了 tag、只是推送/建 Release 时失败：
+  // 这种情况下不重做前面的步骤，直接从推送继续。
+  const resume = capture('git', ['tag', '--list', tag]) !== '' && current === next;
+  if (resume) {
+    console.log(`检测到 ${tag} 已存在且版本号已是 ${next}：接着上次没做完的推送与 Release`);
+  } else if (capture('git', ['tag', '--list', tag])) {
     console.error(`tag ${tag} already exists`);
     return 1;
   }
@@ -316,22 +322,54 @@ export function main(argv = process.argv.slice(2)) {
 
   if (run(process.execPath, ['--test']).status !== 0) {
     console.error('tests failed; release aborted');
+    if (resume) console.error(`版本号已经是 ${next}；修好测试后重跑本命令会从推送继续`);
     return 1;
   }
 
-  const pkg = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8'));
-  pkg.version = next;
-  writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+  const baseSha = capture('git', ['rev-parse', 'HEAD']);
+  /** 推送之前失败：把本地改动恢复原样，用户可以直接重试。 */
+  const rollback = (reason) => {
+    console.error(`\n发版失败：${reason}`);
+    run('git', ['tag', '-d', tag], { capture: true });
+    const reset = run('git', ['reset', '--hard', baseSha], { capture: true });
+    if (!reset.error && reset.status === 0) console.error(`已回退本地改动（回到 ${baseSha.slice(0, 7)}），可以直接重试`);
+    else console.error(`自动回退没有成功，请手动执行：git reset --hard ${baseSha} && git tag -d ${tag}`);
+    return 1;
+  };
 
-  for (const step of plan) {
-    if (run(step.command, step.args).status !== 0) {
-      console.error(`failed: ${step.command} ${step.args.join(' ')}`);
-      return 1;
+  if (!resume) {
+    const pkg = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8'));
+    pkg.version = next;
+    writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    // 只做本地那三步（add / commit / tag），推送单独处理，好在失败时回退。
+    for (const step of plan.slice(0, 3)) {
+      if (run(step.command, step.args).status !== 0) {
+        return rollback(`${step.command} ${step.args[0]} 失败`);
+      }
     }
   }
 
+  // 先推分支：这一步失败说明远端还没变，可以安全回退。
+  if (run('git', ['push', 'origin', BRANCH]).status !== 0) {
+    console.error('\n推送分支失败（网络 / 凭据）');
+    if (resume) {
+      console.error(`本地停在 ${tag}，远端未更新；修好网络后重跑本命令会从推送继续`);
+      return 1;
+    }
+    return rollback('git push 失败');
+  }
+
+  // 再单独推 tag：失败时分支已经上去了，不能再回退本地，改为提示补推。
+  if (run('git', ['push', 'origin', `refs/tags/${tag}`]).status !== 0) {
+    console.error(`\n分支已推送，但 tag ${tag} 推送失败（网络 / 凭据）`);
+    console.error(`恢复网络后执行：git push origin refs/tags/${tag}，然后 node scripts/release.mjs --release-only`);
+    return 1;
+  }
+
   if (!createRelease(next, notes, { dryRun: false })) {
-    console.error(`tag ${tag} pushed but the GitHub release was not created`);
+    console.error(`\ntag ${tag} 已推送，但 GitHub Release 没有建成`);
+    console.error('凭据齐了之后执行：node scripts/release.mjs --release-only');
     return 1;
   }
   console.log(`\nreleased ${tag}`);

@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// 宿主上报的当前版本取自 package.json；发版会改它，所以这里不能写死。
+const CURRENT = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+// 假 Release 必须比当前版本新，否则检查逻辑会正确地判定"没有更新"。
+const NEXT = (() => {
+  const [major, minor, patch] = CURRENT.split('-')[0].split('.').map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+})();
 
 function makeRes() {
   return {
@@ -60,7 +68,7 @@ test('the update route reports status and starts an install', async (t) => {  co
   const release = {
     ok: true,
     async json() {
-      return { tag_name: 'v0.4.0', body: '- 新功能', html_url: 'https://github.com/CM-Silence/dsh-mo-image/releases/tag/v0.4.0' };
+      return { tag_name: `v${NEXT}`, body: '- 新功能', html_url: `https://github.com/CM-Silence/dsh-mo-image/releases/tag/v${NEXT}` };
     }
   };
   const requests = [];
@@ -82,14 +90,14 @@ test('the update route reports status and starts an install', async (t) => {  co
   assert.equal(first.status, 200);
   const firstBody = JSON.parse(first.body);
   assert.equal(firstBody.ok, true);
-  assert.equal(firstBody.current, '0.3.1');
+  assert.equal(firstBody.current, CURRENT);
 
   await new Promise((resolve) => setTimeout(resolve, 60));
   const second = makeRes();
   await route.handler({ method: 'GET', headers: { host: '127.0.0.1:1' }, url: '/api/mo-image/update' }, second);
   const secondBody = JSON.parse(second.body);
   assert.equal(secondBody.state, 'available');
-  assert.equal(secondBody.latest, '0.4.0');
+  assert.equal(secondBody.latest, NEXT);
   assert.equal(secondBody.notes, '- 新功能');
   assert.ok(requests.some((url) => url.includes('/repos/CM-Silence/dsh-mo-image/releases/latest')));
 
@@ -100,7 +108,7 @@ test('the update route reports status and starts an install', async (t) => {  co
   assert.equal(JSON.parse(applyRes.body).ok, true);
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(installs.length, 1);
-  assert.equal(installs[0].spec, 'github:CM-Silence/dsh-mo-image#v0.4.0');
+  assert.equal(installs[0].spec, `github:CM-Silence/dsh-mo-image#v${NEXT}`);
 
   const ackRes = makeRes();
   await route.handler(jsonReq('POST', { action: 'ack' }), ackRes);
@@ -116,7 +124,7 @@ test('a finished update is reported on the first status read after a restart', a
     version: 1, providers: [], active: { providerId: '', model: '' }, defaults: {}
   }), 'utf8');
   // 上一次更新留下的标记：装的是当前这个版本，说明已经装好了。
-  writeFileSync(path.join(state, 'update.json'), JSON.stringify({ from: '0.2.0', to: '0.3.1', startedAt: 1 }), 'utf8');
+  writeFileSync(path.join(state, 'update.json'), JSON.stringify({ from: '0.2.0', to: CURRENT, startedAt: 1 }), 'utf8');
   process.env.DSH_HOME = home;
 
   const routes = [];
@@ -138,6 +146,6 @@ test('a finished update is reported on the first status read after a restart', a
   await route.handler({ method: 'GET', headers: { host: '127.0.0.1:1' }, url: '/api/mo-image/update' }, res);
   const body = JSON.parse(res.body);
   assert.equal(body.state, 'done');
-  assert.equal(body.latest, '0.3.1');
+  assert.equal(body.latest, CURRENT);
   assert.equal(body.updatedBeforeRestart, true);
 });
