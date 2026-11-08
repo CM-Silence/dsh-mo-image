@@ -39,6 +39,17 @@ test('empty state contributes no prompt section', () => {
   assert.equal(promptSectionText(null), '');
 });
 
+test('prompt section forbids judging the image and switching models', () => {
+  const on = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: true });
+  const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false });
+  for (const text of [on, off]) {
+    assert.match(text, /不评价画质/);
+    assert.match(text, /不打开或读取图片/);
+    assert.match(text, /不要自行切换/);
+    assert.match(text, /可以问用户/);
+  }
+});
+
 test('section names the active model, formula and edit model', () => {
   const text = promptSectionText({
     model: 'gpt-image-2.5-flare',

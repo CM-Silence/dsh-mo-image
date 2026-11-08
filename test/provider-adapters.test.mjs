@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, qualityOptionsFor, qualityForAdapter } from '../lib/adapters.js';
+import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -21,6 +21,20 @@ test('provider manifests include hot image providers and native capabilities', (
   assert.ok(adapters.some((adapter) => adapter.id === 'xai-imagine' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'recraft' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'ideogram' && adapter.supportsModels));
+});
+
+test('generic gateways can be filtered to likely image models', () => {
+  assert.deepEqual(filterImageModels([
+    'gpt-image-1',
+    'dall-e-3',
+    'gpt-4o',
+    'text-embedding-3-small',
+    'flux-1-schnell',
+    'qwen-image',
+    'wanx2.1-t2i-turbo',
+    'cogview-4',
+    'some-chat-model'
+  ]), ['gpt-image-1', 'dall-e-3', 'flux-1-schnell', 'qwen-image', 'wanx2.1-t2i-turbo', 'cogview-4']);
 });
 
 test('quality capabilities are per adapter and unsupported models hide quality', () => {

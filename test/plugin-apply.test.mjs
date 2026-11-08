@@ -66,7 +66,7 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(section);
   const text = section.text();
   assert.match(text, /gpt-image-2\.5-flare/);
-  assert.match(text, /gpt-image-2\.5-sunburst/);
+  assert.doesNotMatch(text, /gpt-image-2\.5-sunburst/, 'strict mode must not advertise a different edit model');
   assert.match(text, /生成公式/);
   assert.match(text, /无 negative prompt/);
 

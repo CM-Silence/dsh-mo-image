@@ -161,7 +161,9 @@ test('config route migrates keys to the credentials store and never returns them
   const modelsRoute = routes.find((item) => item.path === '/api/mo-image/models');
   assert.ok(modelsRoute);
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id: 'local-model-a' }, { id: 'local-model-b' }] }), {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [{ id: 'flux-local-a' }, { id: 'gpt-4o' }, { id: 'flux-local-b' }]
+  }), {
     status: 200, headers: { 'content-type': 'application/json' }
   });
   try {
@@ -170,7 +172,29 @@ test('config route migrates keys to the credentials store and never returns them
       baseUrl: 'http://127.0.0.1:9999/v1', adapter: 'openai-images', optionalKey: true
     })), modelsRes);
     assert.equal(modelsRes.status, 200);
-    assert.deepEqual(JSON.parse(modelsRes.body).models, ['local-model-a', 'local-model-b']);
+    const modelsBody = JSON.parse(modelsRes.body);
+    assert.deepEqual(modelsBody.models, ['flux-local-a', 'flux-local-b']);
+    assert.deepEqual(modelsBody.allModels, ['flux-local-a', 'gpt-4o', 'flux-local-b']);
+    assert.equal(modelsBody.filteredCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [{ id: 'Qwen/Qwen-Image' }, { id: 'Qwen/Qwen2.5-72B-Instruct' }]
+  }), {
+    status: 200, headers: { 'content-type': 'application/json' }
+  });
+  try {
+    const modelsRes = makeRes();
+    await modelsRoute.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://api.siliconflow.cn/v1', adapter: '', optionalKey: false
+    })), modelsRes);
+    assert.equal(modelsRes.status, 200);
+    const modelsBody = JSON.parse(modelsRes.body);
+    assert.deepEqual(modelsBody.models, ['Qwen/Qwen-Image']);
+    assert.deepEqual(modelsBody.allModels, ['Qwen/Qwen-Image', 'Qwen/Qwen2.5-72B-Instruct']);
+    assert.equal(modelsBody.filteredCount, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
