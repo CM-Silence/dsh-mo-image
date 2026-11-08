@@ -5,7 +5,10 @@
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build:locales": "node scripts/build-locales.mjs",
+    "check:locales": "node scripts/build-locales.mjs --check",
+    "release": "node scripts/release.mjs"
   },
   "exports": {
     ".": "./lib/index.js",
@@ -14,6 +17,8 @@
   },
   "files": [
     "lib",
+    "locale",
+    "scripts",
     "skills",
     "cordis.patch.yml",
     "README.md"
@@ -31,6 +36,7 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings-general",
         "@deepseek-ai/dsh-client-ui-settings-models",
         "@deepseek-ai/dsh-client-ui-conversation"
