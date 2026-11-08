@@ -268,6 +268,16 @@ export function createRelease(version, notes, options = {}) {
 }
 
 /**
+ * 默认更新日志：docs/superpowers/updatelogs/v<version>.md（与 push.js 的约定一致）。
+ * @param {string} version
+ * @returns {string}
+ */
+function defaultNotesFile(version) {
+  const candidate = path.join(ROOT, 'docs', 'superpowers', 'updatelogs', `v${version}.md`);
+  return existsSync(candidate) ? candidate : '';
+}
+
+/**
  * 只补建 Release：tag 已经推上去、但 GitHub 上没有对应 Release 时用。
  * 缺凭据时和完整发版一样，打印手动步骤并返回失败。
  * @returns {number} 退出码
@@ -280,9 +290,13 @@ function releaseOnly(args) {
     return 1;
   }
   const previous = capture('git', ['describe', '--tags', '--abbrev=0', '--match', 'v*', `${tag}^`]);
+  const autoFile = defaultNotesFile(version);
   const notes = args.notesFile
     ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
-    : args.notes.trim() || renderNotes(collectCommits(previous));
+    : args.notes.trim() || (autoFile ? readFileSync(autoFile, 'utf8').trim() : renderNotes(collectCommits(previous)));
+  if (autoFile && !args.notesFile && !args.notes.trim()) {
+    console.log(`使用 ${path.relative(ROOT, autoFile)} 作为更新日志`);
+  }
   if (args.dryRun) {
     console.log(`release-only ${tag}（上一个 tag: ${previous || '无'}）`);
     console.log(notes || '(no notes)');
