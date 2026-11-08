@@ -4,3 +4,7 @@ generated-images/
 
 # local sandboxes
 .tmp-*/
+
+# local-only release helpers (never committed)
+push.js
+push.sh
