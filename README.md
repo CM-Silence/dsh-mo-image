@@ -41,6 +41,26 @@ dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 
 然后重启 DSH。
 
+## 更新
+
+DSH 每次启动会查一次仓库的最新 Release。有新版时，设置 → 生图模型 页顶部会出现「有可用更新」：点开能看到版本号和这次改了什么，点「更新」会在后台用 pnpm 把插件换成新 tag，重启 DSH 后生效。
+
+- 用 `link:` 方式安装的开发环境不会自动改文件，点更新只会提示你自己 `git pull`。
+- 没有桌面版的插件管理器时，手动更新：
+
+~~~bash
+dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image#v0.4.0
+~~~
+
+维护者发版：
+
+~~~bash
+npm run release -- minor              # 改版本号、跑测试、打 tag、推送、建 Release
+npm run release -- minor --dry-run    # 只看会做什么
+~~~
+
+Release 正文就是对话框里显示的更新说明，默认由上次 tag 以来的提交标题生成，也可以用 `--notes` 或 `--notes-file` 指定。
+
 ## 配置
 
 打开：
@@ -59,6 +79,17 @@ dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 
 内置了几家官方或大型模型平台，也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
 
+## 多语言
+
+插件接入 DSH 的 locale 服务，设置页和右下角生图模型选择器会跟随 **设置 → 通用 → 语言** 立即切换，支持 DSH 内置的 8 种语言：中文、English、日本語、Español、Français、Deutsch、Русский、Português。
+
+- 文案源是 [`locale/messages.csv`](locale/messages.csv)：一行一个 key，一列一种语言，UTF-8 无 BOM。改文案只改这个表；用 Excel 编辑时请走「数据 → 从文本/CSV」并选择 UTF-8。
+- 改完运行 `npm run build:locales`，把字典写进 `lib/client.js` 的生成块；`npm run check:locales` 在测试里校验生成块没有过期。
+- 新增一种语言：在 CSV 增加一列（小写 BCP 47 id），同步更新 `scripts/build-locales.mjs` 的 `BUILTIN_LOCALES`，再生成一次即可；测试会按这个常量校验列顺序。DSH 端还要能提供这个 locale，插件才会注册出可选语言。
+- 覆盖范围：设置页、模型选择器、用户可见的报错和 aria-label。工具描述、系统提示词和技能文案不参与翻译。
+- 宿主设置接口的报错会附带稳定的 `code`/`params`（见 [`lib/localized-error.js`](lib/localized-error.js)），前端按当前语言重写整句；工具调用和宿主日志仍保留原始中文，模型看到的提示词不受影响。新增宿主错误时，在 `SERVER_ERROR_CODES` 里加 code，并在 CSV 加 `serverError.<code>`。
+- 缺 key 时按 DSH 的 locale 回退链回退到英文，再回退到 key；没有 locale 服务的环境（例如纯单测）回退到中文。
+
 ## 使用
 
 直接对模型说：
@@ -74,7 +105,13 @@ dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 - mo_image_generate：文生图 / 重做
 - mo_image_edit：参考图编辑 / 局部修改
 
-工具只接收 prompt、negative_prompt 和 images。**模型、尺寸、质量都由生图选择器控制**，工具不再接收 `model` / `size` / `quality`，避免对话模型把不稳定参数带进请求。
+工具只接收 prompt、negative_prompt 和 images。**模型、尺寸、质量都由生图选择器控制**，工具不再接收 `size` / `quality`，避免对话模型把不稳定参数带进请求。
+
+**Auto 行**：模型选择器第一行是“自动”（英文界面为 `Auto`）。只有选中它，对话模型才能在调用工具时用 `model` 参数从当前提供商的模型列表里挑一个；没选中自动时传 `model` 会被拒绝，不传 `model` 也会报错——不存在"插件替你猜"的路径。选中自动后系统提示词会列出可选模型。没有配置任何模型时（所有提供商的模型目录都为空）不显示自动行，直接显示“还没有模型，去设置 → 生图模型添加”。
+
+**配置是权限级锁定**：插件用 `ctx.tools.guard()` 注册了全局工具守卫，任何工具调用只要目标是 `mo-image/config.json` 或 `/api/mo-image/config`（写文件、shell 命令、HTTP 请求都算），都会在执行前被拒绝，而不是靠提示词"请求"模型别改。守卫只看目标字段，不会误伤正文里出现同样字符串的插件源码编辑。它挡不住刻意混淆的 shell 命令（base64、字符串拼接），真正的硬边界仍然是宿主是否给该 Agent 开 shell。
+
+**图片读取**：默认不读生成图，也不描述画面；只有用户明确要求"看看这张图"时才允许读。
 
 ## 质量档位
 
@@ -106,6 +143,7 @@ dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 - **Off**：要求模型尽量把用户原话直接传给生图工具，不扩写、不补风格/光线/构图，也不自动补 negative prompt；只有用户明确说“优化/改写提示词”时才优化。
 - 提示词优化只影响 `prompt` 文本；模型、尺寸、质量始终由选择器控制，工具不接受这些参数。
 - 设置会写进 `config.json` 的 `defaults.promptOptimization`，默认 true；旧配置没有这个字段时按 On 处理。
+- 提示词优化和生图技能是分开的：生图/改图时仍会加载 `mo-image-generation` / `mo-image-editing` 技能获取调用与输出规则；Off 只跳过技能里的公式和模板。
 - 工具描述和系统提示词会同时提示 Off 语义；编辑时同样使用用户原话或最小必要的修改说明。
 
 ## 数据
@@ -206,8 +244,9 @@ $DSH_HOME/.credentials.yaml
 说明：
 
 - 本地服务没有鉴权时，**API 密钥可以留空**；`optionalKey` 会让宿主不发送 `Authorization`。需要 Bearer token 的服务再填密钥。
-- 「模型目录」右侧的 **获取可用模型** 对第三方提供商、自定义模型 API 和本地部署器都可用：点击后先向端点探测模型，再弹出可搜索、可全选/取消全选的候选列表，只有点「添加所选」才写入当前表单。OpenAI 兼容接口返回的结果会先筛掉明显不是生图的模型，也可以勾选「显示全部模型」；没有模型列表 API 的适配器不显示这个按钮。ComfyUI 列出的是 checkpoint 名称，A1111 列出的是 `sd-models` 的 title。
-- A1111 / Forge / SD.Next 启动时需要加 `--api`。A1111 的 Basic Auth 目前不走密钥输入框，建议本地无鉴权或放到反向代理后面。A1111 的 img2img 只带第一张参考图。
+- 「模型目录」右侧的 **获取可用模型** 对第三方提供商、自定义模型 API 和本地部署器都可用：点击后先向端点探测模型，再弹出可搜索、可全选/取消全选的候选列表，只有点「添加所选」才写入当前表单。OpenAI 兼容接口返回的结果会先筛掉可能不是用于生图的模型，也可以勾选「显示全部模型」；没有模型列表 API 的适配器不显示这个按钮。ComfyUI 列出的是 checkpoint 名称，A1111 列出的是 `sd-models` 的 title。
+- 选择第三方提供商后，「提供商」标签右侧会出现 **前往提供商官网**，按当前选择打开官方 API Key / 控制台页面；本地和自定义模式不显示这个链接。
+- A1111 / Forge / SD.Next 启动时需要加 `--api`。A1111 的 Basic Auth 目前不走密钥输入框，建议仅在可信网络中使用，或加一层访问控制。A1111 的 img2img 只带第一张参考图。
 - ComfyUI 的默认工作流是 **CheckpointLoaderSimple + KSampler**，适合 SD1.5/SDXL checkpoint；Flux、Qwen-Image、任意自定义工作流请用 OpenAI 兼容网关（或改用 sd-server/LocalAI 的后端）。
 - SwarmUI 使用 `/API/GetNewSession` + `/API/GenerateText2Image`，原生编辑暂未实现。
 - InvokeAI、Fooocus、复杂 ComfyUI 工作流：先套一层 OpenAI Images 网关，再选「其他 OpenAI 兼容网关」。
@@ -299,24 +338,9 @@ $DSH_HOME/.credentials.yaml
 
 新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
 
-## 网络与代理
+## 网络
 
-插件在宿主进程里发请求，而 Node 自带的 `fetch` **不会读 Windows 系统代理**（也不读注册表）。所以插件自己解析，按优先级决定走不走代理：
-
-1. `MO_IMAGE_PROXY`：显式覆盖。填代理地址（如 `http://127.0.0.1:7897`），或填 `off` 强制直连；
-2. 环境变量 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（大小写都认，`NO_PROXY` 生效）；
-3. Windows「系统代理」：Clash 等加速器开的系统代理会被自动读取，**规则模式和全局模式都适用**；
-4. 都没有就直连。
-
-边界与注意事项：
-
-- **本机地址永远直连**：`localhost`、`127.*`、`::1` 不会进代理，本地适配器（A1111 / ComfyUI / SwarmUI / sd-server / LocalAI）不受影响。
-- **系统绕过列表生效**：`ProxyOverride` 里的 `192.168.*`、`10.*` 等内网段同样直连。
-- 系统代理的开关有 30 秒缓存，切换后不用重启宿主。
-- TUN 模式没有「系统代理」可读，插件会安静地退回直连——此时由虚拟网卡接管，请求照样能通。
-- 只支持 `http://` 形式的 HTTP 代理（走 CONNECT 隧道）；SOCKS 请在加速器里开混合端口。
-- 规则模式下**域名必须被判为走代理**：如果加速器规则把它判成 DIRECT，插件这边也无能为力。
-- 走代理、以及失败原因都会写进 `$DSH_HOME/mo-image/host.log`。
+请求由宿主进程发出，插件不会修改系统的网络设置。本机地址（`localhost`、`127.*`、`::1`）永远直连，本地适配器（A1111 / ComfyUI / SwarmUI / sd-server / LocalAI）不受影响。网络失败的原因会写进 `$DSH_HOME/mo-image/host.log`。
 
 ## 常见问题
 
@@ -324,9 +348,9 @@ $DSH_HOME/.credentials.yaml
 
 确认插件已安装、profile 的 dsh.profile.bundles 包含 dsh-mo-image，并重启过 DSH。
 
-**请求报 `fetch failed`，或 `网络请求失败：xxx（UND_ERR_CONNECT_TIMEOUT，直连）`**
+**请求报 `fetch failed`，或 `网络请求失败：xxx UND_ERR_CONNECT_TIMEOUT，直连。TCP 连接超时。`**
 
-目标域名在当前网络下连不通（DNS 污染或 TCP 被拦），不是 Key 或模型的问题。开加速器的系统代理即可，插件会自动使用；也可以显式指定 `MO_IMAGE_PROXY=http://127.0.0.1:7897`。已经开了代理还失败，先确认加速器处于规则模式时有没有把这个域名误判成 DIRECT。
+目标域名在当前网络下连不通，不是 Key 或模型的问题。先检查本机网络、DNS 和目标服务是否可达；插件不会修改系统的网络设置。
 
 **401 / 403**
 
