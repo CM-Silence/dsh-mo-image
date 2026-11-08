@@ -21,6 +21,9 @@ test('provider manifests include hot image providers and native capabilities', (
   assert.ok(adapters.some((adapter) => adapter.id === 'xai-imagine' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'recraft' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'ideogram' && adapter.supportsModels));
+  for (const preset of presets) {
+    assert.match(preset.website, /^https:\/\//, preset.id);
+  }
 });
 
 test('generic gateways can be filtered to likely image models', () => {
@@ -35,6 +38,30 @@ test('generic gateways can be filtered to likely image models', () => {
     'cogview-4',
     'some-chat-model'
   ]), ['gpt-image-1', 'dall-e-3', 'flux-1-schnell', 'qwen-image', 'wanx2.1-t2i-turbo', 'cogview-4']);
+});
+
+test('filter recognizes the built-in image model families', () => {
+  const builtIn = [
+    'gpt-image-2.5-flare',
+    'gpt-image-2.5-sunburst',
+    'dall-e-3',
+    'gemini-2.5-flash-image',
+    'gemini-3-pro-image-preview',
+    'grok-imagine-image',
+    'recraftv4_1',
+    'ideogram-3',
+    'core',
+    'black-forest-labs/FLUX.1-schnell',
+    'accounts/fireworks/models/flux-1-schnell',
+    'flux-1-schnell',
+    'Qwen/Qwen-Image',
+    'Kwai-Kolors/Kolors',
+    'wanx2.1-t2i-turbo',
+    'doubao-seedream-4-0-250828',
+    'cogview-4-250304'
+  ];
+  assert.deepEqual(filterImageModels(builtIn), builtIn);
+  assert.deepEqual(filterImageModels(['gpt-4o', 'text-embedding-3-small', 'whisper-1']), []);
 });
 
 test('quality capabilities are per adapter and unsupported models hide quality', () => {

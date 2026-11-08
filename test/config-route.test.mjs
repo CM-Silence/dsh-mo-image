@@ -222,4 +222,84 @@ test('config route migrates keys to the credentials store and never returns them
     async *[Symbol.asyncIterator]() { yield Buffer.from('{}'); }
   }, rebinding);
   assert.equal(rebinding.status, 403);
+
+  const missingBase = makeRes();
+  await modelsRoute.handler(jsonReq('POST', JSON.stringify({ baseUrl: '' })), missingBase);
+  assert.equal(missingBase.status, 502);
+  const missingBaseBody = JSON.parse(missingBase.body);
+  assert.equal(missingBaseBody.code, 'provider.missingBaseUrl');
+  assert.equal(missingBaseBody.error, '请先填写 API 地址');
+
+  const badJson = makeRes();
+  await modelsRoute.handler(jsonReq('POST', '{not json'), badJson);
+  assert.equal(badJson.status, 502);
+  assert.equal(JSON.parse(badJson.body).code, 'request.invalidJson');
+
+  fake.get = () => undefined;
+  const noCredentials = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    config: {
+      version: 1,
+      providers: [{ id: 'p9', name: 'No creds', baseUrl: 'https://api.test/v1', key: 'secret', models: [] }],
+      active: { providerId: 'p9', model: '' },
+      defaults: {}
+    }
+  })), noCredentials);
+  assert.equal(noCredentials.status, 500);
+  assert.equal(JSON.parse(noCredentials.body).code, 'config.credentialsUnavailable');
+
+  const savedNoProxy = process.env.NO_PROXY;
+  const savedOverride = process.env.MO_IMAGE_PROXY;
+  process.env.NO_PROXY = '*';
+  delete process.env.MO_IMAGE_PROXY;
+  globalThis.fetch = async () => {
+    throw Object.assign(new Error('fetch failed'), { code: 'UND_ERR_CONNECT_TIMEOUT' });
+  };
+  try {
+    const networkRes = makeRes();
+    await modelsRoute.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', optionalKey: true
+    })), networkRes);
+    assert.equal(networkRes.status, 502);
+    const networkBody = JSON.parse(networkRes.body);
+    assert.equal(networkBody.code, 'network.failed');
+    assert.equal(networkBody.params.host, 'api.openai.com');
+    assert.equal(networkBody.params.via, 'direct');
+    assert.equal(networkBody.params.hint, 'timeout');
+    assert.match(networkBody.error, /网络请求失败：api\.openai\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedNoProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = savedNoProxy;
+    if (savedOverride === undefined) delete process.env.MO_IMAGE_PROXY; else process.env.MO_IMAGE_PROXY = savedOverride;
+  }
+
+  process.env.NO_PROXY = '*';
+  delete process.env.MO_IMAGE_PROXY;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'bad key' } }), {
+      status: 401, headers: { 'content-type': 'application/json' }
+    });
+    const upstreamRes = makeRes();
+    await modelsRoute.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', optionalKey: true
+    })), upstreamRes);
+    assert.equal(upstreamRes.status, 502);
+    const upstreamBody = JSON.parse(upstreamRes.body);
+    assert.equal(upstreamBody.code, 'upstream.http');
+    assert.equal(upstreamBody.params.status, 401);
+    assert.equal(upstreamBody.params.detail, 'bad key');
+
+    globalThis.fetch = async () => new Response('not json', {
+      status: 200, headers: { 'content-type': 'text/plain' }
+    });
+    const invalidJson = makeRes();
+    await modelsRoute.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', optionalKey: true
+    })), invalidJson);
+    assert.equal(JSON.parse(invalidJson.body).code, 'upstream.invalidJson');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedNoProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = savedNoProxy;
+    if (savedOverride === undefined) delete process.env.MO_IMAGE_PROXY; else process.env.MO_IMAGE_PROXY = savedOverride;
+  }
 });

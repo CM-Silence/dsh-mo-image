@@ -71,14 +71,17 @@ test('turns fetch failures into a readable network error with the cause code', a
       assert.match(error.message, /api\.sudocode\.chat/);
       assert.match(error.message, /UND_ERR_CONNECT_TIMEOUT/);
       assert.match(error.message, /直连/);
-      assert.match(error.message, /代理/);
+      assert.match(error.message, /TCP 连接超时/);
+      assert.doesNotMatch(error.message, /代理|HTTPS_PROXY/);
+      assert.equal(error.localized.code, 'network.failed');
+      assert.equal(error.localized.params.hint, 'timeout');
       assert.equal(error.cause && error.cause.message, 'fetch failed');
       return true;
     }
   );
 });
 
-test('mentions the proxy address when the request went through one', async (t) => {
+test('marks proxy connections without exposing the proxy address', async (t) => {
   stubFetch(t, () => {
     const error = new TypeError('fetch failed');
     error.cause = Object.assign(new Error('connect'), { code: 'ECONNREFUSED' });
@@ -88,7 +91,8 @@ test('mentions the proxy address when the request went through one', async (t) =
   await assert.rejects(
     request('https://api.sudocode.chat/v1/models', {}, { env: {}, systemProxy: SYSTEM_PROXY }),
     (error) => {
-      assert.match(error.message, /127\.0\.0\.1:7897/);
+      assert.match(error.message, /经系统网络配置/);
+      assert.doesNotMatch(error.message, /127\.0\.0\.1:7897/);
       assert.match(error.message, /ECONNREFUSED/);
       return true;
     }

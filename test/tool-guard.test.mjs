@@ -47,7 +47,7 @@ function fakeContext(tools) {
   return fake;
 }
 
-test('generation ignores provider/model arguments and sticks to the active selection', async (t) => {
+test('a model argument outside Auto mode is refused, and provider cannot redirect', async (t) => {
   const home = makeHome();
   const previousHome = process.env.DSH_HOME;
   t.after(() => {
@@ -72,12 +72,14 @@ test('generation ignores provider/model arguments and sticks to the active selec
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const result = await generate.execute({
-    prompt: 'a red apple',
-    provider: 'p-other',
-    model: 'some-other-model'
-  }, { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } });
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await assert.rejects(
+    generate.execute({ prompt: 'a red apple', model: 'some-other-model' }, exec),
+    /Auto/
+  );
+  assert.equal(calls.length, 0, 'a refused model argument must not reach the network');
 
+  const result = await generate.execute({ prompt: 'a red apple', provider: 'p-other' }, exec);
   assert.ok(result.path);
   assert.equal(calls.length, 1);
   assert.ok(calls[0].url.startsWith('https://active.test/v1'), 'must stay on the selected provider');
