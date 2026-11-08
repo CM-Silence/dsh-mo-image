@@ -206,7 +206,7 @@ $DSH_HOME/.credentials.yaml
 说明：
 
 - 本地服务没有鉴权时，**API 密钥可以留空**；`optionalKey` 会让宿主不发送 `Authorization`。需要 Bearer token 的服务再填密钥。
-- 「模型目录」右侧的 **获取可用模型** 只对支持模型列表 API 的适配器显示；ComfyUI 列出的是 checkpoint 名称，A1111 列出的是 `sd-models` 的 title。
+- 「模型目录」右侧的 **获取可用模型** 对第三方提供商、自定义模型 API 和本地部署器都可用：点击后先向端点探测模型，再弹出可搜索、可全选/取消全选的候选列表，只有点「添加所选」才写入当前表单。OpenAI 兼容接口返回的结果会先筛掉明显不是生图的模型，也可以勾选「显示全部模型」；没有模型列表 API 的适配器不显示这个按钮。ComfyUI 列出的是 checkpoint 名称，A1111 列出的是 `sd-models` 的 title。
 - A1111 / Forge / SD.Next 启动时需要加 `--api`。A1111 的 Basic Auth 目前不走密钥输入框，建议本地无鉴权或放到反向代理后面。A1111 的 img2img 只带第一张参考图。
 - ComfyUI 的默认工作流是 **CheckpointLoaderSimple + KSampler**，适合 SD1.5/SDXL checkpoint；Flux、Qwen-Image、任意自定义工作流请用 OpenAI 兼容网关（或改用 sd-server/LocalAI 的后端）。
 - SwarmUI 使用 `/API/GetNewSession` + `/API/GenerateText2Image`，原生编辑暂未实现。
