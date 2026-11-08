@@ -3,18 +3,34 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-function load(options = {}) {
+function jsonResponse(payload) {
+  return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+function createHarness(options = {}) {
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   let loaded = null;
+  let hooks = [];
+  let hookIndex = 0;
+  const effects = [];
+  const urls = [];
   const React = {
     createElement(type, props, ...children) { return { type, props: props || {}, children }; },
     Fragment: 'Fragment',
-    useState(value) { return [value, () => {}]; },
-    useEffect() {},
-    useLayoutEffect() {},
-    useMemo(fn) { return fn(); },
-    useCallback(fn) { return fn; },
-    useRef(value) { return { current: value }; }
+    useState(initial) {
+      const index = hookIndex++;
+      if (!(index in hooks)) hooks[index] = typeof initial === 'function' ? initial() : initial;
+      return [hooks[index], () => {}];
+    },
+    useEffect(fn) { effects.push(fn); hookIndex += 1; },
+    useLayoutEffect(fn) { effects.push(fn); hookIndex += 1; },
+    useMemo(fn) { hookIndex += 1; return fn(); },
+    useCallback(fn) { hookIndex += 1; return fn; },
+    useRef(value) {
+      const index = hookIndex++;
+      if (!(index in hooks)) hooks[index] = { current: value };
+      return hooks[index];
+    }
   };
   const window = {
     __ModuleLoader__: { load(definition) { loaded = definition; } },
@@ -32,7 +48,7 @@ function load(options = {}) {
     styleSheets: [],
     adoptedStyleSheets: []
   };
-  const urls = [];
+  const updateStatus = options.status || { ok: true, state: 'idle', current: '0.3.1' };
   const context = {
     window,
     document,
@@ -42,11 +58,24 @@ function load(options = {}) {
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     MutationObserver: class MutationObserver { observe() {} disconnect() {} },
     AbortSignal: globalThis.AbortSignal,
-    Response: globalThis.Response,
+    Response,
     fetch: async (url) => {
       urls.push(String(url));
-      const payload = options.status || { ok: true, state: 'idle', current: '0.3.1' };
-      return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (String(url).includes('/api/mo-image/update')) return jsonResponse(updateStatus);
+      return jsonResponse({
+        ok: true,
+        config: {
+          providers: [{
+            id: 'p1', name: 'Test provider', baseUrl: 'https://api.test/v1', key: '', hasKey: true,
+            protocol: 'openai-images', adapter: '', models: ['gpt-image-2.5-flare'], names: {}
+          }],
+          active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },
+          defaults: {}
+        },
+        adapters: [],
+        providerPresets: [],
+        localPresets: []
+      });
     },
     setTimeout: () => 0,
     clearTimeout() {},
@@ -58,11 +87,51 @@ function load(options = {}) {
     if (name === 'react-dom') return { createPortal(node) { return node; } };
     return {};
   });
-  return { api, urls, React };
+
+  const registrations = [];
+  const slots = {
+    inject(_key, callback) { callback(); },
+    register(definition, component) {
+      registrations.push({ definition, component });
+      return () => {};
+    }
+  };
+  api.apply({
+    effect(fn) { const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {}; },
+    slots
+  });
+
+  function render(node) {
+    if (node === null || node === undefined) return null;
+    if (Array.isArray(node)) return node.map(render);
+    if (typeof node !== 'object') return node;
+    if (typeof node.type === 'function') {
+      hooks = [];
+      hookIndex = 0;
+      return render(node.type(node.props || {}));
+    }
+    return { type: node.type, props: node.props || {}, children: (node.children || []).map(render) };
+  }
+
+  return { api, React, urls, registrations, render, effects };
+}
+
+function textOf(node, out = []) {
+  if (node === null || node === undefined) return out;
+  if (typeof node === 'string' || typeof node === 'number') { out.push(String(node)); return out; }
+  if (Array.isArray(node)) { for (const item of node) textOf(item, out); return out; }
+  for (const child of node.children || []) textOf(child, out);
+  return out;
+}
+
+function settingsComponent(registrations) {
+  const entry = registrations.find(({ definition }) => definition.name === 'settings.section');
+  assert.ok(entry, 'missing settings.section registration');
+  return entry;
 }
 
 test('renderUpdateNotes turns release markdown into readable blocks', () => {
-  const { api } = load();
+  const { api } = createHarness();
   const notes = api.__test.renderUpdateNotes('- 修复 A\n- 新增 B');
   assert.deepEqual([...notes.map((block) => block.kind)], ['li', 'li']);
   assert.equal(notes[0].text, '修复 A');
@@ -76,7 +145,7 @@ test('renderUpdateNotes turns release markdown into readable blocks', () => {
 });
 
 test('updateToastFor picks the right message per state', () => {
-  const { api } = load();
+  const { api } = createHarness();
   const calls = [];
   const t = (key, params) => { calls.push({ key, params }); return key; };
 
@@ -92,8 +161,56 @@ test('updateToastFor picks the right message per state', () => {
 });
 
 test('fetchUpdateStatus reads the host route without caching', async () => {
-  const { api, urls } = load({ status: { ok: true, state: 'available', current: '0.3.1', latest: '0.4.0' } });
+  const { api, urls } = createHarness({ status: { ok: true, state: 'available', current: '0.3.1', latest: '0.4.0' } });
   const status = await api.__test.fetchUpdateStatus();
   assert.equal(status.latest, '0.4.0');
   assert.ok(urls.includes('/api/mo-image/update'));
+});
+
+test('the settings header shows the update button only when one is available', () => {
+  const { api, React, render } = createHarness();
+  const t = (key) => key;
+  const busy = textOf(render(React.createElement(api.__test.UpdateHeader, {
+    status: { state: 'available', current: '0.3.1', latest: '0.4.0' }, t, onOpen() {}
+  }))).join(' ');
+  assert.match(busy, /update\.available/);
+
+  const idle = textOf(render(React.createElement(api.__test.UpdateHeader, {
+    status: { state: 'idle', current: '0.3.1' }, t, onOpen() {}
+  }))).join(' ');
+  assert.doesNotMatch(idle, /update\.available/);
+});
+
+test('the dialog lays out title, version, notes and the two actions', () => {
+  const { api, React, render } = createHarness();
+  const t = (key, params) => (params ? `${key} ${JSON.stringify(params)}` : key);
+  const text = textOf(render(React.createElement(api.__test.UpdateDialog, {
+    status: {
+      state: 'available', current: '0.3.1', latest: '0.4.0',
+      notes: '- 修复 A\n- 新增 B', url: 'https://github.com/CM-Silence/dsh-mo-image/releases/tag/v0.4.0'
+    },
+    t,
+    onClose() {},
+    onApply() {}
+  }))).join(' ');
+  assert.match(text, /update\.title/);
+  assert.match(text, /0\.3\.1/);
+  assert.match(text, /0\.4\.0/);
+  assert.match(text, /修复 A/);
+  assert.match(text, /新增 B/);
+  assert.match(text, /update\.cancel/);
+  assert.match(text, /update\.apply/);
+});
+
+test('the settings section asks the host for update status when it mounts', async () => {
+  const harness = createHarness({ status: { ok: true, state: 'available', current: '0.3.1', latest: '0.4.0' } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const settings = settingsComponent(harness.registrations);
+  harness.render(harness.React.createElement(settings.component, settings.definition.inject()));
+  for (const effect of harness.effects) {
+    try { effect(); } catch (_error) { /* 渲染器里的副作用不参与断言 */ }
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(harness.urls.includes('/api/mo-image/update'), 'settings did not request update status');
 });
