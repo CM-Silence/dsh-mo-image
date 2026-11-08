@@ -31,11 +31,12 @@ const BRANCH = 'master';
  * @returns {{kind: string, dryRun: boolean, notes: string, notesFile: string, help: boolean}}
  */
 export function parseArgs(argv) {
-  const out = { kind: '', dryRun: false, notes: '', notesFile: '', help: false };
+  const out = { kind: '', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false };
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--dry-run') out.dryRun = true;
+    else if (arg === '--release-only') out.releaseOnly = true;
     else if (arg === '--notes') { out.notes = String(argv[i + 1] || ''); i += 1; }
     else if (arg === '--notes-file') { out.notesFile = String(argv[i + 1] || ''); i += 1; }
     else if (arg === '--help' || arg === '-h') out.help = true;
@@ -129,17 +130,24 @@ function run(command, args, options = {}) {
     encoding: 'utf8',
     env: options.env || process.env
   });
-  if (result.error) throw result.error;
+  // 命令不存在（ENOENT）时 spawnSync 会把 error 填上而 status 为 null；这里不抛，
+  // 交给调用方判断——没有 gh 是常态，不该让发版直接崩掉。
   return result;
 }
 
 function capture(command, args) {
   const result = run(command, args, { capture: true });
-  return result.status === 0 ? String(result.stdout || '').trim() : '';
+  return !result.error && result.status === 0 ? String(result.stdout || '').trim() : '';
+}
+
+/** 某个命令在不在 PATH 上；不存在时返回 false，不抛异常。 */
+export function commandAvailable(name) {
+  const result = run(name, ['--version'], { capture: true });
+  return !result.error && result.status === 0;
 }
 
 function hasGh() {
-  return run('gh', ['--version'], { capture: true }).status === 0;
+  return commandAvailable('gh');
 }
 
 function readVersion() {
@@ -201,12 +209,46 @@ export function createRelease(version, notes, options = {}) {
     }
     if (String(process.env.GITHUB_TOKEN || '').trim()) return createReleaseWithToken(tag, notes);
     console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。`);
-    console.log(`去 https://github.com/${REPO}/releases/new 新建 Release，tag 选 ${tag}，正文：\n`);
+    console.log(`打开这个地址，正文粘贴下面的内容，点 Create release：`);
+    console.log(`  https://github.com/${REPO}/releases/new?tag=${tag}&title=${tag}\n`);
+    console.log('----- 正文开始 -----');
     console.log(notes);
+    console.log('----- 正文结束 -----\n');
+    console.log('装好 gh（winget install GitHub.cli）或设置 GITHUB_TOKEN 后，也可以跑：');
+    console.log(`  node scripts/release.mjs --release-only\n`);
     return false;
   } finally {
     try { rmSync(file, { force: true }); } catch (_error) { /* 同上 */ }
   }
+}
+
+/**
+ * 只补建 Release：tag 已经推上去、但 GitHub 上没有对应 Release 时用。
+ * 缺凭据时和完整发版一样，打印手动步骤并返回失败。
+ * @returns {number} 退出码
+ */
+function releaseOnly(args) {
+  const version = readVersion();
+  const tag = `v${version}`;
+  if (!capture('git', ['tag', '--list', tag])) {
+    console.error(`tag ${tag} 不存在；先跑一次完整发版，或手动打 tag`);
+    return 1;
+  }
+  const previous = capture('git', ['describe', '--tags', '--abbrev=0', '--match', 'v*', `${tag}^`]);
+  const notes = args.notesFile
+    ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
+    : args.notes.trim() || renderNotes(collectCommits(previous));
+  if (args.dryRun) {
+    console.log(`release-only ${tag}（上一个 tag: ${previous || '无'}）`);
+    console.log(notes || '(no notes)');
+    return 0;
+  }
+  if (!createRelease(version, notes, { dryRun: false })) {
+    console.error(`tag ${tag} 已存在，但 GitHub Release 没有建成`);
+    return 1;
+  }
+  console.log(`released ${tag}`);
+  return 0;
 }
 
 /**
@@ -216,8 +258,10 @@ export function createRelease(version, notes, options = {}) {
  */
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
+  if (args.releaseOnly) return releaseOnly(args);
   if (args.help || !args.kind) {
     console.log('usage: node scripts/release.mjs <patch|minor|major|x.y.z> [--dry-run] [--notes "..."] [--notes-file file]');
+    console.log('       node scripts/release.mjs --release-only   # 补建 Release');
     return args.help ? 0 : 2;
   }
   const current = readVersion();

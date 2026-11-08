@@ -1,15 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, nextVersion, renderNotes, releasePlan } from '../scripts/release.mjs';
+import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable } from '../scripts/release.mjs';
 
 test('parseArgs reads the bump kind and flags', () => {
-  assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false });
+  assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false });
   const withNotes = parseArgs(['0.4.0', '--notes', '- 修复']);
   assert.equal(withNotes.kind, '0.4.0');
   assert.equal(withNotes.notes, '- 修复');
   assert.equal(parseArgs(['--dry-run', 'patch']).dryRun, true);
   assert.equal(parseArgs(['--notes-file', 'notes.md', 'patch']).notesFile, 'notes.md');
+  assert.equal(parseArgs(['--release-only']).releaseOnly, true);
   assert.equal(parseArgs([]).kind, '');
+});
+
+test('a missing command is reported as unavailable instead of throwing', () => {
+  assert.equal(commandAvailable('dsh-mo-image-definitely-not-installed'), false);
 });
 
 test('nextVersion bumps the right segment', () => {
