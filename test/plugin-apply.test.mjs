@@ -42,7 +42,7 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   };
 
   const mod = await import('../lib/index.js?apply-test');
-  mod.apply(fake);
+  mod.apply(fake, { update: { skipCheck: true } });
 
   assert.equal(tools.length, 2);
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
@@ -53,12 +53,13 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.equal(generate.parameters.properties.quality, undefined);
   assert.equal(generate.parameters.properties.size, undefined);
   assert.equal(generate.parameters.properties.provider, undefined);
-  assert.equal(generate.parameters.properties.model, undefined);
+  assert.match(String(generate.parameters.properties.model.description), /Auto/);
   assert.ok(edit.parameters.properties.negative_prompt);
   assert.equal(edit.parameters.properties.quality, undefined);
   assert.match(generate.description, /Model, size, and quality come from the picker/);
   assert.match(generate.description, /dialect/);
-  assert.match(generate.description, /prompt optimization is On/);
+  assert.doesNotMatch(generate.description, /only when optimization is On/);
+  assert.match(generate.description, /mo-image-generation skill/);
   assert.match(edit.description, /图1\/图2/);
   assert.match(edit.description, /prompt optimization is Off/);
 
@@ -81,6 +82,6 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
     assert.ok(editingSkill.content.includes(word));
   }
   assert.match(generationSkill.description, /提示词/);
-  assert.equal(routes.length, 3);
-  assert.deepEqual(routes.map((route) => route.path).sort(), ['/api/mo-image/config', '/api/mo-image/models', '/api/mo-image/preview']);
+  assert.equal(routes.length, 4);
+  assert.deepEqual(routes.map((route) => route.path).sort(), ['/api/mo-image/config', '/api/mo-image/models', '/api/mo-image/preview', '/api/mo-image/update']);
 });
