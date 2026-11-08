@@ -42,7 +42,7 @@ test('judgeMarker decides done, updating and failed from the current version', (
   assert.deepEqual(judgeMarker(marker, '0.4.0', 2000), { state: 'done', to: '0.4.0' });
   assert.deepEqual(judgeMarker(marker, '0.3.1', 2000), { state: 'updating', to: '0.4.0' });
   assert.deepEqual(judgeMarker(marker, '0.3.1', 1000 + 90_001), { state: 'failed', to: '0.4.0' });
-  assert.deepEqual(judgeMarker(marker, '0.5.0', 2000), { state: 'done', to: '0.4.0' });
+  assert.deepEqual(judgeMarker(marker, '0.5.0', 2000), { state: 'stale' });
 });
 
 test('readMarker treats broken json as absent and clearMarker removes the file', (t) => {
@@ -84,4 +84,19 @@ test('fetchLatestRelease reads the api, falls back to the redirect, else null', 
 
   const none = await fetchLatestRelease({ apiBase: `${base}/x`, releasesBase: `${base}/y`, request: fetch });
   assert.equal(none, null);
+});
+
+test('fetchLatestRelease reports why both addresses failed', async (t) => {
+  const server = createServer((req, res) => { res.writeHead(503); res.end('down'); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const reasons = [];
+  const result = await fetchLatestRelease({
+    apiBase: base, releasesBase: base, request: fetch,
+    onError: (reason) => reasons.push(reason)
+  });
+  assert.equal(result, null);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /503/);
 });

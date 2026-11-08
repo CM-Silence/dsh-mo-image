@@ -35,7 +35,7 @@ function makeService(overrides = {}) {
     },
     async removeBundle(name) { removed.push(name); return {}; }
   };
-  const service = createUpdateService({
+  const serviceOptions = {
     currentVersion: '0.3.1',
     markerFile,
     request: async () => releaseResponse('v0.4.0', '- 新'),
@@ -44,7 +44,9 @@ function makeService(overrides = {}) {
     sleep: async () => {},
     installDelayMs: 0,
     ...overrides
-  });
+  };
+  if (overrides.noManager) serviceOptions.pluginManager = null;
+  const service = createUpdateService(serviceOptions);
   return { service, markerFile, installs, removed, logs, pluginManager };
 }
 
@@ -142,6 +144,34 @@ test('apply resolves a plugin manager that becomes available later', async () =>
   assert.deepEqual(out, { ok: true });
   await service.settled();
   assert.deepEqual(installs, ['github:CM-Silence/dsh-mo-image#v0.4.0']);
+});
+
+test('hydrate drops a marker that no longer matches the installed version', async () => {
+  const { service, markerFile } = makeService({ currentVersion: '0.5.0' });
+  writeMarker(markerFile, { from: '0.3.1', to: '0.4.0', startedAt: 1 });
+  await service.hydrate();
+  assert.equal(service.status().state, 'idle');
+  assert.equal(readMarker(markerFile), null);
+});
+
+test('without a plugin manager nothing is installable', async () => {
+  const { service, installs } = makeService({ noManager: true });
+  await service.refresh();
+  assert.equal(service.status().installable, false);
+  const out = await service.apply('0.4.0');
+  assert.deepEqual(out, { ok: false, code: 'update.unsupported' });
+  assert.equal(installs.length, 0);
+});
+
+test('a finished update is not installed twice', async () => {
+  const { service, installs } = makeService();
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.equal(service.status().state, 'done');
+  assert.deepEqual(await service.apply('0.4.0'), { ok: true });
+  await service.settled();
+  assert.equal(installs.length, 1);
 });
 
 test('apply is idempotent while an install is in flight', async () => {

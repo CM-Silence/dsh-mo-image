@@ -6,11 +6,11 @@
  * package.json 必须一致，脚本负责保证这一点。
  *
  * Usage:
- *   node scripts/release.mjs patch            # 0.3.1 → 0.3.2
- *   node scripts/release.mjs minor            # 0.3.1 → 0.4.0
- *   node scripts/release.mjs 0.5.0            # 指定版本
- *   node scripts/release.mjs minor --dry-run  # 只打印要做的事
- *   node scripts/release.mjs minor --notes-file notes.md
+ *   npm run release -- patch            # 0.3.1 → 0.3.2
+ *   npm run release -- minor            # 0.3.1 → 0.4.0
+ *   npm run release -- 0.5.0            # 指定版本
+ *   npm run release -- minor --dry-run  # 只打印要做的事
+ *   npm run release -- minor --notes-file notes.md
  */
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -23,6 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
 const REPO = 'CM-Silence/dsh-mo-image';
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+const BRANCH = 'master';
 
 /**
  * 解析命令行。
@@ -80,8 +81,8 @@ const OTHER = '其他';
 export function renderNotes(commits) {
   const buckets = new Map(GROUPS.map(([, title]) => [title, []]));
   for (const commit of commits) {
-    // 发版提交本身是噪音，不写进说明。
-    if (commit.type === 'chore') continue;
+    // 发版提交本身是噪音，不写进说明；其他 chore 归到「其他」。
+    if (commit.type === 'chore' && /^release\b/i.test(String(commit.text || '').trim())) continue;
     const title = (GROUPS.find(([type]) => type === commit.type) || [null, OTHER])[1];
     if (!buckets.has(title)) buckets.set(title, []);
     buckets.get(title).push(commit.text);
@@ -104,12 +105,29 @@ export function parseCommit(subject) {
   return { type: match[1], text: match[2] };
 }
 
+/**
+ * 发版要执行的 git 步骤（测试与 package.json 写入在 main 里单独做）。
+ * 每条命令的 argv 都是分开的数组，不经过 shell，带空格的 -m 不会被拆开。
+ * @param {string} version
+ * @returns {{command: string, args: string[]}[]}
+ */
+export function releasePlan(version) {
+  const tag = `v${version}`;
+  return [
+    { command: 'git', args: ['add', 'package.json'] },
+    { command: 'git', args: ['commit', '-m', `chore(release): ${tag}`] },
+    { command: 'git', args: ['tag', '-a', tag, '-m', tag] },
+    { command: 'git', args: ['push'] },
+    { command: 'git', args: ['push', '--tags'] }
+  ];
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: ROOT,
     stdio: options.capture ? 'pipe' : 'inherit',
     encoding: 'utf8',
-    shell: process.platform === 'win32'
+    env: options.env || process.env
   });
   if (result.error) throw result.error;
   return result;
@@ -138,38 +156,56 @@ function collectCommits(sinceTag) {
   return log.split('\n').map((line) => line.trim()).filter(Boolean).map(parseCommit);
 }
 
-function createRelease(version, notes, dryRun) {
-  const tag = `v${version}`;
-  if (dryRun) {
-    console.log(`would create GitHub release ${tag} with ${notes.split('\n').length} lines of notes`);
-    return true;
+/** 用 token 走 REST API 建 Release：脚本写到临时文件再执行，避免命令行引号问题。 */
+function createReleaseWithToken(tag, notes) {
+  const dir = os.tmpdir();
+  const payload = path.join(dir, `dsh-release-${Date.now()}.json`);
+  const script = path.join(dir, `dsh-release-${Date.now()}.mjs`);
+  writeFileSync(payload, JSON.stringify({ tag_name: tag, name: tag, body: notes }), 'utf8');
+  writeFileSync(script, [
+    "import { readFileSync } from 'node:fs';",
+    'const [file] = process.argv.slice(2);',
+    `const token = String(process.env.GITHUB_TOKEN || '').trim();`,
+    `const body = readFileSync(file, 'utf8');`,
+    `const response = await fetch('https://api.github.com/repos/${REPO}/releases', {`,
+    "  method: 'POST',",
+    "  headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'content-type': 'application/json' },",
+    '  body',
+    '});',
+    'if (!response.ok) { console.error(await response.text()); process.exit(1); }',
+    'console.log(response.status);'
+  ].join('\n'), 'utf8');
+  try {
+    return run(process.execPath, [script, payload]).status === 0;
+  } finally {
+    for (const file of [payload, script]) {
+      try { rmSync(file, { force: true }); } catch (_error) { /* 临时文件删不掉不影响发布 */ }
+    }
   }
+}
+
+/**
+ * 建 Release。返回是否成功；没有凭据时打印手动步骤并返回 false。
+ * @param {string} version
+ * @param {string} notes
+ * @returns {boolean}
+ */
+export function createRelease(version, notes, options = {}) {
+  const tag = `v${version}`;
+  if (options.dryRun) return true;
   const file = path.join(os.tmpdir(), `dsh-mo-image-${tag}.md`);
   writeFileSync(file, notes + '\n', 'utf8');
   try {
     if (hasGh()) {
-      const result = run('gh', ['release', 'create', tag, '--title', tag, '--notes-file', file]);
-      return result.status === 0;
+      return run('gh', ['release', 'create', tag, '--title', tag, '--notes-file', file]).status === 0;
     }
-    const token = String(process.env.GITHUB_TOKEN || '').trim();
-    if (!token) {
-      console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。`);
-      console.log(`去 https://github.com/${REPO}/releases/new 新建 Release，tag 选 ${tag}，正文：\n`);
-      console.log(notes);
-      return false;
-    }
-    const body = JSON.stringify({ tag_name: tag, name: tag, body: notes });
-    const result = run('node', ['-e', `
-      const body = ${JSON.stringify(body)};
-      fetch('https://api.github.com/repos/${REPO}/releases', {
-        method: 'POST',
-        headers: { authorization: 'Bearer ' + process.env.GITHUB_TOKEN, accept: 'application/vnd.github+json', 'content-type': 'application/json' },
-        body
-      }).then((r) => { console.log(r.status); process.exit(r.ok ? 0 : 1); }).catch((e) => { console.error(e.message); process.exit(1); });
-    `]);
-    return result.status === 0;
+    if (String(process.env.GITHUB_TOKEN || '').trim()) return createReleaseWithToken(tag, notes);
+    console.log(`\ntag ${tag} 已经推送，但没有 gh 也没有 GITHUB_TOKEN。`);
+    console.log(`去 https://github.com/${REPO}/releases/new 新建 Release，tag 选 ${tag}，正文：\n`);
+    console.log(notes);
+    return false;
   } finally {
-    try { rmSync(file, { force: true }); } catch (_error) { /* 临时文件删不掉不影响发布 */ }
+    try { rmSync(file, { force: true }); } catch (_error) { /* 同上 */ }
   }
 }
 
@@ -189,23 +225,26 @@ export function main(argv = process.argv.slice(2)) {
   if (next === current) throw new Error('the new version equals the current one');
   const tag = `v${next}`;
 
-  const steps = [
-    ['git', ['status', '--porcelain']],
-    ['npm', ['test']],
-    ['git', ['add', 'package.json']],
-    ['git', ['commit', '-m', `chore(release): ${tag}`]],
-    ['git', ['tag', '-a', tag, '-m', tag]],
-    ['git', ['push']],
-    ['git', ['push', '--tags']]
-  ];
+  // 说明必须在打 tag 之前收：打完 tag 再 describe 拿到的就是新 tag，区间为空。
+  const notes = args.notesFile
+    ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
+    : args.notes.trim() || renderNotes(collectCommits(lastTag()));
+  const plan = releasePlan(next);
 
   if (args.dryRun) {
     console.log(`release ${current} → ${next}`);
-    for (const [command, commandArgs] of steps) console.log(`  ${command} ${commandArgs.join(' ')}`);
-    console.log(`  (github release ${tag})`);
+    console.log(`  node --test    (tests)`);
+    for (const step of plan) console.log(`  ${step.command} ${step.args.join(' ')}`);
+    console.log(`  (github release ${tag})\n`);
+    console.log(notes || '(no notes)');
     return 0;
   }
 
+  const branch = capture('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch !== BRANCH) {
+    console.error(`release from ${BRANCH}, not ${branch || 'detached HEAD'}`);
+    return 1;
+  }
   if (capture('git', ['status', '--porcelain'])) {
     console.error('working tree is not clean; commit or stash first');
     return 1;
@@ -214,31 +253,31 @@ export function main(argv = process.argv.slice(2)) {
     console.error(`tag ${tag} already exists`);
     return 1;
   }
+  if (hasGh() && run('gh', ['release', 'view', tag], { capture: true }).status === 0) {
+    console.error(`release ${tag} already exists`);
+    return 1;
+  }
 
-  for (const [command, commandArgs] of steps.slice(1, 2)) {
-    const result = run(command, commandArgs);
-    if (result.status !== 0) {
-      console.error('tests failed; release aborted');
-      return 1;
-    }
+  if (run(process.execPath, ['--test']).status !== 0) {
+    console.error('tests failed; release aborted');
+    return 1;
   }
 
   const pkg = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8'));
   pkg.version = next;
   writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 
-  for (const [command, commandArgs] of steps.slice(2)) {
-    const result = run(command, commandArgs);
-    if (result.status !== 0) {
-      console.error(`failed: ${command} ${commandArgs.join(' ')}`);
+  for (const step of plan) {
+    if (run(step.command, step.args).status !== 0) {
+      console.error(`failed: ${step.command} ${step.args.join(' ')}`);
       return 1;
     }
   }
 
-  const notes = args.notesFile
-    ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
-    : args.notes.trim() || renderNotes(collectCommits(lastTag()));
-  createRelease(next, notes, false);
+  if (!createRelease(next, notes, { dryRun: false })) {
+    console.error(`tag ${tag} pushed but the GitHub release was not created`);
+    return 1;
+  }
   console.log(`\nreleased ${tag}`);
   return 0;
 }

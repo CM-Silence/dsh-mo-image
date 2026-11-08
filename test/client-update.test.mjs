@@ -59,9 +59,12 @@ function createHarness(options = {}) {
     MutationObserver: class MutationObserver { observe() {} disconnect() {} },
     AbortSignal: globalThis.AbortSignal,
     Response,
-    fetch: async (url) => {
+    fetch: async (url, init) => {
       urls.push(String(url));
-      if (String(url).includes('/api/mo-image/update')) return jsonResponse(updateStatus);
+      if (String(url).includes('/api/mo-image/update')) {
+        if (init && init.method === 'POST') return jsonResponse(options.postResult || { ok: true });
+        return jsonResponse(updateStatus);
+      }
       return jsonResponse({
         ok: true,
         config: {
@@ -217,6 +220,68 @@ test('pushing a toast keeps only the newest message', () => {
   assert.equal(api.__test.toastQueue.current().text, 'update.doneRestart');
   api.__test.toastQueue.clear();
   assert.equal(api.__test.toastQueue.current(), null);
+});
+
+test('a rejected apply surfaces the host error code', async () => {
+  const rejected = createHarness({ postResult: { ok: false, code: 'update.localDev' } });
+  assert.equal(await rejected.api.__test.postUpdateAction({ action: 'apply' }), 'update.localDev');
+  const accepted = createHarness({ postResult: { ok: true } });
+  assert.equal(await accepted.api.__test.postUpdateAction({ action: 'apply' }), '');
+});
+
+test('the header shows a disabled badge while the update runs', () => {
+  const { api, React, render } = createHarness();
+  const t = (key) => key;
+  const tree = render(React.createElement(api.__test.UpdateHeader, {
+    status: { state: 'updating', current: '0.3.1', latest: '0.4.0' }, t, onOpen() {}
+  }));
+  assert.match(textOf(tree).join(' '), /update\.starting/);
+  const buttons = [];
+  const collect = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (node.props && node.props.type === 'button') buttons.push(node);
+    (node.children || []).forEach(collect);
+  };
+  collect(tree);
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props.disabled, true);
+});
+
+test('the dialog closes on Escape', () => {
+  const { api, React, render } = createHarness();
+  const t = (key) => key;
+  let closed = 0;
+  const tree = render(React.createElement(api.__test.UpdateDialog, {
+    status: { state: 'available', current: '0.3.1', latest: '0.4.0', notes: '' },
+    t,
+    onClose() { closed += 1; },
+    onApply() {}
+  }));
+  assert.equal(typeof tree.props.onKeyDown, 'function');
+  tree.props.onKeyDown({ key: 'Escape' });
+  assert.equal(closed, 1);
+});
+
+test('the notes area wraps long lines instead of overflowing', () => {
+  const { api, React, render } = createHarness();
+  const t = (key) => key;
+  const long = 'x'.repeat(400);
+  const tree = render(React.createElement(api.__test.UpdateDialog, {
+    status: { state: 'available', current: '0.3.1', latest: '0.4.0', notes: long },
+    t, onClose() {}, onApply() {}
+  }));
+  const scrollable = [];
+  const collect = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (node.props && node.props.style && node.props.style.maxHeight === 320) scrollable.push(node);
+    (node.children || []).forEach(collect);
+  };
+  collect(tree);
+  assert.equal(scrollable.length, 1);
+  assert.equal(scrollable[0].props.style.overflowWrap, 'anywhere');
+  assert.match(textOf(scrollable[0]).join(''), /^x{400}$/);
 });
 
 test('the settings section asks the host for update status when it mounts', async () => {

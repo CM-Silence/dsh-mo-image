@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, nextVersion, renderNotes } from '../scripts/release.mjs';
+import { parseArgs, nextVersion, renderNotes, releasePlan } from '../scripts/release.mjs';
 
 test('parseArgs reads the bump kind and flags', () => {
   assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false });
@@ -26,12 +26,23 @@ test('renderNotes groups commits by type', () => {
     { type: 'feat', text: 'add searchable model picker' },
     { type: 'fix', text: 'keep the picker open' },
     { type: 'docs', text: 'describe providers' },
-    { type: 'chore', text: 'release v0.4.0' }
+    { type: 'chore', text: 'release v0.4.0' },
+    { type: 'chore', text: 'bump dev dependencies' }
   ]);
   assert.match(notes, /### 新功能/);
   assert.match(notes, /### 修复/);
   assert.match(notes, /add searchable model picker/);
   assert.match(notes, /keep the picker open/);
   assert.match(notes, /describe providers/);
+  assert.match(notes, /bump dev dependencies/);
   assert.doesNotMatch(notes, /release v0\.4\.0/);
+});
+
+test('releasePlan keeps a spaced commit message inside one argument', () => {
+  const plan = releasePlan('0.4.0');
+  assert.deepEqual(plan.map((step) => step.command), ['git', 'git', 'git', 'git', 'git']);
+  const commit = plan.find((step) => step.args[0] === 'commit');
+  assert.deepEqual(commit.args, ['commit', '-m', 'chore(release): v0.4.0']);
+  const tag = plan.find((step) => step.args[0] === 'tag');
+  assert.deepEqual(tag.args, ['tag', '-a', 'v0.4.0', '-m', 'v0.4.0']);
 });

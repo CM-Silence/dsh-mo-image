@@ -23,8 +23,7 @@ function jsonReq(method, payload) {
   };
 }
 
-test('the update route reports status and starts an install', async (t) => {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'mo-image-update-route-'));
+test('the update route reports status and starts an install', async (t) => {  const home = mkdtempSync(path.join(os.tmpdir(), 'mo-image-update-route-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const state = path.join(home, 'mo-image');
   mkdirSync(state, { recursive: true });
@@ -106,4 +105,39 @@ test('the update route reports status and starts an install', async (t) => {
   const ackRes = makeRes();
   await route.handler(jsonReq('POST', { action: 'ack' }), ackRes);
   assert.equal(ackRes.status, 200);
+});
+
+test('a finished update is reported on the first status read after a restart', async (t) => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'mo-image-update-done-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const state = path.join(home, 'mo-image');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(path.join(state, 'config.json'), JSON.stringify({
+    version: 1, providers: [], active: { providerId: '', model: '' }, defaults: {}
+  }), 'utf8');
+  // 上一次更新留下的标记：装的是当前这个版本，说明已经装好了。
+  writeFileSync(path.join(state, 'update.json'), JSON.stringify({ from: '0.2.0', to: '0.3.1', startedAt: 1 }), 'utf8');
+  process.env.DSH_HOME = home;
+
+  const routes = [];
+  const fake = {
+    effect(fn) { const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {}; },
+    inject(_deps, callback) { callback(fake); },
+    tools: { register() { return () => {}; } },
+    webServer: { register(route) { routes.push(route); return () => {}; }, getOrigin() { return 'http://127.0.0.1:1'; } },
+    systemPrompt: { section() { return () => {}; } },
+    skills: { register() { return () => {}; } },
+    get() { return undefined; }
+  };
+  const mod = await import('../lib/index.js?update-done-test');
+  mod.apply(fake, { update: { skipCheck: true } });
+
+  const route = routes.find((item) => item.path === '/api/mo-image/update');
+  assert.ok(route);
+  const res = makeRes();
+  await route.handler({ method: 'GET', headers: { host: '127.0.0.1:1' }, url: '/api/mo-image/update' }, res);
+  const body = JSON.parse(res.body);
+  assert.equal(body.state, 'done');
+  assert.equal(body.latest, '0.3.1');
+  assert.equal(body.updatedBeforeRestart, true);
 });
