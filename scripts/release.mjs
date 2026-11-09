@@ -129,7 +129,7 @@ export function parseCommit(subject) {
 export function releasePlan(version) {
   const tag = `v${version}`;
   return [
-    { command: 'git', args: ['add', 'package.json'] },
+    { command: 'git', args: ['add', 'package.json', 'CHANGELOG.md'] },
     { command: 'git', args: ['commit', '-m', `chore(release): ${tag}`] },
     { command: 'git', args: ['tag', '-a', tag, '-m', tag] },
     { command: 'git', args: ['push'] },
@@ -322,6 +322,43 @@ function releaseOnly(args) {
 }
 
 /**
+ * 把这一版的说明写进 CHANGELOG.md：新的在最前，同版本旧条目被替换。
+ * CHANGELOG 会随包发布，更新对话框就是从这里读说明的。
+ * @param {string} text 现有 CHANGELOG 内容（可为空）
+ * @param {string} version
+ * @param {string} notes
+ * @returns {string}
+ */
+export function upsertChangelog(text, version, notes) {
+  const title = '# 更新日志';
+  const body = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/^#\s+更新日志\s*/, '')
+    .trim();
+  const sections = [];
+  let current = null;
+  for (const line of body.split('\n')) {
+    if (/^##\s+/.test(line)) {
+      if (current) sections.push(current);
+      current = { title: line.trim(), lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) sections.push(current);
+  const wanted = new RegExp(`^##\\s+v?${String(version).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+  const kept = sections
+    .filter((section) => !wanted.test(section.title))
+    .map((section) => ({ title: section.title, lines: section.lines }));
+  const fresh = { title: `## v${version}`, lines: ['', ...String(notes || '').trim().split('\n')] };
+  const lines = [title, ''];
+  for (const section of [fresh, ...kept]) {
+    lines.push(section.title, ...section.lines, '');
+  }
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+/**
  * 发到 npm。返回是否成功（失败不阻止建 Release，但退出码会是 1）。
  * @param {string} version
  * @returns {boolean}
@@ -424,6 +461,10 @@ export function main(argv = process.argv.slice(2)) {
     const pkg = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8'));
     pkg.version = next;
     writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+    // 说明同时写进 CHANGELOG.md：它会随包发布，更新对话框从那里读。
+    const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+    const existing = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '';
+    writeFileSync(changelogPath, upsertChangelog(existing, next, notes), 'utf8');
 
     // 只做本地那三步（add / commit / tag），推送单独处理，好在失败时回退。
     for (const step of plan.slice(0, 3)) {

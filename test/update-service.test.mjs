@@ -6,13 +6,11 @@ import path from 'node:path';
 import { createUpdateService, UPDATE_SPEC } from '../lib/update-service.js';
 import { readMarker, writeMarker } from '../lib/update.js';
 
-function releaseResponse(tag, body) {
-  return {
-    ok: true,
-    async json() {
-      return { tag_name: tag, body, html_url: `https://github.com/CM-Silence/dsh-mo-image/releases/tag/${tag}` };
-    }
-  };
+/** 假的 npm 请求：`/latest` 回版本号，其它（CDN）回 changelog。 */
+function npmRequest(version, notes) {
+  return async (url) => (String(url).includes('/latest')
+    ? { ok: true, async json() { return { version }; } }
+    : { ok: true, async text() { return `## v${version}\n\n${notes}\n`; } });
 }
 
 function makeService(overrides = {}) {
@@ -43,7 +41,10 @@ function makeService(overrides = {}) {
   const serviceOptions = {
     currentVersion: '0.3.1',
     markerFile,
-    request: async () => releaseResponse('v0.4.0', '- 新'),
+    request: npmRequest('0.4.0', '- 新'),
+    registryBase: 'http://registry.test',
+    mirrorBase: 'http://mirror.test',
+    cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
     pluginManager,
     log: (line) => logs.push(line),
     sleep: async () => {},
@@ -63,7 +64,7 @@ test('refresh turns a newer release into available', async () => {
   assert.equal(status.current, '0.3.1');
   assert.equal(status.latest, '0.4.0');
   assert.equal(status.notes, '- 新');
-  assert.equal(status.url, 'https://github.com/CM-Silence/dsh-mo-image/releases/tag/v0.4.0');
+  assert.equal(status.url, 'https://www.npmjs.com/package/dsh-mo-image/v/0.4.0');
   assert.equal(status.installable, true);
 });
 
@@ -137,7 +138,10 @@ test('apply resolves a plugin manager that becomes available later', async () =>
   const service = createUpdateService({
     currentVersion: '0.3.1',
     markerFile: '',
-    request: async () => releaseResponse('v0.4.0', '- 新'),
+    request: npmRequest('0.4.0', '- 新'),
+    registryBase: 'http://registry.test',
+    mirrorBase: 'http://mirror.test',
+    cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
     pluginManager: () => current,
     log() {},
     sleep: async () => {},

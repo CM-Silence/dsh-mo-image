@@ -43,23 +43,27 @@ dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image
 
 ## 更新
 
-DSH 每次启动会查一次仓库的最新 Release。有新版时，设置 → 生图模型 页顶部会出现「有可用更新」：点开能看到版本号和这次改了什么，点「更新」会在后台用 pnpm 把插件换成新 tag，重启 DSH 后生效。
+DSH 每次启动会查一次 npm 上的最新版本（`registry.npmjs.org`，不通时退 `registry.npmmirror.com`）。有新版时，设置 → 生图模型 页顶部会出现「有可用更新」：点开能看到版本号和这次改了什么，点「更新」后插件在后台换成新版本，重启 DSH 后生效。
+
+更新说明来自包里的 `CHANGELOG.md`（按版本从 jsDelivr / unpkg / npmmirror 读取）；那个版本没写说明时，对话框显示「暂无更新说明」。
 
 - 用 `link:` 方式安装的开发环境不会自动改文件，点更新只会提示你自己 `git pull`。
+- 从 npm 安装的走 DSH 原生的 `updateBundle`（先卸旧版再装新版，装失败会自动装回旧版）；从 GitHub 安装的装对应 tag。
 - 没有桌面版的插件管理器时，手动更新：
 
 ~~~bash
-dsh plugin --profile desktop add github:CM-Silence/dsh-mo-image#v0.4.0
+dsh plugin --profile desktop add dsh-mo-image
 ~~~
 
 维护者发版：
 
 ~~~bash
-npm run release -- minor              # 改版本号、跑测试、打 tag、推送、建 Release
-npm run release -- minor --dry-run    # 只看会做什么
+npm run release -- minor                  # 改版本号、写 CHANGELOG、跑测试、打 tag、推送、建 Release
+npm run release -- 0.4.1-rc1 --publish    # 指定版本并同时发到 npm（rc 走 next 标签）
+npm run release -- minor --dry-run        # 只看会做什么
 ~~~
 
-Release 正文就是对话框里显示的更新说明，默认由上次 tag 以来的提交标题生成，也可以用 `--notes` 或 `--notes-file` 指定。
+发布到 npm 时，`-rc / -b / -a` 版本会自动用 `--tag next`，只有正式版才顶掉 `latest`。
 
 ## 配置
 
@@ -105,9 +109,11 @@ Release 正文就是对话框里显示的更新说明，默认由上次 tag 以�
 - mo_image_generate：文生图 / 重做
 - mo_image_edit：参考图编辑 / 局部修改
 
-工具只接收 prompt、negative_prompt 和 images。**模型、尺寸、质量都由生图选择器控制**，工具不再接收 `size` / `quality`，避免对话模型把不稳定参数带进请求。
+工具接收 prompt、negative_prompt、images，以及 **必填的 `model`** 和可选的 `provider`。尺寸和质量仍由生图选择器控制（工具不接收 `size` / `quality`）。
 
-**Auto 行**：模型选择器第一行是“自动”（英文界面为 `Auto`）。只有选中它，对话模型才能在调用工具时用 `model` 参数从当前提供商的模型列表里挑一个；没选中自动时传 `model` 会被拒绝，不传 `model` 也会报错——不存在"插件替你猜"的路径。选中自动后系统提示词会列出可选模型。没有配置任何模型时（所有提供商的模型目录都为空）不显示自动行，直接显示“还没有模型，去设置 → 生图模型添加”。
+**每次调用都必须带 `model`**：非 Auto 模式下它必须等于用户选中的那一项（提供商 + 模型 id 一起核对，不同提供商的同名模型不算同一个），不一致直接拒绝；Auto 模式下从当前提供商的模型列表里挑。传了 `provider` 也会核对，不一致同样拒绝——工具永远不会替用户切换提供商或模型。
+
+**Auto 行**：模型选择器第一行是“自动”（英文界面为 `Auto`）。只有选中它，对话模型才享有模型选择权；选中后系统提示词会列出可选模型。没有配置任何模型时（所有提供商的模型目录都为空）不显示自动行，直接显示“还没有模型，去设置 → 生图模型添加”。
 
 **配置是权限级锁定**：插件用 `ctx.tools.guard()` 注册了全局工具守卫，任何工具调用只要目标是 `mo-image/config.json` 或 `/api/mo-image/config`（写文件、shell 命令、HTTP 请求都算），都会在执行前被拒绝，而不是靠提示词"请求"模型别改。守卫只看目标字段，不会误伤正文里出现同样字符串的插件源码编辑。它挡不住刻意混淆的 shell 命令（base64、字符串拼接），真正的硬边界仍然是宿主是否给该 Agent 开 shell。
 

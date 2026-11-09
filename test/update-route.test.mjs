@@ -65,19 +65,20 @@ test('the update route reports status and starts an install', async (t) => {  co
     skills: { register() { return () => {}; } },
     get(name) { return name === 'pluginManager' ? pluginManager : undefined; }
   };
-  const release = {
-    ok: true,
-    async json() {
-      return { tag_name: `v${NEXT}`, body: '- 新功能', html_url: `https://github.com/CM-Silence/dsh-mo-image/releases/tag/v${NEXT}` };
-    }
-  };
   const requests = [];
   const mod = await import('../lib/index.js?update-route-test');
   mod.apply(fake, {
     update: {
-      request: async (url) => { requests.push(String(url)); return release; },
-      apiBase: 'http://api.test',
-      releasesBase: 'http://rel.test',
+      request: async (url) => {
+        requests.push(String(url));
+        if (String(url).includes('/latest')) {
+          return { ok: true, async json() { return { version: NEXT }; } };
+        }
+        return { ok: true, async text() { return `## v${NEXT}\n\n- 新功能\n`; } };
+      },
+      registryBase: 'http://npm.test',
+      mirrorBase: 'http://npm-mirror.test',
+      cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
       installDelayMs: 0
     }
   });
@@ -99,7 +100,8 @@ test('the update route reports status and starts an install', async (t) => {  co
   assert.equal(secondBody.state, 'available');
   assert.equal(secondBody.latest, NEXT);
   assert.equal(secondBody.notes, '- 新功能');
-  assert.ok(requests.some((url) => url.includes('/repos/CM-Silence/dsh-mo-image/releases/latest')));
+  assert.ok(requests.some((url) => url.includes('/dsh-mo-image/latest')));
+  assert.ok(requests.some((url) => url.includes('/CHANGELOG.md')));
 
   const applyRes = makeRes();
   // 客户端给的版本不可信：服务端只用自己查到的 latest。

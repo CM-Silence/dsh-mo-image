@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag } from '../scripts/release.mjs';
+import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag, upsertChangelog } from '../scripts/release.mjs';
+
+test('upsertChangelog puts the new version on top and replaces an old draft', () => {
+  const initial = ['# 更新日志', '', '## v0.4.1', '', '- 旧版本', ''].join('\n');
+  const added = upsertChangelog(initial, '0.4.2', '- 新功能');
+  assert.match(added, /^# 更新日志\n\n## v0\.4\.2\n\n- 新功能/);
+  assert.match(added, /## v0\.4\.1\n\n- 旧版本/);
+
+  const replaced = upsertChangelog(added, '0.4.2', '- 改过的说明');
+  assert.match(replaced, /- 改过的说明/);
+  assert.doesNotMatch(replaced, /- 新功能/);
+  assert.equal((replaced.match(/## v0\.4\.2/g) || []).length, 1);
+});
 
 test('parseArgs reads the bump kind and flags', () => {
   assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false, publish: false });

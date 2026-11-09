@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   compareVersions, tagToVersion, classifySource, judgeMarker,
-  readMarker, clearMarker, fetchLatestRelease, isHiddenPrerelease
+  readMarker, clearMarker, fetchLatestVersion, fetchChangelogNotes,
+  parseChangelogSection, isHiddenPrerelease
 } from '../lib/update.js';
 
 test('compareVersions orders releases, prereleases and junk', () => {
@@ -57,16 +58,18 @@ test('readMarker treats broken json as absent and clearMarker removes the file',
   assert.equal(readMarker(file), null);
 });
 
-test('fetchLatestRelease reads the api, falls back to the redirect, else null', async (t) => {
+test('fetchLatestVersion reads npm and falls back to the mirror', async (t) => {
+  let primaryDown = true;
   const server = createServer((req, res) => {
-    if (req.url === '/repos/CM-Silence/dsh-mo-image/releases/latest') {
+    if (req.url === '/dsh-mo-image/latest') {
+      if (primaryDown) { res.writeHead(503); res.end('down'); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ tag_name: 'v0.4.0', body: '- 修复：{braces}\n- 新增', html_url: 'u1' }));
+      res.end(JSON.stringify({ name: 'dsh-mo-image', version: '0.4.2' }));
       return;
     }
-    if (req.url === '/CM-Silence/dsh-mo-image/releases/latest') {
-      res.writeHead(302, { location: '/CM-Silence/dsh-mo-image/releases/tag/v0.4.0' });
-      res.end();
+    if (req.url === '/mirror/dsh-mo-image/latest') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'dsh-mo-image', version: '0.4.2' }));
       return;
     }
     res.writeHead(404); res.end();
@@ -74,35 +77,34 @@ test('fetchLatestRelease reads the api, falls back to the redirect, else null', 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const viaApi = await fetchLatestRelease({ apiBase: base, releasesBase: base, request: fetch });
-  assert.equal(viaApi.version, '0.4.0');
-  assert.equal(viaApi.notes, '- 修复：{braces}\n- 新增');
-  assert.equal(viaApi.via, 'api');
+  const viaMirror = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
+  assert.equal(viaMirror.version, '0.4.2');
+  assert.match(viaMirror.url, /npmjs\.com\/package\/dsh-mo-image\/v\/0\.4\.2/);
 
-  const viaRedirect = await fetchLatestRelease({ apiBase: `${base}/missing`, releasesBase: base, request: fetch });
-  assert.deepEqual(viaRedirect, { version: '0.4.0', notes: '', url: `${base}/CM-Silence/dsh-mo-image/releases/tag/v0.4.0`, via: 'redirect' });
+  primaryDown = false;
+  const viaPrimary = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
+  assert.equal(viaPrimary.version, '0.4.2');
 
-  const none = await fetchLatestRelease({ apiBase: `${base}/x`, releasesBase: `${base}/y`, request: fetch });
+  const reasons = [];
+  const none = await fetchLatestVersion({
+    registryBase: `${base}/x`, mirrorBase: `${base}/y`, request: fetch,
+    onError: (reason) => reasons.push(reason)
+  });
   assert.equal(none, null);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /503|HTTP 404/);
 });
 
-test('alpha and beta releases never count as an update', async (t) => {
-  const tags = { value: 'v0.9.0-b2' };
+test('alpha and beta versions are never offered as an update', async (t) => {
   const server = createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ tag_name: tags.value, body: '- beta', html_url: 'u' }));
+    res.end(JSON.stringify({ name: 'dsh-mo-image', version: '0.9.0-b2' }));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const reasons = [];
-  const beta = await fetchLatestRelease({ apiBase: base, releasesBase: `${base}/rel`, request: fetch, onError: (r) => reasons.push(r) });
+  const beta = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
   assert.equal(beta, null);
-  assert.match(reasons[0], /alpha\/beta/);
-
-  tags.value = 'v0.9.0-rc1';
-  const rc = await fetchLatestRelease({ apiBase: base, releasesBase: `${base}/rel`, request: fetch });
-  assert.equal(rc.version, '0.9.0-rc1');
 
   assert.equal(isHiddenPrerelease('0.9.0-a1'), true);
   assert.equal(isHiddenPrerelease('0.9.0-b2'), true);
@@ -110,17 +112,45 @@ test('alpha and beta releases never count as an update', async (t) => {
   assert.equal(isHiddenPrerelease('0.9.0'), false);
 });
 
-test('fetchLatestRelease reports why both addresses failed', async (t) => {
-  const server = createServer((req, res) => { res.writeHead(503); res.end('down'); });
+test('parseChangelogSection returns exactly the requested release', () => {
+  const changelog = [
+    '# 更新日志',
+    '',
+    '## v0.4.2',
+    '',
+    '### 新功能',
+    '',
+    '- 自动更新检查改读 npm',
+    '',
+    '## v0.4.1',
+    '',
+    '- 旧版本'
+  ].join('\n');
+  const section = parseChangelogSection(changelog, '0.4.2');
+  assert.match(section, /自动更新检查改读 npm/);
+  assert.doesNotMatch(section, /旧版本/);
+  assert.equal(parseChangelogSection(changelog, 'v0.4.2'), section);
+  assert.equal(parseChangelogSection(changelog, '9.9.9'), '');
+});
+
+test('fetchChangelogNotes tries each cdn and gives up quietly', async (t) => {
+  const server = createServer((req, res) => {
+    if (req.url === '/ok/CHANGELOG.md') {
+      res.writeHead(200, { 'content-type': 'text/markdown' });
+      res.end('## v0.4.2\n\n- 来自 CDN\n');
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const reasons = [];
-  const result = await fetchLatestRelease({
-    apiBase: base, releasesBase: base, request: fetch,
-    onError: (reason) => reasons.push(reason)
+  const notes = await fetchChangelogNotes('0.4.2', {
+    request: fetch,
+    cdnSources: [(version) => `${base}/missing/${version}/CHANGELOG.md`, (version) => `${base}/ok/CHANGELOG.md`]
   });
-  assert.equal(result, null);
-  assert.equal(reasons.length, 1);
-  assert.match(reasons[0], /503/);
+  assert.equal(notes, '- 来自 CDN');
+
+  const empty = await fetchChangelogNotes('9.9.9', { request: fetch, cdnSources: [(v) => `${base}/ok/${v}/CHANGELOG.md`] });
+  assert.equal(empty, '');
 });

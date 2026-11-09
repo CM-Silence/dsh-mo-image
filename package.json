@@ -21,6 +21,7 @@
     "scripts",
     "skills",
     "cordis.patch.yml",
+    "CHANGELOG.md",
     "README.md"
   ],
   "engines": {
