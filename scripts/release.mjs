@@ -17,7 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compareVersions, isHiddenPrerelease, parseChangelogSection } from '../lib/update.js';
+import { compareVersions, isHiddenPrerelease, parseChangelogFor } from '../lib/update.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
@@ -71,7 +71,8 @@ export function nextVersion(current, kind) {
   if (kind === 'patch') return `${major}.${minor}.${patch + 1}`;
   if (kind === 'minor') return `${major}.${minor + 1}.0`;
   if (kind === 'major') return `${major + 1}.0.0`;
-  const explicit = SEMVER.exec(String(kind || ''));
+  // 「-latest」是作者习惯的正式版写法，只当别名：版本号里不能带它。
+  const explicit = SEMVER.exec(String(kind || '').replace(/-latest$/i, ''));
   if (explicit) {
     const normalized = `${explicit[1]}.${explicit[2]}.${explicit[3]}${explicit[4] ? '-' + explicit[4] : ''}`;
     if (compareVersions(normalized, current) !== 1) throw new Error(`${normalized} is not newer than ${current}`);
@@ -299,7 +300,7 @@ function releaseOnly(args) {
     changelog: existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '',
     commits: collectCommits(previous)
   });
-  const fromChangelog = !args.notes.trim() && !args.notesFile && parseChangelogSection(
+  const fromChangelog = !args.notes.trim() && !args.notesFile && parseChangelogFor(
     existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '', version
   );
   if (fromChangelog) console.log(`使用 CHANGELOG.md 里 ## v${version} 这一节作为更新日志`);
@@ -325,7 +326,7 @@ function releaseOnly(args) {
 export function notesForRelease(input = {}) {
   const explicit = String(input.notesFileText || input.notes || '').trim();
   if (explicit) return explicit;
-  const existing = parseChangelogSection(input.changelog || '', input.version);
+  const existing = parseChangelogFor(input.changelog || '', input.version);
   if (existing) return existing;
   return renderNotes(input.commits || []);
 }
@@ -355,7 +356,7 @@ export function upsertChangelog(text, version, notes) {
     }
   }
   if (current) sections.push(current);
-  const wanted = new RegExp(`^##\\s+v?${String(version).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+  const wanted = new RegExp(`^##\\s+v?${String(version).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-latest)?\\s*$`, 'i');
   const kept = sections
     .filter((section) => !wanted.test(section.title))
     .map((section) => ({ title: section.title, lines: section.lines }));
@@ -418,7 +419,7 @@ export function main(argv = process.argv.slice(2)) {
     changelog: changelogText,
     commits: collectCommits(lastTag())
   });
-  if (!args.notes.trim() && !args.notesFile && parseChangelogSection(changelogText, next)) {
+  if (!args.notes.trim() && !args.notesFile && parseChangelogFor(changelogText, next)) {
     console.log(`使用 CHANGELOG.md 里 ## v${next} 这一节作为更新日志`);
   }
   const plan = releasePlan(next);

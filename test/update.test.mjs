@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   compareVersions, tagToVersion, classifySource, judgeMarker,
   readMarker, clearMarker, fetchLatestVersion, fetchChangelogNotes,
-  parseChangelogSection, isHiddenPrerelease
+  parseChangelogSection, parseChangelogFor, isHiddenPrerelease
 } from '../lib/update.js';
 
 test('compareVersions orders releases, prereleases and junk', () => {
@@ -133,8 +133,13 @@ test('parseChangelogSection returns exactly the requested release', () => {
   assert.equal(parseChangelogSection(changelog, '9.9.9'), '');
 });
 
-test('fetchChangelogNotes tries each cdn and gives up quietly', async (t) => {
-  const server = createServer((req, res) => {
+test('parseChangelogFor accepts a section written as vX-latest', () => {
+  const changelog = ['# 更新日志', '', '## v0.4.1-latest', '', '- 写成 latest', ''].join('\n');
+  assert.equal(parseChangelogFor(changelog, '0.4.1'), '- 写成 latest');
+  assert.equal(parseChangelogFor(changelog, '0.5.0'), '');
+});
+
+test('fetchChangelogNotes tries each cdn and gives up quietly', async (t) => {  const server = createServer((req, res) => {
     if (req.url === '/ok/CHANGELOG.md') {
       res.writeHead(200, { 'content-type': 'text/markdown' });
       res.end('## v0.4.2\n\n- 来自 CDN\n');

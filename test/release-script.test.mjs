@@ -14,6 +14,14 @@ test('release notes prefer the changelog section over generated commits', () => 
   assert.equal(notesForRelease({ version: '0.4.2', changelog, notes: '- 显式', notesFileText: '- 文件', commits }), '- 文件');
 });
 
+test('a section written as vX-latest feeds the plain release and gets folded in', () => {
+  const changelog = ['# 更新日志', '', '## v0.4.1-latest', '', '- 写成 latest 的说明', ''].join('\n');
+  assert.equal(notesForRelease({ version: '0.4.1', changelog, commits: [] }), '- 写成 latest 的说明');
+  const written = upsertChangelog(changelog, '0.4.1', '- 写成 latest 的说明');
+  assert.match(written, /## v0\.4\.1\n/);
+  assert.doesNotMatch(written, /v0\.4\.1-latest/);
+});
+
 test('upsertChangelog puts the new version on top and replaces an old draft', () => {
   const initial = ['# 更新日志', '', '## v0.4.1', '', '- 旧版本', ''].join('\n');
   const added = upsertChangelog(initial, '0.4.2', '- 新功能');
@@ -66,6 +74,11 @@ test('nextVersion accepts explicit tag-style versions with a suffix', () => {
   assert.throws(() => nextVersion('0.9.0-rc2', '0.9.0-rc1'), /newer/i);
   assert.throws(() => nextVersion('0.9.0-b2', '0.9.0-a3'), /newer/i);
   assert.throws(() => nextVersion('0.3.1', '0.4'), /unknown/i);
+});
+
+test('a -latest tag is just an alias for the plain release', () => {
+  assert.equal(nextVersion('0.4.1-rc1', '0.4.1-latest'), '0.4.1');
+  assert.equal(nextVersion('0.4.1-rc1', 'v0.4.2-latest'), '0.4.2');
 });
 
 test('renderNotes groups commits by type', () => {
