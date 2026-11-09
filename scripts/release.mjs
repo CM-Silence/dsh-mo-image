@@ -303,7 +303,7 @@ function releaseOnly(args) {
   const fromChangelog = !args.notes.trim() && !args.notesFile && parseChangelogFor(
     existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '', version
   );
-  if (fromChangelog) console.log(`使用 CHANGELOG.md 里 ## v${version} 这一节作为更新日志`);
+  if (fromChangelog) console.log(`使用 CHANGELOG.md 里 v${version} 的说明`);
   if (args.dryRun) {
     console.log(`release-only ${tag}（上一个 tag: ${previous || '无'}）`);
     console.log(notes || '(no notes)');
@@ -420,7 +420,7 @@ export function main(argv = process.argv.slice(2)) {
     commits: collectCommits(lastTag())
   });
   if (!args.notes.trim() && !args.notesFile && parseChangelogFor(changelogText, next)) {
-    console.log(`使用 CHANGELOG.md 里 ## v${next} 这一节作为更新日志`);
+    console.log(`使用 CHANGELOG.md 里 v${next} 的说明`);
   }
   const plan = releasePlan(next);
 
