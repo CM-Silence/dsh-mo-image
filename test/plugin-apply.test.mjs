@@ -52,8 +52,10 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(generate.parameters.properties.negative_prompt);
   assert.equal(generate.parameters.properties.quality, undefined);
   assert.equal(generate.parameters.properties.size, undefined);
-  assert.equal(generate.parameters.properties.provider, undefined);
+  assert.equal(generate.parameters.properties.provider.type, 'string');
+  assert.match(String(generate.parameters.properties.provider.description), /validated/);
   assert.match(String(generate.parameters.properties.model.description), /Auto/);
+  assert.ok(Array.isArray(generate.parameters.required) && generate.parameters.required.includes('model'));
   assert.ok(edit.parameters.properties.negative_prompt);
   assert.equal(edit.parameters.properties.quality, undefined);
   assert.match(generate.description, /Model, size, and quality come from the picker/);

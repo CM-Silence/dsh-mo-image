@@ -62,7 +62,7 @@ test('generation resolves the key from the credentials service without a config 
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const result = await generate.execute({ prompt: 'a small test image', quality: 'low', size: '2048x2048' }, {
+  const result = await generate.execute({ prompt: 'a small test image', model: 'gpt-image-2.5-flare', quality: 'low', size: '2048x2048' }, {
     signal: new AbortController().signal,
     agent: { session: { header: { cwd: home } } }
   });

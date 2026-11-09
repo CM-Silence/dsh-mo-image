@@ -75,11 +75,17 @@ test('a model argument outside Auto mode is refused, and provider cannot redirec
   const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
   await assert.rejects(
     generate.execute({ prompt: 'a red apple', model: 'some-other-model' }, exec),
-    /Auto/
+    /当前选中的模型|只能由用户/
   );
   assert.equal(calls.length, 0, 'a refused model argument must not reach the network');
 
-  const result = await generate.execute({ prompt: 'a red apple', provider: 'p-other' }, exec);
+  await assert.rejects(
+    generate.execute({ prompt: 'a red apple', model: 'gpt-image-2.5-flare', provider: 'p-other' }, exec),
+    /提供商/
+  );
+  assert.equal(calls.length, 0, 'a foreign provider must not reach the network');
+
+  const result = await generate.execute({ prompt: 'a red apple', model: 'gpt-image-2.5-flare', provider: 'p-active' }, exec);
   assert.ok(result.path);
   assert.equal(calls.length, 1);
   assert.ok(calls[0].url.startsWith('https://active.test/v1'), 'must stay on the selected provider');
@@ -116,6 +122,7 @@ test('editing uses the selected model and never falls back to another one', asyn
 
   await edit.execute({
     prompt: '只把背景换成浅灰色',
+    model: 'gpt-image-2.5-flare',
     images: [reference]
   }, { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } });
 
@@ -153,7 +160,7 @@ test('a model without image editing reports that it does not support it', async 
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
 
   await assert.rejects(
-    edit.execute({ prompt: '换成灰色背景', images: [reference] },
+    edit.execute({ prompt: '换成灰色背景', model: 'ideogram-3', images: [reference] },
       { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } }),
     /该模型不支持图生图/
   );
@@ -186,7 +193,7 @@ test('an upstream model-capability error is reported as "does not support" inste
   t.after(() => { globalThis.fetch = originalFetch; });
 
   await assert.rejects(
-    edit.execute({ prompt: '换成灰色背景', images: [reference] },
+    edit.execute({ prompt: '换成灰色背景', model: 'gpt-image-2.5-flare', images: [reference] },
       { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } }),
     /该模型不支持图生图/
   );

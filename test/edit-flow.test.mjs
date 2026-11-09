@@ -59,6 +59,7 @@ test('edit flow reads a local reference and sends a JSON image payload', async (
 
   const result = await edit.execute({
     prompt: '只把背景换成浅灰色，其他保持不变',
+    model: 'kwai-kolors/kolors',
     images: [reference]
   }, { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } });
 

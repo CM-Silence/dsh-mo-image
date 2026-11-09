@@ -15,11 +15,18 @@ function makeHome(activeModel) {
   mkdirSync(state, { recursive: true });
   writeFileSync(path.join(state, 'config.json'), JSON.stringify({
     version: 1,
-    providers: [{
-      id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1',
-      apiKeyEnv: 'MO_IMAGE_P1_API_KEY', protocol: 'openai-images', adapter: '',
-      models: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'], names: {}
-    }],
+    providers: [
+      {
+        id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1',
+        apiKeyEnv: 'MO_IMAGE_P1_API_KEY', protocol: 'openai-images', adapter: '',
+        models: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'], names: {}
+      },
+      {
+        id: 'p2', name: 'Other', baseUrl: 'https://other.test/v1',
+        apiKeyEnv: 'MO_IMAGE_P2_API_KEY', protocol: 'openai-images', adapter: '',
+        models: ['gpt-image-2.5-flare'], names: {}
+      }
+    ],
     active: { providerId: 'p1', model: activeModel },
     defaults: { quality: 'high', auto: true, width: 1024, height: 1024 }
   }), 'utf8');
@@ -100,12 +107,39 @@ test('auto mode rejects models outside the active provider list', async (t) => {
   );
 });
 
-test('outside auto mode a model argument is refused', async (t) => {
+test('outside auto mode a matching model argument is accepted', async (t) => {
+  const { generate, calls } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-flare' },
+    { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } });
+  assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-image-2.5-flare');
+});
+
+test('outside auto mode a different model is refused with both ids named', async (t) => {
   const { generate } = await generateWith(t, 'gpt-image-2.5-flare', {});
   await assert.rejects(
     generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-sunburst' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } }),
-    /Auto/
+    (error) => {
+      assert.match(error.message, /gpt-image-2\.5-flare/);
+      assert.match(error.message, /gpt-image-2\.5-sunburst/);
+      return true;
+    }
   );
+});
+
+test('a provider argument is validated against the selected provider, not obeyed', async (t) => {
+  const { generate, calls } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } };
+
+  // 同名模型在另一个提供商里也存在：换了提供商就必须拒绝，不能拿名字对上就当同一个。
+  await assert.rejects(
+    generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-flare', provider: 'p2' }, exec),
+    /提供商/
+  );
+  assert.equal(calls.length, 0);
+
+  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-flare', provider: 'p1' }, exec);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.startsWith('https://api.test/v1'));
 });
 
 test('auto mode is described in the prompt section with the available models', () => {
