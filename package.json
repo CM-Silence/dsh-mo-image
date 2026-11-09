@@ -26,8 +26,32 @@
   "engines": {
     "dsh": ">=0.2.1-rc.2"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CM-Silence/dsh-mo-image.git"
+  },
+  "homepage": "https://github.com/CM-Silence/dsh-mo-image#readme",
+  "bugs": {
+    "url": "https://github.com/CM-Silence/dsh-mo-image/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "image",
+    "openai-images"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "dsh": {
     "bundle": {

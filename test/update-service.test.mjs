@@ -19,6 +19,7 @@ function makeService(overrides = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'mo-update-service-'));
   const markerFile = path.join(dir, 'update.json');
   const installs = [];
+  const updates = [];
   const removed = [];
   const logs = [];
   const bundles = [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image' }];
@@ -32,6 +33,10 @@ function makeService(overrides = {}) {
         throw error;
       }
       return { result: { changed: true, application: 'restart-required' } };
+    },
+    async updateBundle(name, version, options) {
+      updates.push({ name, version, options });
+      return { from: '0.3.1', to: version, step: 'install', result: { changed: true, application: 'restart-required' } };
     },
     async removeBundle(name) { removed.push(name); return {}; }
   };
@@ -47,7 +52,7 @@ function makeService(overrides = {}) {
   };
   if (overrides.noManager) serviceOptions.pluginManager = null;
   const service = createUpdateService(serviceOptions);
-  return { service, markerFile, installs, removed, logs, pluginManager };
+  return { service, markerFile, installs, updates, removed, logs, pluginManager };
 }
 
 test('refresh turns a newer release into available', async () => {
@@ -172,6 +177,33 @@ test('a finished update is not installed twice', async () => {
   assert.deepEqual(await service.apply('0.4.0'), { ok: true });
   await service.settled();
   assert.equal(installs.length, 1);
+});
+
+test('a registry install updates through updateBundle instead of installing over', async () => {
+  const { service, updates, installs } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: '^0.3.1', updatable: true }]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].name, 'dsh-mo-image');
+  assert.equal(updates[0].version, '0.4.0');
+  assert.equal(typeof updates[0].options.requestId, 'string');
+  assert.equal(installs.length, 0);
+  assert.equal(service.status().state, 'done');
+});
+
+test('a github install still installs the tagged spec', async () => {
+  const { service, updates, installs } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image', updatable: false }]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.equal(updates.length, 0);
+  assert.equal(installs.length, 1);
+  assert.equal(installs[0].spec, 'github:CM-Silence/dsh-mo-image#v0.4.0');
 });
 
 test('apply is idempotent while an install is in flight', async () => {

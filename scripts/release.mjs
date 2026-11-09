@@ -32,12 +32,13 @@ const BRANCH = 'master';
  * @returns {{kind: string, dryRun: boolean, notes: string, notesFile: string, help: boolean}}
  */
 export function parseArgs(argv) {
-  const out = { kind: '', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false };
+  const out = { kind: '', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false, publish: false };
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg === '--release-only') out.releaseOnly = true;
+    else if (arg === '--publish') out.publish = true;
     else if (arg === '--notes') { out.notes = String(argv[i + 1] || ''); i += 1; }
     else if (arg === '--notes-file') { out.notesFile = String(argv[i + 1] || ''); i += 1; }
     else if (arg === '--help' || arg === '-h') out.help = true;
@@ -45,6 +46,16 @@ export function parseArgs(argv) {
   }
   out.kind = rest[0] || '';
   return out;
+}
+
+/**
+ * npm 的 dist-tag：预发布发到 next，正式版才顶掉 latest，
+ * 免得 `npm i dsh-mo-image` 的人装到 rc。
+ * @param {string} version
+ * @returns {'next'|'latest'}
+ */
+export function distTag(version) {
+  return /-(?:a|b|rc)\d+$/i.test(String(version || '')) ? 'next' : 'latest';
 }
 
 /**
@@ -311,6 +322,26 @@ function releaseOnly(args) {
 }
 
 /**
+ * 发到 npm。返回是否成功（失败不阻止建 Release，但退出码会是 1）。
+ * @param {string} version
+ * @returns {boolean}
+ */
+function publishToNpm(version) {
+  const tag = distTag(version);
+  const args = ['publish', '--tag', tag, '--access', 'public'];
+  console.log(`\n发布到 npm（dist-tag: ${tag}）…`);
+  // Windows 上 npm 是 .cmd，不能直接 spawn；优先用 npm-cli.js 走 node。
+  const cli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const result = existsSync(cli) ? run(process.execPath, [cli, ...args]) : run('npm', args);
+  if (!result.error && result.status === 0) {
+    console.log(`npm 已发布 ${version}`);
+    return true;
+  }
+  console.error(`npm publish 失败；tag 已经推送。修好后手动执行：npm publish --tag ${tag}`);
+  return false;
+}
+
+/**
  * 主流程。
  * @param {string[]} argv
  * @returns {number} 退出码
@@ -319,7 +350,7 @@ export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.releaseOnly) return releaseOnly(args);
   if (args.help || !args.kind) {
-    console.log('usage: node scripts/release.mjs <patch|minor|major|x.y.z|x.y.z-rc1> [--dry-run] [--notes "..."] [--notes-file file]');
+    console.log('usage: node scripts/release.mjs <patch|minor|major|x.y.z|x.y.z-rc1> [--dry-run] [--publish] [--notes "..."] [--notes-file file]');
     console.log('       node scripts/release.mjs --release-only   # 补建 Release');
     return args.help ? 0 : 2;
   }
@@ -341,6 +372,7 @@ export function main(argv = process.argv.slice(2)) {
     console.log(`release ${current} → ${next}`);
     console.log(`  node --test    (tests)`);
     for (const step of plan) console.log(`  ${step.command} ${step.args.join(' ')}`);
+    if (args.publish) console.log(`  npm publish --tag ${distTag(next)}`);
     console.log(`  (github release ${tag})\n`);
     console.log(notes || '(no notes)');
     return 0;
@@ -418,13 +450,16 @@ export function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  let published = true;
+  if (args.publish) published = publishToNpm(next);
+
   if (!createRelease(next, notes, { dryRun: false })) {
     console.error(`\ntag ${tag} 已推送，但 GitHub Release 没有建成`);
     console.error('凭据齐了之后执行：node scripts/release.mjs --release-only');
     return 1;
   }
   console.log(`\nreleased ${tag}`);
-  return 0;
+  return published ? 0 : 1;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {

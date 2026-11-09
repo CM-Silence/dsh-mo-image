@@ -1,16 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable } from '../scripts/release.mjs';
+import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag } from '../scripts/release.mjs';
 
 test('parseArgs reads the bump kind and flags', () => {
-  assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false });
+  assert.deepEqual(parseArgs(['minor']), { kind: 'minor', dryRun: false, notes: '', notesFile: '', help: false, releaseOnly: false, publish: false });
   const withNotes = parseArgs(['0.4.0', '--notes', '- 修复']);
   assert.equal(withNotes.kind, '0.4.0');
   assert.equal(withNotes.notes, '- 修复');
   assert.equal(parseArgs(['--dry-run', 'patch']).dryRun, true);
   assert.equal(parseArgs(['--notes-file', 'notes.md', 'patch']).notesFile, 'notes.md');
   assert.equal(parseArgs(['--release-only']).releaseOnly, true);
+  assert.equal(parseArgs(['0.4.1', '--publish']).publish, true);
   assert.equal(parseArgs([]).kind, '');
+});
+
+test('prereleases publish under the next dist-tag', () => {
+  assert.equal(distTag('0.4.1'), 'latest');
+  assert.equal(distTag('0.4.1-rc1'), 'next');
+  assert.equal(distTag('0.4.1-b1'), 'next');
+  assert.equal(distTag('0.4.1-a2'), 'next');
 });
 
 test('a missing command is reported as unavailable instead of throwing', () => {
