@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag, upsertChangelog } from '../scripts/release.mjs';
+import {
+  parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag,
+  upsertChangelog, notesForRelease
+} from '../scripts/release.mjs';
+
+test('release notes prefer the changelog section over generated commits', () => {
+  const changelog = ['# 更新日志', '', '## v0.4.2', '', '- 写在 CHANGELOG 里', '', '## v0.4.1', '', '- 旧', ''].join('\n');
+  const commits = [{ type: 'feat', text: 'auto' }];
+  assert.equal(notesForRelease({ version: '0.4.2', changelog, commits }), '- 写在 CHANGELOG 里');
+  assert.equal(notesForRelease({ version: '0.4.3', changelog, commits }), '### 新功能\n\n- auto');
+  assert.equal(notesForRelease({ version: '0.4.2', changelog, notes: '- 显式', commits }), '- 显式');
+  assert.equal(notesForRelease({ version: '0.4.2', changelog, notes: '- 显式', notesFileText: '- 文件', commits }), '- 文件');
+});
 
 test('upsertChangelog puts the new version on top and replaces an old draft', () => {
   const initial = ['# 更新日志', '', '## v0.4.1', '', '- 旧版本', ''].join('\n');

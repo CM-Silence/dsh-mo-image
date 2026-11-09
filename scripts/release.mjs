@@ -17,7 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compareVersions, isHiddenPrerelease } from '../lib/update.js';
+import { compareVersions, isHiddenPrerelease, parseChangelogSection } from '../lib/update.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
@@ -279,16 +279,6 @@ export function createRelease(version, notes, options = {}) {
 }
 
 /**
- * 默认更新日志：docs/superpowers/updatelogs/v<version>.md（与 push.js 的约定一致）。
- * @param {string} version
- * @returns {string}
- */
-function defaultNotesFile(version) {
-  const candidate = path.join(ROOT, 'docs', 'superpowers', 'updatelogs', `v${version}.md`);
-  return existsSync(candidate) ? candidate : '';
-}
-
-/**
  * 只补建 Release：tag 已经推上去、但 GitHub 上没有对应 Release 时用。
  * 缺凭据时和完整发版一样，打印手动步骤并返回失败。
  * @returns {number} 退出码
@@ -301,13 +291,18 @@ function releaseOnly(args) {
     return 1;
   }
   const previous = capture('git', ['describe', '--tags', '--abbrev=0', '--match', 'v*', `${tag}^`]);
-  const autoFile = defaultNotesFile(version);
-  const notes = args.notesFile
-    ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
-    : args.notes.trim() || (autoFile ? readFileSync(autoFile, 'utf8').trim() : renderNotes(collectCommits(previous)));
-  if (autoFile && !args.notesFile && !args.notes.trim()) {
-    console.log(`使用 ${path.relative(ROOT, autoFile)} 作为更新日志`);
-  }
+  const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+  const notes = notesForRelease({
+    version,
+    notes: args.notes,
+    notesFileText: args.notesFile ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8') : '',
+    changelog: existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '',
+    commits: collectCommits(previous)
+  });
+  const fromChangelog = !args.notes.trim() && !args.notesFile && parseChangelogSection(
+    existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '', version
+  );
+  if (fromChangelog) console.log(`使用 CHANGELOG.md 里 ## v${version} 这一节作为更新日志`);
   if (args.dryRun) {
     console.log(`release-only ${tag}（上一个 tag: ${previous || '无'}）`);
     console.log(notes || '(no notes)');
@@ -319,6 +314,20 @@ function releaseOnly(args) {
   }
   console.log(`released ${tag}`);
   return 0;
+}
+
+/**
+ * 决定 Release 正文：显式传入 > CHANGELOG 里已有的这一节 > 提交标题自动生成。
+ * 更新对话框读的就是 CHANGELOG，所以这里优先用作者已经写好的那一节。
+ * @param {{version: string, notes?: string, notesFileText?: string, changelog?: string, commits?: {type: string, text: string}[]}} input
+ * @returns {string}
+ */
+export function notesForRelease(input = {}) {
+  const explicit = String(input.notesFileText || input.notes || '').trim();
+  if (explicit) return explicit;
+  const existing = parseChangelogSection(input.changelog || '', input.version);
+  if (existing) return existing;
+  return renderNotes(input.commits || []);
 }
 
 /**
@@ -400,9 +409,18 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   // 说明必须在打 tag 之前收：打完 tag 再 describe 拿到的就是新 tag，区间为空。
-  const notes = args.notesFile
-    ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8').trim()
-    : args.notes.trim() || renderNotes(collectCommits(lastTag()));
+  const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+  const changelogText = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : '';
+  const notes = notesForRelease({
+    version: next,
+    notes: args.notes,
+    notesFileText: args.notesFile ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8') : '',
+    changelog: changelogText,
+    commits: collectCommits(lastTag())
+  });
+  if (!args.notes.trim() && !args.notesFile && parseChangelogSection(changelogText, next)) {
+    console.log(`使用 CHANGELOG.md 里 ## v${next} 这一节作为更新日志`);
+  }
   const plan = releasePlan(next);
 
   if (args.dryRun) {
