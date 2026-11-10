@@ -79,7 +79,7 @@ test('refresh failure stays idle and logs', async () => {
   assert.ok(logs.some((line) => line.includes('update check failed')));
 });
 
-test('apply installs the tagged git spec and writes a marker', async () => {
+test('apply installs the npm version spec and writes a marker', async () => {
   const { service, markerFile, installs } = makeService();
   await service.refresh();
   const out = await service.apply('0.4.0');
@@ -90,7 +90,7 @@ test('apply installs the tagged git spec and writes a marker', async () => {
   await service.settled();
   assert.equal(installs.length, 1);
   assert.equal(installs[0].spec, UPDATE_SPEC('0.4.0'));
-  assert.equal(installs[0].spec, 'github:CM-Silence/dsh-mo-image#v0.4.0');
+  assert.equal(installs[0].spec, 'dsh-mo-image@0.4.0');
   assert.equal(typeof installs[0].options.requestId, 'string');
   assert.equal(installs[0].options.enabled, true);
 });
@@ -152,7 +152,7 @@ test('apply resolves a plugin manager that becomes available later', async () =>
   const out = await service.apply('0.4.0');
   assert.deepEqual(out, { ok: true });
   await service.settled();
-  assert.deepEqual(installs, ['github:CM-Silence/dsh-mo-image#v0.4.0']);
+  assert.deepEqual(installs, ['dsh-mo-image@0.4.0']);
 });
 
 test('hydrate drops a marker that no longer matches the installed version', async () => {
@@ -198,7 +198,7 @@ test('a registry install updates through updateBundle instead of installing over
   assert.equal(service.status().state, 'done');
 });
 
-test('a github install still installs the tagged spec', async () => {
+test('a git install is upgraded through the npm spec', async () => {
   const { service, updates, installs } = makeService({
     bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image', updatable: false }]
   });
@@ -207,7 +207,7 @@ test('a github install still installs the tagged spec', async () => {
   await service.settled();
   assert.equal(updates.length, 0);
   assert.equal(installs.length, 1);
-  assert.equal(installs[0].spec, 'github:CM-Silence/dsh-mo-image#v0.4.0');
+  assert.equal(installs[0].spec, 'dsh-mo-image@0.4.0');
 });
 
 test('apply is idempotent while an install is in flight', async () => {

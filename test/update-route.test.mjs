@@ -110,7 +110,7 @@ test('the update route reports status and starts an install', async (t) => {  co
   assert.equal(JSON.parse(applyRes.body).ok, true);
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(installs.length, 1);
-  assert.equal(installs[0].spec, `github:CM-Silence/dsh-mo-image#v${NEXT}`);
+  assert.equal(installs[0].spec, `dsh-mo-image@${NEXT}`);
 
   const ackRes = makeRes();
   await route.handler(jsonReq('POST', { action: 'ack' }), ackRes);

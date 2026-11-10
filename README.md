@@ -21,6 +21,12 @@
 - DSH >= 0.2.1-rc.2
 - Node.js / pnpm（DSH 已自带）
 
+从 npm 安装（推荐）：
+
+~~~bash
+dsh plugin --profile desktop add dsh-mo-image
+~~~
+
 从 GitHub 安装：
 
 ~~~bash
@@ -49,7 +55,7 @@ DSH 每次启动会查一次 npm 上的最新版本（`registry.npmjs.org`，不
 更新说明来自包里的 `CHANGELOG.md`（按版本从 jsDelivr / unpkg / npmmirror 读取）；那个版本没写说明时，对话框显示「暂无更新说明」。
 
 - 用 `link:` 方式安装的开发环境不会自动改文件，点更新只会提示你自己 `git pull`。
-- 从 npm 安装的走 DSH 原生的 `updateBundle`（先卸旧版再装新版，装失败会自动装回旧版）；从 GitHub 安装的装对应 tag。
+- 检测和安装都走 npm：点更新时按 `dsh-mo-image@x.y.z` 的版本规格安装，不依赖 GitHub。从 npm 安装的走 DSH 原生的 `updateBundle`（先卸旧版再装新版，装失败会自动装回旧版）；早期用 `github:` 装的也会被换成 npm 版。
 - 没有桌面版的插件管理器时，手动更新：
 
 ~~~bash
