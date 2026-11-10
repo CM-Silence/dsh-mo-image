@@ -44,11 +44,14 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   const mod = await import('../lib/index.js?apply-test');
   mod.apply(fake, { update: { skipCheck: true } });
 
-  assert.equal(tools.length, 2);
+  assert.equal(tools.length, 3);
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const listModels = tools.find((tool) => tool.name === 'mo_image_list_models');
   assert.ok(generate);
   assert.ok(edit);
+  assert.ok(listModels, 'the model needs a way to read the configured models');
+  assert.match(listModels.description, /config file/, 'the description must warn off the guarded file');
   assert.ok(generate.parameters.properties.negative_prompt);
   assert.equal(generate.parameters.properties.quality, undefined);
   assert.equal(generate.parameters.properties.size, undefined);
