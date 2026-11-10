@@ -366,6 +366,45 @@ test('arrow keys on the drag handle move a row without a pointer', async () => {
   assert.deepEqual(modelRows(tree).map((row) => row.id), ['beta-model', 'alpha-model']);
 });
 
+function rowTags(tree) {
+  return findAll(tree, (node) => hasClass(node, 'rowTag')).map((node) => textOf(node).join(''));
+}
+
+test('a provider built from a built-in preset carries no Custom tag', async () => {
+  const harness = createHarness({ config: baseConfig() });
+  await settle();
+  const tree = harness.renderRoot();
+  assert.deepEqual(rowTags(tree), [], 'a built-in provider is not a custom endpoint');
+});
+
+test('a provider with an endpoint of its own keeps the Custom tag', async () => {
+  const config = baseConfig({
+    providers: [{
+      id: 'p1', name: 'My gateway', baseUrl: 'https://gateway.example.com/v1',
+      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      models: ['alpha-model'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'alpha-model' }
+  });
+  const harness = createHarness({ config });
+  await settle();
+  assert.deepEqual(rowTags(harness.renderRoot()), ['Custom']);
+});
+
+test('a local deployment still reads Local, not Custom', async () => {
+  const config = baseConfig({
+    providers: [{
+      id: 'p1', name: 'AUTOMATIC1111', baseUrl: 'http://127.0.0.1:7860',
+      key: '', hasKey: false, optionalKey: true, adapter: 'a1111', protocol: 'openai-images',
+      models: ['sd-xl'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'sd-xl' }
+  });
+  const harness = createHarness({ config });
+  await settle();
+  assert.deepEqual(rowTags(harness.renderRoot()), ['Local']);
+});
+
 test('the section header keeps DSH spacing: title row then intro as section children', async () => {
   const harness = createHarness({ config: baseConfig() });
   await settle();
