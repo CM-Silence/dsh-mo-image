@@ -107,15 +107,18 @@ async function loadClientSeat(config = { providers: [], active: { providerId: ''
     };
   }
 
-  function openModelPanel() {
-    // The inner seat's hook order is: theme state/effect, store state/error/effect,
-    // open, panel, query, activeIndex, menuPos, widthDraft, heightDraft, then refs.
-    overrides = new Map([[5, true], [6, 'model']]);
+  function openPanel(panel) {
+    // OfficialImageSeat's hook order starts at open, then panel.
+    overrides = new Map([[0, true], [1, panel]]);
     const seatElement = seat({});
     return renderElement(seatElement);
   }
 
-  return { openModelPanel };
+  function openModelPanel() {
+    return openPanel('model');
+  }
+
+  return { openModelPanel, openPanel };
 }
 
 function collectText(node, out = []) {
@@ -137,6 +140,35 @@ test('no configured models hides the Auto row and shows the empty hint', async (
   const text = collectText(seat.openModelPanel()).join(' ');
   assert.doesNotMatch(text, /(^|\s)Auto(\s|$)/);
   assert.match(text, /还没有模型，去“设置 → 生图模型”添加/);
+});
+
+test('the home panel names the active model instead of showing its id', async () => {
+  const seat = await loadClientSeat({
+    providers: [{
+      id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['gpt-image-2.5-flare'],
+      names: { 'gpt-image-2.5-flare': 'Flare Image' }
+    }],
+    active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },
+    defaults: {}
+  });
+  const text = collectText(seat.openPanel('home')).join(' ');
+  assert.match(text, /Flare Image/);
+  assert.doesNotMatch(text, /gpt-image-2\.5-flare/, 'the model id is only for parameters, never for display');
+});
+
+test('the home panel falls back to the id when a model has no display name', async () => {
+  const seat = await loadClientSeat({
+    providers: [{
+      id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['gpt-image-2.5-flare'],
+      names: {}
+    }],
+    active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },
+    defaults: {}
+  });
+  const text = collectText(seat.openPanel('home')).join(' ');
+  assert.match(text, /gpt-image-2\.5-flare/);
 });
 
 test('the Auto row stays available once a model is configured', async () => {

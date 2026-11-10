@@ -10,6 +10,7 @@
 - 图片编辑：保留原图，只改指定部分
 - 参考图：支持 1–16 张本地图片或 URL
 - 多模型：不同提供商、不同模型可随时切换
+- 选择器皮肤：默认跟随原版对话模型选择器；检测到 Codex 风格美化插件时自动切换同款弹层
 - 模型感知提示词：按当前模型注入对应的写法、公式和约束
 - 对话内直接显示生成结果
 
@@ -78,8 +79,11 @@ npm run release -- minor --dry-run        # 只看会做什么
 | API 地址 | OpenAI Images 兼容地址，通常以 /v1 结尾 |
 | API 密钥 | 对应平台的 Key |
 | 模型 ID | 例如 gpt-image-2.5-flare |
+| 显示名称 | 可选；对话里的模型名，留空就用模型 ID |
 
 保存后，在对话输入框右侧选择当前生图模型。
+
+「模型目录」沿用 DSH 对话模型设置页的模型行：拖动手柄（或聚焦手柄后按上下方向键）调整顺序，顺序就是选择器里的顺序；「获取可用模型」会把上游列出的模型连同显示名一起带回来，已加入列表的模型默认勾选，勾选结果就是新的模型列表。
 
 内置了几家官方或大型模型平台，也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
 
@@ -93,6 +97,19 @@ npm run release -- minor --dry-run        # 只看会做什么
 - 覆盖范围：设置页、模型选择器、用户可见的报错和 aria-label。工具描述、系统提示词和技能文案不参与翻译。
 - 宿主设置接口的报错会附带稳定的 `code`/`params`（见 [`lib/localized-error.js`](lib/localized-error.js)），前端按当前语言重写整句；工具调用和宿主日志仍保留原始中文，模型看到的提示词不受影响。新增宿主错误时，在 `SERVER_ERROR_CODES` 里加 code，并在 CSV 加 `serverError.<code>`。
 - 缺 key 时按 DSH 的 locale 回退链回退到英文，再回退到 key；没有 locale 服务的环境（例如纯单测）回退到中文。
+
+## 选择器皮肤
+
+生图席挂在输入框右侧（`conversation.input.right`），默认沿用 DSH 原版对话模型选择器的类名与结构：类名从当前样式表解析，菜单、搜索、分组、键盘行为和原版对齐；只改 CSS 的主题会自动覆盖到它。
+
+如果对话席被 [dsh-codex-model-effort-selector](https://github.com/ABING1111/dsh-codex-model-effort-selector) 这类接管型美化插件替换，插件会检测 `.cmes-*` DOM 并切换成同一套 Codex 皮肤：
+
+- **质量**占据「推理等级」的位置：滑条按当前模型实际公布的档位排列（Auto 紧挨着 Off，不会被当成最高档），每档一色；拖动/键盘/Home/End 都可改档，最高档触发紫罗兰、星尘动画和「更快消耗使用额度」提示。
+- 点弹层中间的档位标题进入 **provider → 模型**两级下钻，带搜索、当前勾选和「N 档」徽标。
+- **⚡ Fast** 是左侧工具（纯视觉，和 Codex 一样，按会话记住；开启时滑条会走 fast-mode 动画；不挂悬停提示），**齿轮**是右侧「其他设置」工具，里面分组放尺寸和提示词优化，内容超高时可滚动。
+- 弹层通过 portal 挂到 `document.body`，不赌输入区祖先没有 transform/filter/backdrop-filter，避免定位偏移和被裁剪。
+
+未知的接管型插件没有公共协议，插件只采样它触发器的尺寸/字号/颜色做通用降级，弹层仍用宿主 token 自绘；这样并排不违和，但不承诺逐像素一致。想做到 1:1，需要和对方约定皮肤标记或 CSS 变量。
 
 ## 使用
 
@@ -121,11 +138,11 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 ## 质量档位
 
-质量档位由「当前模型」决定，宿主通过 `/api/mo-image/config` 的 `capabilities` 下发；没有官方质量参数的模型直接隐藏这一行。
+质量档位由「当前模型」决定，宿主通过 `/api/mo-image/config` 的 `capabilities` 下发。原版皮肤里，没有官方质量参数的模型隐藏这一行；Codex 皮肤里显示「此模型未提供质量档位」，但尺寸和提示词优化仍可从弹层工具进入。GPT-Image 的 `Auto` 是模式而不是画质档，滑条里紧挨着 `Off` 放，不排到最高档。
 
 | 模型族 | 质量行 | 选项 |
 |---|---|---|
-| OpenAI GPT-Image | 显示 | Off / Low / Medium / High / Auto |
+| OpenAI GPT-Image | 显示 | Off / Auto / Low / Medium / High |
 | OpenAI DALL·E 3 | 显示 | Off / Standard / HD |
 | Ideogram 3 | 显示 | Off / Turbo / Default / Quality |
 | Google Gemini / Nano Banana | 隐藏 | 只有尺寸/比例，没有 quality |
@@ -143,7 +160,7 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 ## 提示词优化
 
-生图模型选择器的首页新增「提示词优化」一栏，默认 **On**：
+生图模型选择器里新增「提示词优化」，默认 **On**（原版皮肤在首页一栏；Codex 皮肤在右侧齿轮「其他设置」页的「提示词」分组里）：
 
 - **On**：保持现在的行为，按当前模型的提示词方言扩写/整理 prompt。
 - **Off**：要求模型尽量把用户原话直接传给生图工具，不扩写、不补风格/光线/构图，也不自动补 negative prompt；只有用户明确说“优化/改写提示词”时才优化。
@@ -372,4 +389,4 @@ $DSH_HOME/.credentials.yaml
 
 ## License
 
-MIT
+MIT。Codex 皮肤的几何、色板与粒子分布改编自 [dsh-codex-model-effort-selector](https://github.com/ABING1111/dsh-codex-model-effort-selector)（MIT），完整许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

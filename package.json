@@ -22,6 +22,7 @@
     "skills",
     "cordis.patch.yml",
     "CHANGELOG.md",
+    "THIRD-PARTY-NOTICES.md",
     "README.md"
   ],
   "engines": {
