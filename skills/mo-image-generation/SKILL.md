@@ -231,8 +231,8 @@ negative_prompt: low quality, blurry, oversaturated, deformed hands, extra finge
 
 ## 五、调用
 
-- 需要知道有哪些生图模型、当前选的是哪个、是否处于 Auto 模式时，调用 `mo_image_list_models`。它返回每个提供商的模型 id、显示名和是否为本地部署。
-- **不要读插件配置文件**（`config.json`）或打 `/api/mo-image/config`：这些路径被守卫拦着，读也会被拒绝。
+- 需要知道有哪些生图模型、当前选的是哪个、是否处于 Auto 模式时，优先调用 `mo_image_list_models`。它返回每个提供商的模型 id、显示名和是否为本地部署。
+- 插件配置文件可以只读查看（`read` / `grep`），但对它的任何写入（`write` / `edit` / shell 重定向）都会被守卫拒绝。
 - `prompt`：按当前模型写好的最终提示词。
 - `negative_prompt`：只在当前模型支持时传；不确定就省略。
 - 工具只接收 `prompt` / `negative_prompt`；模型、尺寸、质量由用户在生图选择器里控制，不要尝试传 `provider` / `model` / `size` / `quality`。

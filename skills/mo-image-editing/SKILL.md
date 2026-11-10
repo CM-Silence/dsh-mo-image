@@ -136,7 +136,7 @@ Change only the jacket color to deep navy. Keep the model's face, hair, pose, bo
 
 ## 五、调用
 
-- 需要知道有哪些生图模型、当前选的是哪个时，调用 `mo_image_list_models`；不要读插件配置文件或打 `/api/mo-image/config`，那些路径被守卫拦着。
+- 需要知道有哪些生图模型、当前选的是哪个时，优先调用 `mo_image_list_models`；配置文件可以只读查看，但写入会被守卫拒绝。
 - `images`：1–16 张本地绝对路径或 http(s) URL；顺序对应图1/图2，不能错。
 - `prompt`：按当前模型写好的最终编辑提示词。
 - `negative_prompt`：只在当前模型支持时传。
