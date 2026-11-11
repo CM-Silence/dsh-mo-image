@@ -25,6 +25,9 @@ function makeService(overrides = {}) {
     async listBundles() { return overrides.bundles || bundles; },
     async installBundle(spec, options) {
       installs.push({ spec, options });
+      const planned = overrides.installBehaviors && overrides.installBehaviors.shift();
+      if (planned instanceof Error) throw planned;
+      if (planned === 'failed-result') return { result: { changed: true, application: 'failed' } };
       if (overrides.failNext) {
         const error = overrides.failNext;
         overrides.failNext = null;
@@ -208,6 +211,77 @@ test('a git install is upgraded through the npm spec', async () => {
   assert.equal(updates.length, 0);
   assert.equal(installs.length, 1);
   assert.equal(installs[0].spec, 'dsh-mo-image@0.4.0');
+});
+
+test('a failed npm install after the removal restores the git install and says so', async () => {
+  const { service, installs, removed } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image#v0.3.1', updatable: false }],
+    installBehaviors: [
+      Object.assign(new Error('already there'), { code: 'already-installed' }),
+      new Error('registry down'),
+      'ok'
+    ]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.deepEqual(removed, ['dsh-mo-image']);
+  assert.deepEqual(installs.map((item) => item.spec), [
+    'dsh-mo-image@0.4.0',
+    'dsh-mo-image@0.4.0',
+    'github:CM-Silence/dsh-mo-image#v0.3.1'
+  ]);
+  assert.equal(installs[2].options.enabled, true);
+  const status = service.status();
+  assert.equal(status.state, 'failed');
+  assert.equal(status.error, 'update.failedRestored');
+});
+
+test('an install reported as failed after the removal also restores the git install', async () => {
+  const { service, installs } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image#v0.3.1', updatable: false }],
+    installBehaviors: [
+      Object.assign(new Error('already there'), { code: 'already-installed' }),
+      'failed-result',
+      'ok'
+    ]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.equal(installs.at(-1).spec, 'github:CM-Silence/dsh-mo-image#v0.3.1');
+  assert.equal(service.status().error, 'update.failedRestored');
+});
+
+test('when the git restore also fails the status reports a broken install', async () => {
+  const { service, installs } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image#v0.3.1', updatable: false }],
+    installBehaviors: [
+      Object.assign(new Error('already there'), { code: 'already-installed' }),
+      new Error('registry down'),
+      new Error('git down')
+    ]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.equal(installs.length, 3);
+  const status = service.status();
+  assert.equal(status.state, 'failed');
+  assert.equal(status.error, 'update.failedBroken');
+});
+
+test('a first install that never got as far as removing keeps the raw error', async () => {
+  const { service, installs, removed } = makeService({
+    bundles: [{ name: 'dsh-mo-image', source: 'github:CM-Silence/dsh-mo-image#v0.3.1', updatable: false }],
+    installBehaviors: [new Error('offline')]
+  });
+  await service.refresh();
+  await service.apply('0.4.0');
+  await service.settled();
+  assert.deepEqual(removed, []);
+  assert.equal(installs.length, 1);
+  assert.equal(service.status().error, 'offline');
 });
 
 test('apply is idempotent while an install is in flight', async () => {

@@ -87,6 +87,14 @@ test('prompt optimization off instructs raw user wording', () => {
   assert.doesNotMatch(text, /主体 \+ 动作 \+ 环境/);
 });
 
+test('neither prompt mode makes the model echo the selected model id', () => {
+  const on = promptSectionText({ model: 'gpt-image-2.5-flare' });
+  const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false });
+  for (const text of [on, off]) {
+    assert.doesNotMatch(text, /必须传 model/);
+  }
+});
+
 test('both prompt modes keep generation parameters out of tool args', () => {
   const on = promptSectionText({ model: 'gpt-image-2.5-flare' });
   const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false });

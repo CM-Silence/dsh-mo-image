@@ -60,6 +60,7 @@ test('a model argument outside Auto mode is refused, and provider cannot redirec
   const mod = await import('../lib/index.js?tool-guard-test');
   mod.apply(fakeContext(tools));
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
   assert.ok(generate);
 
   const originalFetch = globalThis.fetch;
@@ -73,6 +74,7 @@ test('a model argument outside Auto mode is refused, and provider cannot redirec
   t.after(() => { globalThis.fetch = originalFetch; });
 
   const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await settings.execute({}, exec);
   await assert.rejects(
     generate.execute({ prompt: 'a red apple', model: 'some-other-model' }, exec),
     /当前选中的模型|只能由用户/
@@ -108,6 +110,7 @@ test('editing uses the selected model and never falls back to another one', asyn
   const mod = await import('../lib/index.js?tool-guard-edit');
   mod.apply(fakeContext(tools));
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
   assert.ok(edit);
 
   const originalFetch = globalThis.fetch;
@@ -120,11 +123,13 @@ test('editing uses the selected model and never falls back to another one', asyn
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await settings.execute({}, exec);
   await edit.execute({
     prompt: '只把背景换成浅灰色',
     model: 'gpt-image-2.5-flare',
     images: [reference]
-  }, { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } });
+  }, exec);
 
   const form = captured.init.body;
   assert.equal(typeof form.get, 'function', 'gpt-image edits should be multipart');
@@ -158,10 +163,12 @@ test('a model without image editing reports that it does not support it', async 
   const mod = await import('../lib/index.js?tool-guard-noedit');
   mod.apply(fakeContext(tools));
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await settings.execute({}, exec);
 
   await assert.rejects(
-    edit.execute({ prompt: '换成灰色背景', model: 'ideogram-3', images: [reference] },
-      { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } }),
+    edit.execute({ prompt: '换成灰色背景', model: 'ideogram-3', images: [reference] }, exec),
     /该模型不支持图生图/
   );
 });
@@ -181,6 +188,7 @@ test('an upstream model-capability error is reported as "does not support" inste
   const mod = await import('../lib/index.js?tool-guard-upstream');
   mod.apply(fakeContext(tools));
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
 
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -192,9 +200,11 @@ test('an upstream model-capability error is reported as "does not support" inste
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await settings.execute({}, exec);
+
   await assert.rejects(
-    edit.execute({ prompt: '换成灰色背景', model: 'gpt-image-2.5-flare', images: [reference] },
-      { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } }),
+    edit.execute({ prompt: '换成灰色背景', model: 'gpt-image-2.5-flare', images: [reference] }, exec),
     /该模型不支持图生图/
   );
   assert.equal(calls, 1, 'must fail fast instead of retrying other field names');

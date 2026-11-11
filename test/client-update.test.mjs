@@ -157,6 +157,8 @@ test('updateToastFor picks the right message per state', () => {
 
   assert.equal(api.__test.updateToastFor({ state: 'updating' }, t), 'update.starting');
   assert.equal(api.__test.updateToastFor({ state: 'failed' }, t), 'update.failed');
+  assert.equal(api.__test.updateToastFor({ state: 'failed', error: 'update.failedRestored' }, t), 'update.failedRestored');
+  assert.equal(api.__test.updateToastFor({ state: 'failed', error: 'update.failedBroken' }, t), 'update.failedBroken');
   assert.equal(api.__test.updateToastFor({ state: 'done', updatedBeforeRestart: false, latest: '0.4.0' }, t), 'update.doneRestart');
   assert.equal(api.__test.updateToastFor({ state: 'done', updatedBeforeRestart: true, latest: '0.4.0' }, t), 'update.done');
   assert.equal(calls.at(-1).key, 'update.done');

@@ -45,7 +45,11 @@ test('edit flow reads a local reference and sends a JSON image payload', async (
   const mod = await import('../lib/index.js?edit-flow-test');
   mod.apply(fake);
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
   assert.ok(edit);
+  assert.ok(settings);
+  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } };
+  await settings.execute({}, exec);
 
   const originalFetch = globalThis.fetch;
   let captured = null;
@@ -61,7 +65,7 @@ test('edit flow reads a local reference and sends a JSON image payload', async (
     prompt: '只把背景换成浅灰色，其他保持不变',
     model: 'kwai-kolors/kolors',
     images: [reference]
-  }, { signal: new AbortController().signal, agent: { session: { header: { cwd: home } } } });
+  }, exec);
 
   assert.ok(result.path);
   assert.equal(path.dirname(result.path), path.join(home, 'generated-images'));

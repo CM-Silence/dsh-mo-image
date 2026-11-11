@@ -54,10 +54,10 @@ async function loadTool(home, suffix) {
   const tools = [];
   const mod = await import(`../lib/index.js?model-list-${suffix}`);
   mod.apply(fakeContext(tools));
-  return tools.find((tool) => tool.name === 'mo_image_list_models') || null;
+  return tools.find((tool) => tool.name === 'mo_image_settings') || null;
 }
 
-test('the plugin exposes a tool that lists the configured image models', async (t) => {
+test('the plugin exposes a tool that reports the current settings as one small json', async (t) => {
   const home = makeHome(CONFIG);
   const previousHome = process.env.DSH_HOME;
   t.after(() => {
@@ -66,35 +66,24 @@ test('the plugin exposes a tool that lists the configured image models', async (
   });
 
   const tool = await loadTool(home, 'main');
-  assert.ok(tool, 'mo_image_list_models should be registered');
+  assert.ok(tool, 'mo_image_settings should be registered');
   assert.equal(tool.parameters.required, undefined, 'the tool takes no required arguments');
 
   const result = await tool.execute({}, { signal: new AbortController().signal });
 
-  assert.equal(result.active.providerId, 'p-local');
-  assert.equal(result.active.providerName, 'Local ComfyUI');
-  assert.equal(result.active.model, 'flux-2-klein-4b.safetensors');
-  assert.equal(result.active.modelName, 'FLUX.2 Klein 4B');
-  assert.equal(result.auto, false);
+  assert.deepEqual(Object.keys(result).sort(), ['hint', 'model', 'promptOptimization', 'provider'],
+    'outside auto mode the payload carries no model list and no display names');
+  assert.equal(result.provider, 'p-local', 'the provider is an id, not a name');
+  assert.equal(result.model, 'flux-2-klein-4b.safetensors');
+  assert.equal(result.promptOptimization, true);
+  assert.match(result.hint, /30–80/, 'the hint is the only prose left');
+  assert.equal(result.models, undefined);
 
-  assert.equal(result.providers.length, 2);
-  const local = result.providers.find((item) => item.id === 'p-local');
-  assert.deepEqual(local.models.map((model) => model.id), [
-    'flux-2-klein-4b.safetensors',
-    'moss_image_sft_int8_convrot.safetensors'
-  ]);
-  assert.equal(local.models[0].name, 'FLUX.2 Klein 4B');
-  assert.equal(local.models[1].name, '', 'models without a display name keep it empty');
-  assert.equal(local.adapter, 'comfyui');
-  assert.equal(local.local, true);
-  assert.equal(local.active, true);
-
-  const cloud = result.providers.find((item) => item.id === 'p-cloud');
-  assert.equal(cloud.active, false);
-  assert.equal(cloud.local, false);
+  const blocks = tool.output.render({}, result);
+  assert.equal(blocks[0].text, JSON.stringify(result), 'the model sees the same compact json');
 });
 
-test('the model list tool never exposes credentials or raw config fields', async (t) => {
+test('the settings tool never exposes credentials or raw config fields', async (t) => {
   const home = makeHome(CONFIG);
   const previousHome = process.env.DSH_HOME;
   t.after(() => {
@@ -110,7 +99,7 @@ test('the model list tool never exposes credentials or raw config fields', async
   assert.doesNotMatch(text, /MO_IMAGE_P_/, 'credential ref names stay internal');
 });
 
-test('the model list tool reports an empty setup without throwing', async (t) => {
+test('the settings tool reports an empty setup without throwing', async (t) => {
   const home = makeHome(null);
   const previousHome = process.env.DSH_HOME;
   t.after(() => {
@@ -120,12 +109,12 @@ test('the model list tool reports an empty setup without throwing', async (t) =>
 
   const tool = await loadTool(home, 'empty');
   const result = await tool.execute({}, { signal: new AbortController().signal });
-  assert.deepEqual(result.providers, []);
-  assert.equal(result.active.providerId, '');
-  assert.equal(result.active.model, '');
+  assert.equal(result.provider, '');
+  assert.equal(result.model, '');
+  assert.ok(result.hint.length > 0, 'an empty setup still explains what to do');
 });
 
-test('the tool description points at itself instead of the guarded config file', async (t) => {
+test('the tool description sends the model through the tool instead of the guarded config file', async (t) => {
   const home = makeHome(CONFIG);
   const previousHome = process.env.DSH_HOME;
   t.after(() => {
@@ -134,6 +123,7 @@ test('the tool description points at itself instead of the guarded config file',
   });
 
   const tool = await loadTool(home, 'desc');
-  assert.match(tool.description, /list|模型/i);
+  assert.match(tool.description, /settings|model/i);
+  assert.match(tool.description, /mo_image_generate|generation/i, 'the description says when to call it');
   assert.doesNotMatch(tool.description, /config\.json/, 'do not send the model to the guarded file');
 });

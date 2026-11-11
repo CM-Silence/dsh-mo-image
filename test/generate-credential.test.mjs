@@ -50,7 +50,14 @@ test('generation resolves the key from the credentials service without a config 
   const mod = await import('../lib/index.js?generate-credential-test');
   mod.apply(fake);
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
   assert.ok(generate);
+  assert.ok(settings);
+  const exec = {
+    signal: new AbortController().signal,
+    agent: { session: { header: { cwd: home } } }
+  };
+  await settings.execute({}, exec);
 
   const originalFetch = globalThis.fetch;
   let captured = null;
@@ -62,10 +69,7 @@ test('generation resolves the key from the credentials service without a config 
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  const result = await generate.execute({ prompt: 'a small test image', model: 'gpt-image-2.5-flare', quality: 'low', size: '2048x2048' }, {
-    signal: new AbortController().signal,
-    agent: { session: { header: { cwd: home } } }
-  });
+  const result = await generate.execute({ prompt: 'a small test image', model: 'gpt-image-2.5-flare', quality: 'low', size: '2048x2048' }, exec);
   assert.ok(result.path);
   assert.equal(path.dirname(result.path), path.join(home, 'generated-images'));
   assert.equal(existsSync(path.join(state, 'out', path.basename(result.path))), false);

@@ -47,18 +47,22 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.equal(tools.length, 3);
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
-  const listModels = tools.find((tool) => tool.name === 'mo_image_list_models');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
   assert.ok(generate);
   assert.ok(edit);
-  assert.ok(listModels, 'the model needs a way to read the configured models');
-  assert.match(listModels.description, /config file/, 'the description must warn off the guarded file');
+  assert.ok(settings, 'the model needs a tool that reads the current settings');
+  assert.match(settings.description, /before every generation/i, 'the description says when to call it');
+  assert.match(settings.description, /rejected/i, 'the description says generation is gated on it');
   assert.ok(generate.parameters.properties.negative_prompt);
   assert.equal(generate.parameters.properties.quality, undefined);
   assert.equal(generate.parameters.properties.size, undefined);
   assert.equal(generate.parameters.properties.provider.type, 'string');
   assert.match(String(generate.parameters.properties.provider.description), /validated/);
   assert.match(String(generate.parameters.properties.model.description), /Auto/);
-  assert.ok(Array.isArray(generate.parameters.required) && generate.parameters.required.includes('model'));
+  // 模型由选择器决定，工具参数只是可选的一致性核对：让模型复述环境状态，
+  // 用户中途切换模型时它就会复读历史里的旧 id，每次都白失败一轮。
+  assert.ok(!(generate.parameters.required || []).includes('model'), 'model must be optional');
+  assert.ok(!(edit.parameters.required || []).includes('model'), 'model must be optional for edits too');
   assert.ok(edit.parameters.properties.negative_prompt);
   assert.equal(edit.parameters.properties.quality, undefined);
   assert.match(generate.description, /Model, size, and quality come from the picker/);
@@ -66,7 +70,7 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.doesNotMatch(generate.description, /only when optimization is On/);
   assert.match(generate.description, /mo-image-generation skill/);
   assert.match(edit.description, /图1\/图2/);
-  assert.match(edit.description, /prompt optimization is Off/);
+  assert.match(edit.description, /optimization is Off/);
 
   const section = sections.find((item) => item.name === 'mo-image:prompt-recipe');
   assert.ok(section);

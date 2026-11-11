@@ -71,6 +71,7 @@ async function generateWith(t, activeModel, args) {
   mod.apply(fakeContext(tools));
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');
   const edit = tools.find((tool) => tool.name === 'mo_image_edit');
+  const settings = tools.find((tool) => tool.name === 'mo_image_settings');
 
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -81,43 +82,56 @@ async function generateWith(t, activeModel, args) {
     });
   };
   t.after(() => { globalThis.fetch = originalFetch; });
-  return { generate, edit, calls, home, reference };
+  const session = { header: { cwd: os.tmpdir() } };
+  const exec = { signal: new AbortController().signal, agent: { session } };
+  return { generate, edit, settings, calls, home, reference, session, exec };
 }
 
 test('auto mode lets the model pick any model from the active provider', async (t) => {
-  const { generate, calls } = await generateWith(t, 'auto', {});
-  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-sunburst' },
-    { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } });
+  const { generate, settings, calls, exec } = await generateWith(t, 'auto', {});
+  await settings.execute({}, exec);
+  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-sunburst' }, exec);
   assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-image-2.5-sunburst');
 });
 
 test('auto mode without a model argument is an error, not a silent guess', async (t) => {
-  const { generate } = await generateWith(t, 'auto', {});
+  const { generate, settings, exec } = await generateWith(t, 'auto', {});
+  await settings.execute({}, exec);
   await assert.rejects(
-    generate.execute({ prompt: 'a cat' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } }),
+    generate.execute({ prompt: 'a cat' }, exec),
     /Auto/
   );
 });
 
 test('auto mode rejects models outside the active provider list', async (t) => {
-  const { generate } = await generateWith(t, 'auto', {});
+  const { generate, settings, exec } = await generateWith(t, 'auto', {});
+  await settings.execute({}, exec);
   await assert.rejects(
-    generate.execute({ prompt: 'a cat', model: 'not-in-list' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } }),
+    generate.execute({ prompt: 'a cat', model: 'not-in-list' }, exec),
     /不在|列表/
   );
 });
 
 test('outside auto mode a matching model argument is accepted', async (t) => {
-  const { generate, calls } = await generateWith(t, 'gpt-image-2.5-flare', {});
-  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-flare' },
-    { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } });
+  const { generate, settings, calls, exec } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  await settings.execute({}, exec);
+  await generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-flare' }, exec);
+  assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-image-2.5-flare');
+});
+
+test('outside auto mode omitting the model uses the selected model', async (t) => {
+  const { generate, settings, calls, exec } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  await settings.execute({}, exec);
+  await generate.execute({ prompt: 'a cat' }, exec);
+  assert.equal(calls.length, 1);
   assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-image-2.5-flare');
 });
 
 test('outside auto mode a different model is refused with both ids named', async (t) => {
-  const { generate } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  const { generate, settings, exec } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  await settings.execute({}, exec);
   await assert.rejects(
-    generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-sunburst' }, { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } }),
+    generate.execute({ prompt: 'a cat', model: 'gpt-image-2.5-sunburst' }, exec),
     (error) => {
       assert.match(error.message, /gpt-image-2\.5-flare/);
       assert.match(error.message, /gpt-image-2\.5-sunburst/);
@@ -127,8 +141,8 @@ test('outside auto mode a different model is refused with both ids named', async
 });
 
 test('a provider argument is validated against the selected provider, not obeyed', async (t) => {
-  const { generate, calls } = await generateWith(t, 'gpt-image-2.5-flare', {});
-  const exec = { signal: new AbortController().signal, agent: { session: { header: { cwd: os.tmpdir() } } } };
+  const { generate, settings, calls, exec } = await generateWith(t, 'gpt-image-2.5-flare', {});
+  await settings.execute({}, exec);
 
   // 同名模型在另一个提供商里也存在：换了提供商就必须拒绝，不能拿名字对上就当同一个。
   await assert.rejects(
