@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveAdapter, applyWorkflowTemplate, COMFY_WORKFLOW_PLACEHOLDERS } from '../lib/adapters.js';
@@ -205,4 +205,48 @@ test('comfyui falls back to the builtin workflow when the model has no options',
     fitted: { width: 512, height: 512, size: '512x512' }
   }, new AbortController().signal);
   assert.equal(submitted.prompt['1'].class_type, 'CheckpointLoaderSimple');
+});
+
+/* ------------------------------------------------ analyzeComfyWorkflow */
+
+import { analyzeComfyWorkflow } from '../lib/adapters.js';
+import { readFileSync } from 'node:fs';
+
+const sampleObjectInfo = () => JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
+const sdUiJson = () => JSON.stringify(JSON.parse(readFileSync('test/fixtures/sd-t2i.ui.json', 'utf8')));
+
+function stubComfy(t, handler) {
+  const original = globalThis.fetch;
+  globalThis.fetch = handler;
+  t.after(() => { globalThis.fetch = original; });
+}
+
+test('analyzeComfyWorkflow converts a UI workflow and returns a mapping', async (t) => {
+  stubComfy(t, async (url) => (String(url).includes('/object_info')
+    ? jsonResponse(sampleObjectInfo())
+    : jsonResponse({}, 404)));
+  const result = await analyzeComfyWorkflow({ base: 'http://127.0.0.1:8188', provider: {}, workflow: sdUiJson() });
+  assert.equal(result.format, 'ui');
+  assert.deepEqual(result.mapping.prompt, { node: '6', input: 'text' });
+  assert.equal(result.mapping.width.node, '5');
+  assert.equal(result.mapping.seed.node, '3');
+});
+
+test('analyzeComfyWorkflow refuses a UI workflow whose node classes are missing', async (t) => {
+  stubComfy(t, async (url) => (String(url).includes('/object_info')
+    ? jsonResponse(sampleObjectInfo())
+    : jsonResponse({}, 404)));
+  const ui = JSON.stringify({ nodes: [{ id: 1, type: 'MysteryNode', widgets_values: [] }], links: [] });
+  await assert.rejects(
+    () => analyzeComfyWorkflow({ base: 'http://127.0.0.1:8189', provider: {}, workflow: ui }),
+    /没有安装/
+  );
+});
+
+test('analyzeComfyWorkflow reports an unreachable object_info', async (t) => {
+  stubComfy(t, async () => jsonResponse({}, 503));
+  await assert.rejects(
+    () => analyzeComfyWorkflow({ base: 'http://127.0.0.1:9999', provider: {}, workflow: sdUiJson() }),
+    /object_info|节点签名/
+  );
 });

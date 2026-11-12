@@ -190,3 +190,28 @@ test('injectByMapping leaves untouched values alone when a field is not supplied
   const { graph } = injectByMapping(moss(), fullMapping(), { prompt: 'x' });
   assert.equal(graph['18:7'].inputs.seed, moss()['18:7'].inputs.seed);
 });
+
+/* ------------------------------------------------- FLUX.2 / SamplerCustomAdvanced */
+
+const flux = () => JSON.parse(readFileSync('test/fixtures/flux-t2i.api.json', 'utf8'));
+
+test('analyzeWorkflow reads prompt, seed and model through a custom sampler chain', () => {
+  const { mapping, samplerId } = analyzeWorkflow(flux(), objectInfo());
+  assert.equal(samplerId, '14', 'SamplerCustomAdvanced is the sampler');
+  assert.deepEqual(mapping.prompt, { node: '8', input: 'text' });
+  assert.deepEqual(mapping.seed, { node: '7', input: 'noise_seed' });
+  assert.deepEqual(mapping.model, { node: '5', input: 'unet_name' });
+  assert.deepEqual(mapping.width, { node: '15', input: 'width' });
+  assert.deepEqual(mapping.height, { node: '15', input: 'height' });
+});
+
+test('analyzeWorkflow leaves negative empty instead of copying the positive prompt', () => {
+  const { mapping } = analyzeWorkflow(flux(), objectInfo());
+  assert.equal(mapping.negative_prompt, null);
+});
+
+test('uiToApi lists the classes it could not convert', () => {
+  const ui = { nodes: [{ id: 1, type: 'MysteryNode', widgets_values: [1] }], links: [] };
+  const { missing } = uiToApi(ui, objectInfo());
+  assert.deepEqual(missing, ['MysteryNode']);
+});

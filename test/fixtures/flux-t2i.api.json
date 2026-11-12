@@ -1,0 +1,21 @@
+{
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "flux2-vae.safetensors" } },
+  "4": { "class_type": "CLIPLoader", "inputs": { "clip_name": "qwen_3_4b.safetensors", "type": "flux2" } },
+  "5": { "class_type": "UNETLoader", "inputs": { "unet_name": "flux-2-klein-4b.safetensors", "weight_dtype": "default" } },
+  "7": { "class_type": "RandomNoise", "inputs": { "noise_seed": 123 } },
+  "8": { "class_type": "CLIPTextEncode", "inputs": { "text": "a red fox in the snow", "clip": ["4", 0] } },
+  "11": { "class_type": "CLIPTextEncode", "inputs": { "text": "", "clip": ["4", 0] } },
+  "10": { "class_type": "CFGGuider", "inputs": { "model": ["5", 0], "positive": ["8", 0], "negative": ["11", 0], "cfg": 1 } },
+  "12": { "class_type": "KSamplerSelect", "inputs": { "sampler_name": "euler" } },
+  "13": { "class_type": "BasicScheduler", "inputs": { "model": ["5", 0], "scheduler": "simple", "steps": 4, "denoise": 1 } },
+  "14": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["7", 0], "guider": ["10", 0], "sampler": ["12", 0],
+      "sigmas": ["13", 0], "latent_image": ["15", 0]
+    }
+  },
+  "15": { "class_type": "EmptyLatentImage", "inputs": { "width": 1024, "height": 1024, "batch_size": 1 } },
+  "16": { "class_type": "VAEDecode", "inputs": { "samples": ["14", 0], "vae": ["3", 0] } },
+  "17": { "class_type": "SaveImage", "inputs": { "filename_prefix": "flux", "images": ["16", 0] } }
+}
