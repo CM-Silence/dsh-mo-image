@@ -319,3 +319,22 @@ test('editing the workflow and saving sends modelOptions for that model', async 
   assert.ok(provider.modelOptions, 'modelOptions must be persisted');
   assert.equal(provider.modelOptions['flux.safetensors'].workflow, '{"1":{"class_type":"KSampler"}}');
 });
+
+test('the workflow panel can send the pasted graph to the analyze route', async () => {
+  const { harness, tree } = await openEditor();
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
+  textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  const buttons = findAll(opened, (node) => node.type === 'button').map((node) => textOf(node).join('').trim());
+  const parse = findButton(opened, (node) => /parse workflow/i.test(textOf(node).join('')));
+  assert.ok(parse, 'expected a parse-workflow button, found: ' + JSON.stringify(buttons));
+  await parse.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/comfy/analyze'));
+  assert.equal(posted.length, 1, 'expected one analyze POST');
+  const body = JSON.parse(posted[0].body);
+  assert.equal(body.workflow, '{"1":{"class_type":"KSampler"}}');
+});
