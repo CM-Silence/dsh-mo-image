@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
 /** Stateful React stand-in, so clicking the chevron re-renders the settings section. */
-function createHarness({ config, primitives = null } = {}) {
+function createHarness({ config, primitives = null, analyze = null } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -53,6 +53,9 @@ function createHarness({ config, primitives = null } = {}) {
     AbortSignal: globalThis.AbortSignal, Response: globalThis.Response,
     fetch: async (url, init) => {
       fetchCalls.push({ url: String(url), method: (init && init.method) || 'GET', body: init && init.body });
+      if (analyze && String(url).includes('/comfy/analyze')) {
+        return new Response(JSON.stringify(analyze), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       return new Response(JSON.stringify({
         ok: true, config, adapters: [],
         providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
@@ -187,8 +190,8 @@ const PRIMITIVES = {
   IconDragHandleOutlineRegular: 'IconDragHandle'
 };
 
-async function openEditor(config = CONFIG) {
-  const harness = createHarness({ config, primitives: PRIMITIVES });
+async function openEditor(config = CONFIG, options = {}) {
+  const harness = createHarness(Object.assign({ config, primitives: PRIMITIVES }, options));
   await new Promise((resolve) => setImmediate(resolve));
   let tree = harness.renderRoot();
   const edit = findButton(tree, (node) => textOf(node).join('').includes('Edit'));
@@ -337,4 +340,38 @@ test('the workflow panel can send the pasted graph to the analyze route', async 
   assert.equal(posted.length, 1, 'expected one analyze POST');
   const body = JSON.parse(posted[0].body);
   assert.equal(body.workflow, '{"1":{"class_type":"KSampler"}}');
+});
+
+test('parsing keeps the mapping when the same analyze response also carries params', async () => {
+  const analysis = {
+    ok: true,
+    format: 'api',
+    mapping: { prompt: { node: '18:17', input: 'value' }, image: null },
+    candidates: { prompt: [{ node: '18:17', input: 'value', classType: 'PrimitiveStringMultiline' }] },
+    params: [
+      { name: 'prompt', node: '18:17', input: 'value', type: 'STRING', role: true },
+      { name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25 }
+    ],
+    warnings: []
+  };
+  const { harness, tree } = await openEditor(CONFIG, { analyze: analysis });
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
+  textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  const parse = findButton(opened, (node) => /parse workflow/i.test(textOf(node).join('')));
+  await parse.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  opened = harness.renderRoot();
+  const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
+  await save.props.onClick();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
+  const body = JSON.parse(posted[posted.length - 1].body);
+  const provider = body.config.providers.find((item) => item.id === 'p1');
+  const entry = provider.modelOptions['flux.safetensors'];
+  assert.deepEqual(entry.mapping.prompt, { node: '18:17', input: 'value' },
+    'the mapping must survive the params write');
+  assert.ok(Array.isArray(entry.params) && entry.params.length === 2, 'params must be stored too');
 });
