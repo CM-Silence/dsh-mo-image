@@ -192,3 +192,4 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.modelMappingSeed","种子","Seed","シード","Semilla","Graine","Seed","Сид","Semente"
 "form.modelMappingModel","模型","Model","モデル","Modelo","Modèle","Modell","Модель","Modelo"
 "form.modelMappingImage","参考图","Reference image","参照画像","Imagen de referencia","Image de référence","Referenzbild","Референс","Imagem de referência"
+"form.modelMappingExpose","暴露给对话模型","Expose to the chat model","チャットモデルに公開","Exponer al modelo de chat","Exposer au modèle de chat","Für das Chat-Modell freigeben","Показывать чат-модели","Expor ao modelo de chat"
