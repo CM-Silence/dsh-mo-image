@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { collectParams, applyWorkflowParams } from '../lib/comfy-workflow.js';
+import { collectParams, applyWorkflowParams, analyzeWorkflow } from '../lib/comfy-workflow.js';
 
 const objectInfo = () => JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
 const moss = () => JSON.parse(readFileSync('test/fixtures/moss-t2i.api.json', 'utf8'));
@@ -65,4 +65,11 @@ test('applyWorkflowParams accepts an enum value', () => {
   const result = applyWorkflowParams(graph, params, { sampler_name: 'euler' });
   assert.equal(result.graph['18:7'].inputs.sampler_name, 'euler');
   assert.deepEqual(result.applied, ['sampler_name']);
+});
+
+test('analyzed params carry the candidate inputs the panel can rebind to', () => {
+  const analysis = analyzeWorkflow(moss(), objectInfo());
+  const steps = analysis.params.find((param) => param.name === 'steps');
+  assert.ok(Array.isArray(steps.candidates), 'a param needs candidates for its dropdown');
+  assert.ok(steps.candidates.some((item) => item.node === '18:7' && item.input === 'steps'));
 });
