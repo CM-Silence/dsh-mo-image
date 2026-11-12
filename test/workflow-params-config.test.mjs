@@ -20,8 +20,8 @@ test('settingsPayload lists parameter names and types without defaults', () => {
   assert.equal(payload.params.length, 2);
   assert.deepEqual(payload.params[0], { name: 'steps', type: 'INT' });
   assert.deepEqual(payload.params[1], { name: 'sampler_name', type: 'enum', options: ['euler', 'er_sde'] });
-  assert.match(payload.hint, /steps/);
-  assert.match(payload.hint, /sampler_name/);
+  assert.match(payload.hint, /params/);
+  assert.doesNotMatch(payload.hint, /steps/, 'the hint must not repeat the parameter list');
   assert.doesNotMatch(payload.hint, /默认 25/, 'defaults must not leak into the hint');
 });
 
