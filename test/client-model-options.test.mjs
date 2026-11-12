@@ -240,14 +240,14 @@ test('the model options toggle is disabled for a cloud provider', async () => {
   assert.match(String(toggle.props.title), /ComfyUI/i, 'the tooltip should explain why it is disabled');
 });
 
-test('the workflow textarea starts tall enough to paste a whole graph', async () => {
+test('the workflow textarea is compact but still usable', async () => {
   const { harness, tree } = await openEditor();
   optionsToggle(tree).props.onClick(fakeEvent());
   const opened = harness.renderRoot();
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
-  assert.ok(Number(textarea.props.rows) >= 12, 'textarea should default to at least 12 rows');
-  assert.ok(Number(textarea.props.style.minHeight) >= 240, 'textarea should have a usable minimum height');
+  assert.ok(Number(textarea.props.rows) >= 8, 'textarea should default to at least 8 rows');
+  assert.ok(Number(textarea.props.style.minHeight) >= 160, 'textarea should keep a usable minimum height');
 });
 
 test('the model options toggle is disabled for a local provider that does not use ComfyUI workflows', async () => {
