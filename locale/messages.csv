@@ -194,3 +194,6 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.modelMappingImage","参考图","Reference image","参照画像","Imagen de referencia","Image de référence","Referenzbild","Референс","Imagem de referência"
 "form.modelMappingExpose","暴露给对话模型","Expose to the chat model","チャットモデルに公開","Exponer al modelo de chat","Exposer au modèle de chat","Für das Chat-Modell freigeben","Показывать чат-модели","Expor ao modelo de chat"
 "form.modelMappingNoTarget","该工作流没有这个输入","This workflow has no such input","このワークフローに入力がありません","Este flujo no tiene esa entrada","Ce workflow n’a pas cette entrée","Dieser Workflow hat keine solche Eingabe","В этом workflow нет такого входа","Este fluxo não tem essa entrada"
+"form.modelMappingColName","参数名","Parameter","パラメータ","Parámetro","Paramètre","Parameter","Параметр","Parâmetro"
+"form.modelMappingColTarget","参数映射","Mapping","マッピング","Mapeo","Correspondance","Zuordnung","Привязка","Mapeamento"
+"form.modelMappingColExpose","是否暴露","Exposed","公開","Expuesto","Exposé","Freigeben","Доступен","Exposto"

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { settingsPayload } from '../lib/prompt-profiles.js';
-import { normalizeModelOptions } from '../lib/index.js';
+import { normalizeModelOptions, workflowParamsOf } from '../lib/index.js';
 
 const provider = { id: 'p-comfy', adapter: 'comfyui' };
 const PARAMS = [
@@ -59,4 +59,28 @@ test('settingsPayload hides parameters the user unchecked', () => {
   });
   assert.deepEqual(payload.params.map((param) => param.name), ['cfg']);
   assert.doesNotMatch(payload.hint, /steps/);
+});
+
+const MIXED = [
+  { name: 'prompt', role: true, node: '1', input: 'value', type: 'STRING', default: 'x' },
+  { name: 'steps', node: '2', input: 'steps', type: 'INT', default: 25 }
+];
+
+test('role params are exposed by default while tunables stay hidden', () => {
+  const provider = { modelOptions: { m1: { workflow: '{}', params: MIXED } } };
+  const out = workflowParamsOf(provider, 'm1', { id: 'comfyui' });
+  assert.deepEqual(out.map((param) => param.name), ['prompt']);
+});
+
+test('an explicit expose flag overrides the default in both directions', () => {
+  const provider = {
+    modelOptions: { m1: { workflow: '{}', params: MIXED, expose: { prompt: false, steps: true } } }
+  };
+  const out = workflowParamsOf(provider, 'm1', { id: 'comfyui' });
+  assert.deepEqual(out.map((param) => param.name), ['steps']);
+});
+
+test('non-comfy adapters never get workflow params', () => {
+  const provider = { modelOptions: { m1: { workflow: '{}', params: MIXED } } };
+  assert.equal(workflowParamsOf(provider, 'm1', { id: 'a1111' }), undefined);
 });
