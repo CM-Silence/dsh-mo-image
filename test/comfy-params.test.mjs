@@ -23,14 +23,13 @@ test('collectParams returns only the tunable inputs present in the graph', () =>
   assert.deepEqual(names, ['steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'batch_size']);
 });
 
-test('collectParams carries the default value and type', () => {
+test('collectParams carries the type and, for enums, the allowed values', () => {
   const params = collectParams(moss(), mappingOf(), objectInfo());
   const steps = params.find((item) => item.name === 'steps');
   assert.equal(steps.node, '18:7');
-  assert.equal(steps.default, 25);
   assert.equal(steps.type, 'INT');
+  assert.equal(steps.default, undefined, 'the default value is not stored any more');
   const sampler = params.find((item) => item.name === 'sampler_name');
-  assert.equal(sampler.default, 'er_sde');
   assert.equal(sampler.type, 'enum');
   assert.ok(sampler.options.includes('euler'));
 });
