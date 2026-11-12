@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { settingsPayload } from '../lib/prompt-profiles.js';
 import { normalizeModelOptions, workflowParamsOf } from '../lib/index.js';
+import { collectRoleParams } from '../lib/comfy-workflow.js';
 
 const provider = { id: 'p-comfy', adapter: 'comfyui' };
 const PARAMS = [
@@ -10,15 +12,17 @@ const PARAMS = [
   { name: 'sampler_name', node: '18:7', input: 'sampler_name', type: 'enum', default: 'er_sde', options: ['euler', 'er_sde'] }
 ];
 
-test('settingsPayload lists workflow parameters and their defaults', () => {
+test('settingsPayload lists parameter names and types without defaults', () => {
   const payload = settingsPayload({
     provider, model: 'moss.safetensors', adapter: { id: 'comfyui' },
     workflowParams: PARAMS
   });
   assert.equal(payload.params.length, 2);
+  assert.deepEqual(payload.params[0], { name: 'steps', type: 'INT' });
+  assert.deepEqual(payload.params[1], { name: 'sampler_name', type: 'enum', options: ['euler', 'er_sde'] });
   assert.match(payload.hint, /steps/);
-  assert.match(payload.hint, /默认 25/);
   assert.match(payload.hint, /sampler_name/);
+  assert.doesNotMatch(payload.hint, /默认 25/, 'defaults must not leak into the hint');
 });
 
 test('settingsPayload omits params when the model has none', () => {
@@ -47,18 +51,6 @@ test('normalizeModelOptions drops a malformed parameter list instead of half-kee
     m1: { workflow: '{"1":{}}', params: [{ name: 'steps' }] }
   }, ['m1']);
   assert.equal(out.m1.params, undefined);
-});
-
-test('settingsPayload hides parameters the user unchecked', () => {
-  const payload = settingsPayload({
-    provider, model: 'moss.safetensors', adapter: { id: 'comfyui' },
-    workflowParams: [
-      { name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25, expose: false },
-      { name: 'cfg', node: '18:7', input: 'cfg', type: 'FLOAT', default: 2.5 }
-    ]
-  });
-  assert.deepEqual(payload.params.map((param) => param.name), ['cfg']);
-  assert.doesNotMatch(payload.hint, /steps/);
 });
 
 const MIXED = [
@@ -98,4 +90,16 @@ test('seed and model stay hidden by default even though they are role params', (
     }
   };
   assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined);
+});
+
+test('role params take their type from object_info and never report a link as a string', () => {
+  const objectInfo = JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
+  const graph = {
+    '18:6': { class_type: 'EmptyFlux2LatentImage', inputs: { width: ['19', 0], height: ['19', 1], batch_size: 1 } }
+  };
+  const mapping = { width: { node: '18:6', input: 'width' }, height: { node: '18:6', input: 'height' } };
+  const params = collectRoleParams(graph, mapping, objectInfo);
+  const width = params.find((item) => item.name === 'width');
+  assert.equal(width.type, 'INT');
+  assert.equal(width.default, undefined, 'a link is not a usable default');
 });
