@@ -21,7 +21,7 @@ test('normalizeModelOptions drops empty or non-string workflows', () => {
 });
 
 test('normalizeModelOptions caps very large payloads', () => {
-  const huge = 'x'.repeat(300000);
+  const huge = 'x'.repeat(2_500_000);
   const out = normalizeModelOptions({ a: { workflow: huge } }, ['a']);
   assert.deepEqual(out, {}, 'oversized workflow should be rejected');
 });
@@ -68,4 +68,23 @@ test('normalizeConfig drops modelOptions for adapters that cannot run custom wor
   });
   assert.equal(config.providers[0].modelOptions, undefined,
     'only the ComfyUI adapter understands custom workflows');
+});
+
+test('normalizeModelOptions keeps a valid mapping next to the workflow', () => {
+  const out = normalizeModelOptions({
+    'm1': { workflow: '{"1":{}}', mapping: { prompt: { node: '1', input: 'text' }, width: null } }
+  }, ['m1']);
+  assert.deepEqual(out.m1.mapping.prompt, { node: '1', input: 'text' });
+  assert.equal(out.m1.mapping.width, null);
+});
+
+test('normalizeModelOptions drops a mapping that is not shaped node/input', () => {
+  const out = normalizeModelOptions({ 'm1': { workflow: '{"1":{}}', mapping: { prompt: 'nope' } } }, ['m1']);
+  assert.equal(out.m1.mapping, undefined);
+});
+
+test('normalizeModelOptions accepts a workflow up to 2 MB', () => {
+  const big = '{"1":"' + 'x'.repeat(1_500_000) + '"}';
+  const out = normalizeModelOptions({ 'm1': { workflow: big } }, ['m1']);
+  assert.ok(out.m1, 'a 1.5 MB workflow must survive');
 });
