@@ -27,17 +27,19 @@ test('settingsPayload omits params when the model has none', () => {
   assert.doesNotMatch(payload.hint, /params/);
 });
 
-test('normalizeModelOptions keeps the analyzed parameters and the exposure flag', () => {
+test('normalizeModelOptions keeps per-parameter exposure flags', () => {
   const out = normalizeModelOptions({
-    m1: { workflow: '{"1":{}}', params: PARAMS, exposeParams: false }
+    m1: {
+      workflow: '{"1":{}}',
+      params: [
+        { name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25, expose: false },
+        { name: 'cfg', node: '18:7', input: 'cfg', type: 'FLOAT', default: 2.5 }
+      ]
+    }
   }, ['m1']);
   assert.equal(out.m1.params.length, 2);
-  assert.equal(out.m1.exposeParams, false);
-});
-
-test('normalizeModelOptions treats a missing exposure flag as exposed', () => {
-  const out = normalizeModelOptions({ m1: { workflow: '{"1":{}}', params: PARAMS } }, ['m1']);
-  assert.equal(out.m1.exposeParams, undefined, 'default exposure is the absence of the flag');
+  assert.equal(out.m1.params[0].expose, false, 'a hidden parameter stays hidden');
+  assert.equal(out.m1.params[1].expose, undefined, 'the default is exposed');
 });
 
 test('normalizeModelOptions drops a malformed parameter list instead of half-keeping it', () => {
@@ -45,4 +47,16 @@ test('normalizeModelOptions drops a malformed parameter list instead of half-kee
     m1: { workflow: '{"1":{}}', params: [{ name: 'steps' }] }
   }, ['m1']);
   assert.equal(out.m1.params, undefined);
+});
+
+test('settingsPayload hides parameters the user unchecked', () => {
+  const payload = settingsPayload({
+    provider, model: 'moss.safetensors', adapter: { id: 'comfyui' },
+    workflowParams: [
+      { name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25, expose: false },
+      { name: 'cfg', node: '18:7', input: 'cfg', type: 'FLOAT', default: 2.5 }
+    ]
+  });
+  assert.deepEqual(payload.params.map((param) => param.name), ['cfg']);
+  assert.doesNotMatch(payload.hint, /steps/);
 });
