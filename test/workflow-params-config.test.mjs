@@ -84,3 +84,18 @@ test('non-comfy adapters never get workflow params', () => {
   const provider = { modelOptions: { m1: { workflow: '{}', params: MIXED } } };
   assert.equal(workflowParamsOf(provider, 'm1', { id: 'a1111' }), undefined);
 });
+
+test('seed and model stay hidden by default even though they are role params', () => {
+  const provider = {
+    modelOptions: {
+      m1: {
+        workflow: '{}',
+        params: [
+          { name: 'seed', role: true, node: '3', input: 'seed', type: 'INT', default: 1 },
+          { name: 'model', role: true, node: '1', input: 'unet_name', type: 'STRING', default: 'x' }
+        ]
+      }
+    }
+  };
+  assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined);
+});
