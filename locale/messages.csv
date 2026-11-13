@@ -144,6 +144,7 @@ quality.off,"关闭","Off","オフ","Desactivado","Désactivée","Aus","Выкл
 quality.low,"低","Low","低","Baja","Basse","Niedrig","Низкое","Baixa"
 quality.medium,"中","Medium","中","Media","Moyenne","Mittel","Среднее","Média"
 quality.high,"高","High","高","Alta","Haute","Hoch","Высокое","Alta"
+quality.xhigh,"极高","XHigh","極高","Muy alta","Très haute","Sehr hoch","Очень высокое","Muito alta"
 quality.max,"最高","Max","最大","Máxima","Maximale","Maximal","Максимум","Máxima"
 quality.auto,"自动","Auto","自動","Automática","Automatique","Automatisch","Авто","Automática"
 quality.standard,"标准","Standard","標準","Estándar","Standard","Standard","Стандартное","Padrão"

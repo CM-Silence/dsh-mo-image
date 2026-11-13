@@ -149,6 +149,26 @@ test('openai-chat reads message.images data urls', async (t) => {
   assert.deepEqual(body.modalities, ['image', 'text']);
 });
 
+test('openai-chat downloads image links returned by relays', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/chat/completions')) {
+      return jsonResponse({ choices: [{ message: { content: '![img](https://cdn.test/relay.png)' } }] });
+    }
+    if (target === 'https://cdn.test/relay.png') {
+      return new Response(Buffer.from(PNG_1PX, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } });
+    }
+    throw new Error('unexpected url ' + target);
+  };
+
+  const provider = { baseUrl: 'https://relay.example/v1', adapter: 'openai-chat', key: 'k' };
+  const adapter = resolveAdapter(provider, 'x');
+  const result = await adapter.execute('generate', provider, { model: 'x', prompt: 'draw', fitted }, signal());
+  assert.ok(result.bytes.length > 0);
+});
+
 test('openai-chat throws instead of returning text when the relay sends no image', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

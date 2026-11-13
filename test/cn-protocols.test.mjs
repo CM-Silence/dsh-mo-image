@@ -103,6 +103,18 @@ test('siliconflow no longer sends batch_size', () => {
   assert.equal(body.image_size, '1024x1024');
 });
 
+test('siliconflow edit omits image_size for Qwen-Image-Edit', () => {
+  const provider = { baseUrl: 'https://api.siliconflow.cn/v1', adapter: 'siliconflow', key: 'k' };
+  const adapter = resolveAdapter(provider, 'Qwen/Qwen-Image-Edit-2509');
+  const built = prepareEdit(adapter, provider, {
+    model: 'Qwen/Qwen-Image-Edit-2509', prompt: 'x', fitted,
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  }, new Set(), 'image');
+  const body = JSON.parse(built.body);
+  assert.equal(body.image_size, undefined);
+  assert.ok(String(body.image).startsWith('data:image/png;base64,'));
+});
+
 test('ideogram builds the endpoint from the model id', () => {
   const provider = { baseUrl: 'https://api.ideogram.ai', adapter: 'ideogram', key: 'k' };
   const adapter = resolveAdapter(provider, 'ideogram-4');

@@ -10,6 +10,11 @@ test('normalizeConfig keeps hostModel for the responses adapter', () => {
   assert.equal(out.providers[0].hostModel, 'gpt-5.2');
 });
 
+test('normalizeConfig keeps xhigh as a quality value', () => {
+  const out = normalizeConfig({ defaults: { quality: 'xhigh' } });
+  assert.equal(out.defaults.quality, 'xhigh');
+});
+
 test('normalizeConfig drops hostModel from providers that do not need it', () => {
   const out = normalizeConfig({
     providers: [{ id: 'p', baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', hostModel: 'gpt-5.2' }]

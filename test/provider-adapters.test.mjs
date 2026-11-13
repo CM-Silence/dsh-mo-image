@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, fitSize, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
+import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -68,6 +68,29 @@ test('gemini sizes images per model and skips thought parts', async (t) => {
     }, new AbortController().signal),
     /最多 3 张/
   );
+});
+
+test('host-specific adapters win over model-only matches', () => {
+  assert.equal(resolveAdapter({ baseUrl: 'https://res.openai.azure.com/openai/v1' }, 'gpt-image-2.5-flare').id, 'azure-openai');
+  assert.equal(resolveAdapter({ baseUrl: 'https://openrouter.ai/api/v1' }, 'openai/gpt-image-2.5-flare').id, 'openrouter-images');
+  assert.equal(resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare').id, 'gpt-image');
+});
+
+test('xhigh stays a first-class quality value', () => {
+  const gpt = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare');
+  assert.equal(qualityForAdapter(gpt, 'xhigh', 'gpt-image-2.5-flare'), 'xhigh');
+});
+
+test('recraft routes edits to imageToImage', () => {
+  const provider = { baseUrl: 'https://external.api.recraft.ai/v1', adapter: 'recraft', key: 'k' };
+  const adapter = resolveAdapter(provider, 'recraftv4_1');
+  const built = prepareEdit(adapter, provider, {
+    model: 'recraftv4_1', prompt: 'watercolor', fitted: { width: 1024, height: 1024, size: '1024x1024' },
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  }, new Set(), 'image');
+  assert.equal(built.path, '/images/imageToImage');
+  assert.ok(built.body.get('image'));
+  assert.equal(built.body.get('strength'), '0.5');
 });
 
 test('provider manifests include hot image providers and native capabilities', () => {

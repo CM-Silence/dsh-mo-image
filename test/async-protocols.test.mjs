@@ -265,6 +265,164 @@ test('replicate polls urls.get and uses the model schema to pick the image field
   assert.ok(String(body.input.image).startsWith('data:image/png;base64,'));
 });
 
+test('fal sends image_url for a single reference image', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let submitted = null;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target === 'https://queue.fal.run/fal-ai/flux-pro/kontext') {
+      submitted = JSON.parse(init.body);
+      return jsonResponse({ status_url: 'https://queue.test/s', response_url: 'https://queue.test/r' });
+    }
+    if (target === 'https://queue.test/s') return jsonResponse({ status: 'COMPLETED' });
+    if (target === 'https://queue.test/r') return jsonResponse({ images: [{ url: 'https://cdn.test/fal-edit.png' }] });
+    if (target === 'https://cdn.test/fal-edit.png') return pngResponse();
+    throw new Error('unexpected url ' + target);
+  };
+
+  const providerDef = { baseUrl: 'https://queue.fal.run', adapter: 'fal', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'fal-ai/flux-pro/kontext');
+  await callImageApi('edit', adapter, providerDef, {
+    model: 'fal-ai/flux-pro/kontext', prompt: 'watercolor', fitted,
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  }, new AbortController().signal);
+
+  assert.ok(String(submitted.image_url).startsWith('data:image/png;base64,'));
+  assert.equal(submitted.image_urls, undefined);
+});
+
+test('bfl kontext sends aspect_ratio instead of width and height', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let submitted = null;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target === 'https://api.bfl.ai/v1/flux-kontext-pro') {
+      submitted = JSON.parse(init.body);
+      return jsonResponse({ polling_url: 'https://api.bfl.ai/v1/get_result?id=k' });
+    }
+    if (target.includes('get_result')) return jsonResponse({ status: 'Ready', result: { sample: 'https://cdn.test/k.png' } });
+    if (target === 'https://cdn.test/k.png') return pngResponse();
+    throw new Error('unexpected url ' + target);
+  };
+
+  const providerDef = { baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'flux-kontext-pro');
+  await callImageApi('edit', adapter, providerDef, {
+    model: 'flux-kontext-pro', prompt: 'make it blue',
+    fitted: { width: 1344, height: 768, size: '1344x768' },
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  }, new AbortController().signal);
+
+  assert.equal(submitted.aspect_ratio, '16:9');
+  assert.equal(submitted.width, undefined);
+  assert.ok(String(submitted.input_image).startsWith('data:image/png;base64,'));
+});
+
+test('bfl ultra uses aspect_ratio instead of width/height', () => {
+  const providerDef = { baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'flux-pro-1.1-ultra');
+  const body = adapter.async.build({
+    model: 'flux-pro-1.1-ultra', prompt: 'x', fitted: { width: 1344, height: 768, size: '1344x768' }
+  }, providerDef);
+  assert.equal(body.aspect_ratio, '16:9');
+  assert.equal(body.width, undefined);
+});
+
+test('replicate refuses to guess an image field from the schema', async (t) => {
+  resetAsyncSchemaCache();
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target === 'https://api.replicate.com/v1/models/acme/weird-model') {
+      return jsonResponse({
+        latest_version: {
+          openapi_schema: {
+            components: {
+              schemas: {
+                Input: { properties: { prompt: { type: 'string' }, image_scale: { type: 'number' } } }
+              }
+            }
+          }
+        }
+      });
+    }
+    throw new Error('unexpected url ' + target);
+  };
+
+  const providerDef = { baseUrl: 'https://api.replicate.com/v1', adapter: 'replicate', key: 'r8' };
+  const adapter = resolveAdapter(providerDef, 'acme/weird-model');
+  const built = await adapter.async.build({
+    model: 'acme/weird-model', prompt: 'x', fitted,
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  }, providerDef, new AbortController().signal);
+
+  assert.equal(built.body.input.image_scale, undefined);
+  assert.match(String(built.note || ''), /未识别模型输入字段/);
+});
+
+test('replicate uses width and height when the schema exposes them', async (t) => {
+  resetAsyncSchemaCache();
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => jsonResponse({
+    latest_version: {
+      openapi_schema: {
+        components: {
+          schemas: {
+            Input: { properties: { prompt: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' } } }
+          }
+        }
+      }
+    }
+  });
+
+  const providerDef = { baseUrl: 'https://api.replicate.com/v1', adapter: 'replicate', key: 'r8' };
+  const adapter = resolveAdapter(providerDef, 'acme/wide-model');
+  const built = await adapter.async.build({
+    model: 'acme/wide-model', prompt: 'x', fitted: { width: 1024, height: 768, size: '1024x768' }
+  }, providerDef, new AbortController().signal);
+
+  assert.equal(built.body.input.width, 1024);
+  assert.equal(built.body.input.height, 768);
+});
+
+test('replicate retries the schema after a transient failure', async (t) => {
+  resetAsyncSchemaCache();
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    calls += 1;
+    if (calls === 1) return jsonResponse({ error: 'busy' }, 503);
+    return jsonResponse({
+      latest_version: {
+        openapi_schema: {
+          components: {
+            schemas: {
+              Input: { properties: { prompt: { type: 'string' }, image: { type: 'string', format: 'uri' } } }
+            }
+          }
+        }
+      }
+    });
+  };
+
+  const providerDef = { baseUrl: 'https://api.replicate.com/v1', adapter: 'replicate', key: 'r8' };
+  const adapter = resolveAdapter(providerDef, 'acme/flaky-model');
+  const input = {
+    model: 'acme/flaky-model', prompt: 'x', fitted,
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'a.png' }]
+  };
+  const first = await adapter.async.build(input, providerDef, new AbortController().signal);
+  assert.equal(first.body.input.image, undefined);
+  const second = await adapter.async.build(input, providerDef, new AbortController().signal);
+  assert.ok(String(second.body.input.image).startsWith('data:image/png;base64,'));
+  assert.equal(calls, 2);
+});
+
 test('replicate without a schema sends prompt only and reports the omission', async (t) => {
   resetAsyncSchemaCache();
   const original = globalThis.fetch;
