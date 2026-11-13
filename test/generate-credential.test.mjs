@@ -75,7 +75,7 @@ test('generation resolves the key from the credentials service without a config 
   assert.equal(existsSync(path.join(state, 'out', path.basename(result.path))), false);
   assert.ok(captured);
   const body = JSON.parse(captured.init.body);
-  assert.equal(body.quality, 'high');
+  assert.equal(body.quality, 'max');
   assert.equal(body.size, undefined);
   const headers = captured.init.headers;
   const auth = typeof headers.get === 'function' ? headers.get('authorization') : (headers.Authorization || headers.authorization);

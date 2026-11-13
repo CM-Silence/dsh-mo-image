@@ -91,7 +91,7 @@ test('config route migrates keys to the credentials store and never returns them
   const p1 = getBody.capabilities.find((item) => item.providerId === 'p1');
   const model = p1 && p1.models.find((item) => item.model === 'gpt-image-2.5-flare');
   assert.ok(model && model.quality);
-  assert.deepEqual(model.quality.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'auto']);
+  assert.deepEqual(model.quality.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'auto']);
   assert.equal(model.quality.default, 'high');
   assert.equal(secrets.get('MO_IMAGE_P1_API_KEY'), 'secret');
   assert.equal(JSON.parse(readFileSync(configFile, 'utf8')).providers[0].key, undefined);

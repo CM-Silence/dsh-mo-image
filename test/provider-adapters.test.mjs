@@ -1,13 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
+import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, fitSize, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 }
+
+test('gpt-image accepts arbitrary 16-multiple sizes and xhigh quality', () => {
+  const gpt = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare');
+  const fitted = fitSize(gpt, '2048x1152');
+  assert.equal(fitted.size, '2048x1152');
+  const options = qualityOptionsFor(gpt, 'gpt-image-2.5-flare');
+  assert.deepEqual(options.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'auto']);
+});
 
 test('provider manifests include hot image providers and native capabilities', () => {
   const presets = providerPresetManifest();
