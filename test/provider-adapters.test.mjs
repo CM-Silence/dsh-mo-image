@@ -17,6 +17,59 @@ test('gpt-image accepts arbitrary 16-multiple sizes and xhigh quality', () => {
   assert.deepEqual(options.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'auto']);
 });
 
+test('gemini model list keeps nano-banana names and drops imagen', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => jsonResponse({ models: [
+    { name: 'models/gemini-nano-banana-2.1', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.1-flash-image', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/imagen-4.0-generate', supportedGenerationMethods: ['predict'] },
+    { name: 'models/gemini-2.5-pro', supportedGenerationMethods: ['generateContent'] }
+  ] });
+
+  const provider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'k' };
+  const adapter = resolveAdapter(provider, 'gemini-3.1-flash-image');
+  assert.deepEqual(await adapter.listModels(provider, new AbortController().signal), [
+    'gemini-nano-banana-2.1', 'gemini-3.1-flash-image'
+  ]);
+});
+
+test('gemini sizes images per model and skips thought parts', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return jsonResponse({ candidates: [{ content: { parts: [
+      { thought: true, inlineData: { mimeType: 'image/png', data: PNG_1PX } },
+      { inlineData: { mimeType: 'image/png', data: PNG_1PX } }
+    ] } }] });
+  };
+
+  const provider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'k' };
+
+  await resolveAdapter(provider, 'gemini-3.1-flash-image').execute('generate', provider, {
+    model: 'gemini-3.1-flash-image', prompt: 'a cat', fitted: { width: 2048, height: 2048, size: '2048x2048' }
+  }, new AbortController().signal);
+  let body = JSON.parse(calls.at(-1).init.body);
+  assert.equal(body.generationConfig.imageConfig.imageSize, '2K');
+  assert.equal(body.generationConfig.imageConfig.aspectRatio, '1:1');
+
+  await resolveAdapter(provider, 'gemini-2.5-flash-image').execute('generate', provider, {
+    model: 'gemini-2.5-flash-image', prompt: 'a cat', fitted: { width: 2048, height: 2048, size: '2048x2048' }
+  }, new AbortController().signal);
+  body = JSON.parse(calls.at(-1).init.body);
+  assert.equal(body.generationConfig.imageConfig.imageSize, undefined);
+
+  await assert.rejects(
+    () => resolveAdapter(provider, 'gemini-2.5-flash-image').execute('edit', provider, {
+      model: 'gemini-2.5-flash-image', prompt: 'x', fitted: { width: 1024, height: 1024, size: '1024x1024' },
+      images: [1, 2, 3, 4].map((index) => ({ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: index + '.png' }))
+    }, new AbortController().signal),
+    /最多 3 张/
+  );
+});
+
 test('provider manifests include hot image providers and native capabilities', () => {
   const presets = providerPresetManifest();
   const adapters = adapterManifest();
