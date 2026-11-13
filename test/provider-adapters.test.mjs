@@ -93,6 +93,16 @@ test('recraft routes edits to imageToImage', () => {
   assert.equal(built.body.get('strength'), '0.5');
 });
 
+test('volcengine agent plan preset uses the ark adapter', () => {
+  const preset = providerPresetManifest().find((item) => item.id === 'volcengine-plan');
+  assert.ok(preset, 'expected the volcengine-plan preset');
+  assert.equal(preset.name, '火山方舟 Agent Plan');
+  assert.equal(preset.baseUrl, 'https://ark.cn-beijing.volces.com/api/plan/v3');
+  assert.equal(preset.adapter, '');
+  const adapter = resolveAdapter({ baseUrl: preset.baseUrl, adapter: preset.adapter }, 'doubao-seedream-4-0-250828');
+  assert.equal(adapter.id, 'volcengine-ark');
+});
+
 test('provider manifests include hot image providers and native capabilities', () => {
   const presets = providerPresetManifest();
   const adapters = adapterManifest();

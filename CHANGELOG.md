@@ -9,6 +9,7 @@
 5. `gpt-image` 支持任意 16 倍数尺寸与 `xhigh` / `max` 质量档。
 6. 拆分 `lib/adapter-kit.js`，新协议放在 `lib/adapters/` 下；异步描述符支持自定义提交、轮询与结果解析。
 7. 已知限制：新协议只做了 mock 单测，未做真实连通验证；gpt-image 的 `background` / `moderation` 等新参数暂无 UI 入口。
+8. 新增「火山方舟 Agent Plan」提供商预设（`https://ark.cn-beijing.volces.com/api/plan/v3`），与火山方舟共用 `volcengine-ark` 适配器。
 
 ## v0.5.1
 

@@ -248,6 +248,7 @@ $DSH_HOME/.credentials.yaml
 | **Fireworks AI** | `openai-images` | `accounts/fireworks/models/flux-1-schnell` | OpenAI Images 兼容网关 |
 | **Novita AI** | `openai-images` | `flux-1-schnell` | OpenAI Images 兼容网关 |
 | 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；尺寸支持 `2K/3K/4K` 预设与任意宽高 |
+| 火山方舟 Agent Plan | `volcengine-ark` | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
 | 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wanx2.1-t2i-turbo` | 异步入队任务 |
 | 硅基流动 | `siliconflow` | 手动/获取 | 生成 + 单图编辑 |
