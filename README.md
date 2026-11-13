@@ -241,7 +241,7 @@ $DSH_HOME/.credentials.yaml
 | **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **xAI Grok Imagine** | `xai-imagine` | `grok-imagine-image` | 生成；原生编辑暂未支持 |
-| **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成；原生编辑暂未支持 |
+| **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
 | **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4` | 生成；模型写在路径里 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
 | **Together AI** | `together` | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
@@ -378,7 +378,7 @@ $DSH_HOME/.credentials.yaml
 两种交互形态都覆盖：
 
 - **同步**：一次请求直接返回图片
-- **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；三种主流队列（百炼万相、BFL、fal、Replicate）的提交与状态词都收在适配器的 `async` 描述符里
+- **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate 四家的提交与状态词都收在适配器的 `async` 描述符里
 
 选择规则：设置页的「API 协议」下拉可直接指定适配器；选「自动识别」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → `openai-images` 兜底」匹配。
 

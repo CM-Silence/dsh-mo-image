@@ -3,7 +3,7 @@
 ## v0.6.0
 
 1. 新增 7 个生图协议：OpenAI Responses（`image_generation` 工具）、OpenRouter 专用 Images、Azure OpenAI、chat/completions 中转，以及 BFL、fal.ai、Replicate 三家异步队列（含图生图）。
-2. 新增百炼 Qwen-Image 原生多模态接口与智谱 BigModel 适配器；修正火山方舟尺寸（支持 `2K/3K/4K` 预设）、硅基流动已废弃参数、Ideogram 模型路径。
+2. 新增百炼 Qwen-Image 原生多模态接口与智谱 BigModel 适配器；接上 Recraft `imageToImage` 编辑；修正火山方舟尺寸（支持 `2K/3K/4K` 预设）、硅基流动已废弃参数与 Qwen-Image-Edit 的尺寸过滤、Ideogram 模型路径。
 3. 修正 Gemini 适配器：更新 2026 模型清单（`gemini-nano-banana-2.1`、`gemini-3.1-flash-image` 等）、按模型分级 `imageSize`、14 档宽高比、参考图上限（2.5 只有 3 张）、跳过 thinking 中间图。
 4. 设置页「API 协议」从禁用占位改成真实下拉；选 `openai-responses` 时出现「调度模型」字段。
 5. `gpt-image` 支持任意 16 倍数尺寸与 `xhigh` / `max` 质量档。
