@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -25,6 +25,7 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   const sections = [];
   const skills = [];
   const routes = [];
+  const provided = new Map();
   const fake = {
     effect(fn) {
       const disposer = fn();
@@ -38,11 +39,23 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
     },
     systemPrompt: { section(def) { sections.push(def); return () => {}; } },
     skills: { register(def) { skills.push(def); return () => {}; } },
-    get() { return undefined; }
+    provide(name, value) { provided.set(name, value); return () => {}; },
+    get(name) { return provided.get(name); }
   };
 
   const mod = await import('../lib/index.js?apply-test');
   mod.apply(fake, { update: { skipCheck: true } });
+
+  const service = provided.get('moImageStatus');
+  assert.ok(service, 'other plugins read the status through ctx.get("moImageStatus")');
+  assert.equal(service.contract, 1);
+  const status = await service.describe();
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(status.version, pkg.version);
+  assert.equal(status.provider.id, 'p1');
+  assert.equal(status.configured, true);
+  assert.equal(status.key.source, 'config');
+  assert.equal(status.capabilities.maxRefs, 16);
 
   assert.equal(tools.length, 3);
   const generate = tools.find((tool) => tool.name === 'mo_image_generate');

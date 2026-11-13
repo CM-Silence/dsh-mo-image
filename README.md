@@ -206,6 +206,32 @@ $DSH_HOME/mo-image/out/
 
 建议把 `generated-images/` 加进项目的 `.gitignore`，避免把生成图误提交。
 
+## 给其它插件读状态（moImageStatus）
+
+0.7.0 起，插件在宿主注册只读服务 `moImageStatus`。同一个宿主里的插件可以：
+
+~~~js
+const service = ctx.get('moImageStatus')
+if (service?.contract >= 1) {
+  const status = await service.describe()
+}
+~~~
+
+`describe()` 返回一份快照，不写配置，也不依赖浏览器状态：
+
+| 字段 | 含义 |
+|---|---|
+| `contract` | 契约版本，当前 `1` |
+| `version` | 插件版本号 |
+| `ready` / `configured` / `missing` | 是否可用，以及缺哪一项（`provider` / `baseUrl` / `key` / `model`） |
+| `provider` | `{ id, name, baseUrl, optionalKey, protocol, adapter }` 或 `null` |
+| `model` / `auto` / `models` | 当前模型；Auto 时 `model='auto'` 并带候选列表 |
+| `key` | `{ ok, source, ref }`，`source` 为 `optional` / `credentials` / `env` / `config` |
+| `capabilities` | `{ generate, edit, maxRefs, size }`；`edit` 按适配器 / ComfyUI 工作流判断，`maxRefs` 为 16 |
+| `defaults` / `promptOptimization` | 选择器里的尺寸、质量与提示词优化开关 |
+
+调用方必须自己处理服务不存在的情况：0.6 及更早版本没有这个服务，按旧的文件格式回退即可（工作台就是这么做的，并会标注 `source: 'legacy'`）。
+
 配置保存在：
 
 ~~~text

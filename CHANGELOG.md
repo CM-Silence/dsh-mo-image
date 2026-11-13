@@ -1,5 +1,10 @@
 # 更新日志
 
+## v0.7.0
+
+1. 新增只读状态服务 `moImageStatus`：其它插件（工作台）可以读取当前提供商/模型、Auto 候选、Key 来源、编辑能力（按适配器/工作流判断）与参考图上限，不必再解析 `config.json`、凭据库或猜「编辑模型」。
+2. 服务只读，不写配置；没有该服务的旧调用方仍按原来的文件格式工作。
+
 ## v0.6.0
 
 1. 新增 7 个生图协议：OpenAI Responses、OpenRouter 专用 Images、Azure OpenAI、chat/completions 中转，以及 BFL、fal.ai、Replicate 三家异步队列。
