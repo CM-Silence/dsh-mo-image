@@ -2,7 +2,7 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 用的生图插件。
 
-配置一个 OpenAI Images 兼容的模型后，可以直接在对话里让模型生成图片，或用参考图做局部修改、融合和版本迭代。
+配置一个生图模型后，可以直接在对话里让模型生成图片，或用参考图做局部修改、融合和版本迭代。
 
 ## 功能
 
@@ -232,27 +232,35 @@ $DSH_HOME/.credentials.yaml
 
 | 提供商 | 适配器 | 默认模型 | 说明 |
 |---|---|---|---|
-| **Google Gemini / Nano Banana** | `google-gemini` | `gemini-2.5-flash-image`、`gemini-3-pro-image-preview` | 原生 `generateContent`；生成 + 参考图编辑，最多 14 张参考图 |
+| **Google Gemini / Nano Banana** | `google-gemini` | `gemini-nano-banana-2.1`、`gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-2.5-flash-image` | 原生 `generateContent`；生成 + 参考图编辑，新模型最多 14 张、2.5 只有 3 张 |
 | OpenAI | `dall-e-3` / `gpt-image` / `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
+| **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在高级设置里填「调度模型」 |
+| **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
+| **Azure OpenAI** | `azure-openai` | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
+| **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
+| **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
+| **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **xAI Grok Imagine** | `xai-imagine` | `grok-imagine-image` | 生成；原生编辑暂未支持 |
 | **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成；原生编辑暂未支持 |
-| **Ideogram** | `ideogram` | `ideogram-3` | 生成；原生编辑暂未支持 |
+| **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4` | 生成；模型写在路径里 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
 | **Together AI** | `together` | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
 | **Fireworks AI** | `openai-images` | `accounts/fireworks/models/flux-1-schnell` | OpenAI Images 兼容网关 |
 | **Novita AI** | `openai-images` | `flux-1-schnell` | OpenAI Images 兼容网关 |
-| 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；模型列表可用 |
-| 阿里云百炼 | `dashscope-wanx` | 手动/获取 | 通义万相异步任务 |
+| 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；尺寸支持 `2K/3K/4K` 预设与任意宽高 |
+| 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
+| 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wanx2.1-t2i-turbo` | 异步入队任务 |
 | 硅基流动 | `siliconflow` | 手动/获取 | 生成 + 单图编辑 |
-| 智谱 BigModel | `openai-images` | 手动/获取 | 生成 |
+| 智谱 BigModel | `zhipu` | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 
 说明：
 
-- Google Gemini 使用 `x-goog-api-key` 头；Nano Banana Pro 在模型名包含 `pro-image` 时会按尺寸发送 `1K/2K/4K`。
+- Google Gemini 使用 `x-goog-api-key` 头；`imageSize` 按模型分级（3.1-flash 支持 `512/1K/2K/4K`，2.5 不发），`aspectRatio` 新模型 14 档。
 - xAI 使用 `aspect_ratio` + `resolution`，不是 OpenAI 的 `size`。
 - Recraft / Ideogram / Together / Stability 的默认模型 ID 只是建议值，服务端模型更新后可以在「模型目录」里改，或用「获取可用模型」重新拉取。
 - 这些云端提供商的密钥仍只写入 DSH 凭据库，不写进 `config.json`。
 - 内置列表来自宿主 manifest，客户端不单独维护一份；新增提供商会同时影响设置页和模型列表能力判断。
+- Replicate 的输入字段由模型 schema 决定；schema 拉不到时只发 prompt 并在结果里注明，不会猜字段名。
 
 文档：
 
@@ -360,17 +368,27 @@ $DSH_HOME/.credentials.yaml
 | `quality` | 该模型是否有质量档位、档位名称/数量，以及如何映射成平台参数（如 DALL·E 的 `standard/hd`、Ideogram 的 `rendering_speed`）；没有就不下发，选择器也不显示质量行 |
 | `transport` | `json` 或 `multipart` |
 | `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
-| `async` + `poll` | 异步入队型：提交拿 `task_id`，轮询到成功再下载 |
+| `authHeader` | `bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal） |
+| `endpoints` | 可以是字符串，也可以是按模型拼路径的函数（Ideogram、fal、Replicate） |
+| `async` + `poll` | 异步入队型；新描述符自带 `build / submitPath / pollUrl / pollHeaders / statusOf / resolve` |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置适配器：`openai-images`（通用兜底）、`gpt-image`、`dall-e-3`、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`together`、`siliconflow`、`volcengine-ark`、`dashscope-wanx`、`a1111`、`comfyui`、`swarmui`。
+内置适配器：`openai-images`（通用兜底）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`gpt-image`、`dall-e-3`、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`together`、`siliconflow`、`volcengine-ark`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`a1111`、`comfyui`、`swarmui`、`localai`。
 
 两种交互形态都覆盖：
 
 - **同步**：一次请求直接返回图片
-- **异步入队**：提交返回 `task_id`，按 `poll.intervalMs` 轮询 `GET /tasks/{taskId}`，`SUCCEEDED` 后下载结果；`FAILED` / 超时会带回上游原因
+- **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；三种主流队列（百炼万相、BFL、fal、Replicate）的提交与状态词都收在适配器的 `async` 描述符里
 
-选择规则：`provider.adapter` 显式指定 → 按 API 域名匹配 → 按模型 ID 匹配 → 落到 `openai-images`。设置页不需要新增选项。
+选择规则：设置页的「API 协议」下拉可直接指定适配器；选「自动识别」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → `openai-images` 兜底」匹配。
+
+## 已知限制
+
+- **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`、`bfl`、`fal`、`replicate` 的协议形状来自 2026-11 官方文档，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
+- **gpt-image 的新参数没做 UI**：`background` / `moderation` / `output_compression` 等 2026 年新增字段暂不发送，等设置页有入口再接。
+- **C 级协议未实现**：Krea、Luma Photon、Runway、腾讯混元、百度文心一格、Adobe Firefly、Gemini Interactions API 留在后续版本。
+- **Google Imagen 已停用**：Gemini API 下线、Vertex 侧 2026-06-30 停服，插件不再支持；请改用 `gemini-3.1-flash-image` 等 Nano Banana 模型。
+- **Vertex AI 未支持**：需要 OAuth access token（1 小时过期）且没有模型列表端点。
 
 **尺寸自动适配**：你写 `256x256` 而模型最小只能出 `1024x1024` 时，插件会按最近的合法尺寸生成，再把结果缩回 `256x256`（内置零依赖 PNG 缩放）。反过来，请求尺寸大于模型上限时按上限生成并附注说明，不会把小图放大冒充目标尺寸。缩放和上限调整都会写进 `$DSH_HOME/mo-image/host.log`。
 

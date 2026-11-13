@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.6.0
+
+1. 新增 7 个生图协议：OpenAI Responses（`image_generation` 工具）、OpenRouter 专用 Images、Azure OpenAI、chat/completions 中转，以及 BFL、fal.ai、Replicate 三家异步队列（含图生图）。
+2. 新增百炼 Qwen-Image 原生多模态接口与智谱 BigModel 适配器；修正火山方舟尺寸（支持 `2K/3K/4K` 预设）、硅基流动已废弃参数、Ideogram 模型路径。
+3. 修正 Gemini 适配器：更新 2026 模型清单（`gemini-nano-banana-2.1`、`gemini-3.1-flash-image` 等）、按模型分级 `imageSize`、14 档宽高比、参考图上限（2.5 只有 3 张）、跳过 thinking 中间图。
+4. 设置页「API 协议」从禁用占位改成真实下拉；选 `openai-responses` 时出现「调度模型」字段。
+5. `gpt-image` 支持任意 16 倍数尺寸与 `xhigh` / `max` 质量档。
+6. 拆分 `lib/adapter-kit.js`，新协议放在 `lib/adapters/` 下；异步描述符支持自定义提交、轮询与结果解析。
+7. 已知限制：新协议只做了 mock 单测，未做真实连通验证；gpt-image 的 `background` / `moderation` 等新参数暂无 UI 入口。
+
 ## v0.5.1
 
 1. 修复了自动更新路径异常的问题，现在统一使用npm进行更新。
