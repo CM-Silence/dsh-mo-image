@@ -466,3 +466,25 @@ test('with DSH primitives present, the fetch dialog is the DSH Modal with outlin
   assert.equal(candidateRows(tree).length, 4);
   assert.equal(candidateRows(tree).filter((candidate) => candidate.checked).length, 2);
 });
+
+test('the protocol select lists every adapter and reveals the responses host model', async () => {
+  const adapters = [
+    { id: 'openai-responses', label: 'OpenAI Responses', local: false, supportsModels: false },
+    { id: 'bfl', label: 'Black Forest Labs (FLUX)', local: false, supportsModels: true }
+  ];
+  const { harness, tree: edited } = await openProviderEditor(baseConfig(), { adapters });
+
+  const protocolSelect = findAll(edited, (node) => node.type === 'select'
+    && findAll(node, (child) => child.type === 'option').some((option) => option.props.value === 'bfl'))[0];
+  assert.ok(protocolSelect, 'expected a protocol select that lists the adapters');
+  assert.equal(protocolSelect.props.disabled, undefined);
+  assert.deepEqual(
+    findAll(protocolSelect, (child) => child.type === 'option').map((option) => option.props.value),
+    ['', 'openai-responses', 'bfl']
+  );
+  assert.equal(findAll(edited, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length, 0);
+
+  protocolSelect.props.onChange({ target: { value: 'openai-responses' } });
+  const tree = harness.renderRoot();
+  assert.ok(findAll(tree, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length > 0);
+});
