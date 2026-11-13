@@ -84,6 +84,8 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.match(generate.description, /mo-image-generation skill/);
   assert.match(edit.description, /图1\/图2/);
   assert.match(edit.description, /optimization is Off/);
+  assert.equal(edit.output.schema.properties.model.type, 'string', 'edit reports the model it actually used');
+  assert.equal(settings.output.schema.properties.editModels.type, 'array', 'Auto mode reports edit-capable models');
 
   const section = sections.find((item) => item.name === 'mo-image:prompt-recipe');
   assert.ok(section);

@@ -71,11 +71,12 @@ test('the plugin exposes a tool that reports the current settings as one small j
 
   const result = await tool.execute({}, { signal: new AbortController().signal });
 
-  assert.deepEqual(Object.keys(result).sort(), ['hint', 'model', 'promptOptimization', 'provider'],
+  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'hint', 'model', 'promptOptimization', 'provider'],
     'outside auto mode the payload carries no model list and no display names');
   assert.equal(result.provider, 'p-local', 'the provider is an id, not a name');
   assert.equal(result.model, 'flux-2-klein-4b.safetensors');
   assert.equal(result.promptOptimization, true);
+  assert.equal(result.canEdit, true, 'the built-in ComfyUI workflow can edit');
   assert.match(result.hint, /30–80/, 'the hint is the only prose left');
   assert.equal(result.models, undefined);
 

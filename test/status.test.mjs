@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildImageStatus, canEditModel, STATUS_CONTRACT } from '../lib/status.js';
+import { buildImageStatus, canEditModel, editCapableModels, pickAutoEditModel, STATUS_CONTRACT } from '../lib/status.js';
 import { resolveAdapter } from '../lib/adapters.js';
 
 const defaults = { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true };
@@ -65,6 +65,25 @@ test('Auto 下候选模型不支持编辑时 edit=false', () => {
   assert.equal(status.auto, true);
   assert.equal(status.configured, true);
   assert.equal(status.capabilities.edit, false);
+  assert.deepEqual(status.capabilities.editModels, []);
+});
+
+test('Auto 下自动忽略不能图生图的模型，只列可改图的', () => {
+  const provider = {
+    id: 'p12', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',
+    optionalKey: true, models: ['flux.safetensors', 'moss.safetensors'],
+    modelOptions: { 'moss.safetensors': { workflow: '{}', mapping: { image: null } } }
+  };
+  const status = buildImageStatus({
+    config: configOf(provider, { providerId: 'p12', model: 'auto' }),
+    version: '0.8.0',
+    key: { ok: true, source: 'optional', ref: '' }
+  });
+  assert.equal(status.capabilities.edit, true);
+  assert.deepEqual(status.capabilities.editModels, ['flux.safetensors']);
+  assert.deepEqual(editCapableModels(provider, provider.models), ['flux.safetensors']);
+  assert.deepEqual(pickAutoEditModel(provider, provider.models, ''), { model: 'flux.safetensors', capable: ['flux.safetensors'] });
+  assert.deepEqual(pickAutoEditModel(provider, provider.models, 'moss.safetensors'), { model: '', capable: ['flux.safetensors'] });
 });
 
 test('选中的模型不在目录里算没选模型', () => {
@@ -117,6 +136,7 @@ test('ComfyUI 自定义工作流没有图片槽时不能编辑', () => {
     key: { ok: true, source: 'optional', ref: '' }
   });
   assert.equal(status.capabilities.edit, false);
+  assert.deepEqual(status.capabilities.editModels, []);
 });
 
 test('ComfyUI 工作流有 {{image}} 或图片映射时可以编辑', () => {

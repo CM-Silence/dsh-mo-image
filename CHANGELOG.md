@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.8.0
+
+1. Auto 模式改图自动忽略不能图生图的模型：`mo_image_settings` 增加 `editModels`，`mo_image_edit` 不传 model 时自动取第一个可改图模型，传了不能改图的模型会直接报出可选项。
+2. 固定模型不支持图生图时提前报错（不再等适配器层）；生图/改图工具返回里新增 `model`，方便工作台登记版本。
+3. `moImageStatus` 增加 `capabilities.editModels`；提示词节会标出当前模型能否图生图。
+
 ## v0.7.0
 
 1. 新增只读状态服务 `moImageStatus`：其它插件（工作台）可以读取当前提供商/模型、Auto 候选、Key 来源、编辑能力（按适配器/工作流判断）与参考图上限，不必再解析 `config.json`、凭据库或猜「编辑模型」。

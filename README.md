@@ -227,7 +227,7 @@ if (service?.contract >= 1) {
 | `provider` | `{ id, name, baseUrl, optionalKey, protocol, adapter }` 或 `null` |
 | `model` / `auto` / `models` | 当前模型；Auto 时 `model='auto'` 并带候选列表 |
 | `key` | `{ ok, source, ref }`，`source` 为 `optional` / `credentials` / `env` / `config` |
-| `capabilities` | `{ generate, edit, maxRefs, size }`；`edit` 按适配器 / ComfyUI 工作流判断，`maxRefs` 为 16 |
+| `capabilities` | `{ generate, edit, editModels, maxRefs, size }`；`edit` 按适配器 / ComfyUI 工作流判断，`editModels` 是 Auto 下可改图的模型，`maxRefs` 为 16 |
 | `defaults` / `promptOptimization` | 选择器里的尺寸、质量与提示词优化开关 |
 
 调用方必须自己处理服务不存在的情况：0.6 及更早版本没有这个服务，按旧的文件格式回退即可（工作台就是这么做的，并会标注 `source: 'legacy'`）。

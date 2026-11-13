@@ -91,7 +91,7 @@ test('the settings tool returns a minimal json with the model and a one-line hin
   assert.equal(settings.parameters.required, undefined, 'the settings tool takes no arguments');
 
   const result = await settings.execute({}, exec);
-  assert.deepEqual(Object.keys(result).sort(), ['hint', 'model', 'promptOptimization', 'provider']);
+  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'hint', 'model', 'promptOptimization', 'provider']);
   assert.equal(result.provider, 'p1', 'the provider is reported by id only');
   assert.equal(result.model, 'flux-2-klein-4b.safetensors');
   assert.equal(result.promptOptimization, true);
@@ -120,6 +120,8 @@ test('auto mode lists the model ids to pick from', async (t) => {
   const result = await settings.execute({}, exec);
   assert.equal(result.model, 'auto');
   assert.deepEqual(result.models, ['flux-2-klein-4b.safetensors', 'moss_image_sft_int8_convrot.safetensors']);
+  assert.deepEqual(result.editModels, ['flux-2-klein-4b.safetensors', 'moss_image_sft_int8_convrot.safetensors'],
+    'Auto mode also reports which models can edit');
 });
 
 test('generating without reading the settings first is refused before any request', async (t) => {
