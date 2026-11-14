@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { settingsPayload } from '../lib/prompt-profiles.js';
+import { settingsPayload, promptSectionText } from '../lib/prompt-profiles.js';
 import { normalizeModelOptions, workflowParamsOf } from '../lib/index.js';
 import { collectRoleParams } from '../lib/comfy-workflow.js';
 
@@ -144,4 +144,40 @@ test('settingsPayload reports A1111 parameters without node positions', () => {
     workflowParams: [{ name: 'steps', type: 'INT' }]
   });
   assert.deepEqual(payload.params, [{ name: 'steps', type: 'INT' }]);
+});
+
+test('the prompt section tells the model to tune exposed params proactively', () => {
+  const section = promptSectionText({
+    model: 'sd15.safetensors', adapter: { id: 'a1111' }, promptOptimization: true,
+    workflowParams: [{ name: 'steps', type: 'INT' }, { name: 'cfg_scale', type: 'FLOAT' }]
+  });
+  assert.match(section, /可调参数：steps、cfg_scale/);
+  assert.match(section, /主动调整/);
+  assert.match(section, /重绘幅度/);
+});
+
+test('the prompt section never mentions parameters when optimization is Off', () => {
+  const section = promptSectionText({
+    model: 'sd15.safetensors', adapter: { id: 'a1111' }, promptOptimization: false,
+    workflowParams: [{ name: 'steps', type: 'INT' }]
+  });
+  assert.doesNotMatch(section, /可调参数/);
+});
+
+test('the prompt section stays quiet for models without exposed parameters', () => {
+  const section = promptSectionText({ model: 'sd15.safetensors', adapter: { id: 'a1111' }, promptOptimization: true });
+  assert.doesNotMatch(section, /可调参数/);
+});
+
+test('the generation skill documents how to tune parameters', () => {
+  const skill = readFileSync('skills/mo-image-generation/SKILL.md', 'utf8');
+  assert.match(skill, /参数调优/);
+  assert.match(skill, /denoising_strength/);
+  assert.match(skill, /karras/);
+});
+
+test('the editing skill documents the denoise ladder', () => {
+  const skill = readFileSync('skills/mo-image-editing/SKILL.md', 'utf8');
+  assert.match(skill, /重绘幅度/);
+  assert.match(skill, /0\.2–0\.35/);
 });

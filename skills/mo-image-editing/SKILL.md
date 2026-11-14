@@ -135,7 +135,19 @@ Change only the jacket color to deep navy. Keep the model's face, hair, pose, bo
 7. 当前模型支持参考图编辑吗？不支持就换模型。
 8. 是否需要 negative prompt？当前模型支持吗？
 
-## 五、调用
+## 五、重绘幅度
+
+只有当 `mo_image_settings` 返回了 `params` 并且其中有重绘幅度（`denoise` 或 `denoising_strength`）时才适用。优化开启时按需求主动调：
+
+| 用户想要 | 重绘幅度 |
+|---|---|
+| 只改一个小地方，构图和主体都要保住 | 0.2–0.35 |
+| 换背景、换风格，但保留大结构 | 0.5–0.6 |
+| 大改、几乎重画 | 0.65–0.8 |
+
+改完告诉用户调了多少、为什么。没暴露这个参数就留空，用当前工作流/WebUI 的默认值。步数和提示词强度的规则和文生图一致，见 `mo-image-generation` 的参数调优一节。
+
+## 六、调用
 
 - 改图前先调用 `mo_image_settings` 读当前配置：它返回当前提供商和模型的 id、提示词优化开关，以及一句该模型的写法提示（Auto 模式再给可选模型 id）。没读就调用改图工具会被拒绝。
 - `images`：1–16 张本地绝对路径或 http(s) URL；顺序对应图1/图2，不能错。
@@ -145,7 +157,7 @@ Change only the jacket color to deep navy. Keep the model's face, hair, pose, bo
 - 编辑可能较慢，工具超时 360s；不要重复提交同一请求。
 - 工具返回 Markdown 图片行；原样复制到最终回复。
 
-## 六、失败
+## 七、失败
 
 - 400 提到 image：工具会自动换字段重试一次。
 - 400 提到 model：换一个支持编辑的模型，例如 `gpt-image-2.5-sunburst`。

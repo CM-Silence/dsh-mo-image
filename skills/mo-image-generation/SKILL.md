@@ -217,7 +217,43 @@ negative_prompt: low quality, blurry, oversaturated, deformed hands, extra finge
 
 见 `mo-image-editing` 技能。核心是：只改一个点，列全保留项，重复约束。
 
-## 四、自检清单
+## 四、参数调优
+
+只有当 `mo_image_settings` 返回了 `params` 时这一节才适用：那说明用户已经把这些参数暴露给对话模型。**优化开启时，按用户的需求主动调，不要等用户点名**；没把握就留空，让工作流/WebUI 用默认值。
+
+### 各参数在管什么
+
+| 参数 | 作用 | 常用区间 |
+|---|---|---|
+| `steps`（步数） | 去噪迭代次数，越多细节越足，超过 30 收益递减 | SD1.5/SDXL 20–30；FLUX、LCM 类 4–8；草稿 8–12 |
+| `cfg` / `cfg_scale`（提示词强度） | 对提示词的贴合度。过高僵硬、过饱和；过低跑题 | SD1.5/SDXL 6–8；蒸馏模型（FLUX 等）1–3.5 |
+| `sampler_name`（采样器） | 收敛方式与质感 | `euler` 稳；`dpmpp_2m` 质量均衡；`dpmpp_2m_sde`/`dpmpp_3m_sde` 更细腻；带 ancestral 的每次结果都不同 |
+| `scheduler`（调度器） | 噪声曲线 | `normal` 通用；`karras` 细节更好；`sgm_uniform` 适合 SDXL；`simple` 常见于 FLUX/MOSS |
+| `denoise` / `denoising_strength`（重绘幅度） | 图生图保留原图的程度 | 0.2–0.4 微调；0.5 平衡；0.6–0.8 大改；1.0 等于忽略原图 |
+| `guidance` | 蒸馏模型的引导强度，通常固定不动 | FLUX 系 1–3.5 |
+| `seed`（种子） | 复现同一张图 | 需要复现才传固定值；否则留空 |
+
+### 从用户的话推到参数
+
+| 用户想要 | 怎么调 |
+|---|---|
+| 更精细、细节更多、高清感 | `steps` 提到 28–30；`scheduler=karras`；采样器 `dpmpp_2m` |
+| 更快、先看个大概 | `steps` 降到 8–12 |
+| 更贴合描述、文字更准 | `cfg` 提到 8–9（蒸馏模型别超过 4） |
+| 更自由、更有创意、别太死板 | `cfg` 降到 5–6；采样器换 ancestral 系 |
+| 每次想要不一样的版本 | 不传 `seed`，或换 ancestral 采样器 |
+| 就要刚才那张的变体 | 固定 `seed`，只改提示词里的一个点 |
+| 改图只动一点点、保留构图 | `denoising_strength` 0.2–0.35 |
+| 改图换风格、大改 | `denoising_strength` 0.6–0.75 |
+
+### 边界
+
+- 只调 `params` 里出现过的参数；没出现的说明用户没暴露，不要传。
+- 一次最多动两三个参数，改完告诉用户改了哪些、为什么。
+- 参数名以 `params` 里的为准（A1111 是 `cfg_scale`，ComfyUI 是 `cfg`）。
+- 传了不支持或取值无效的参数会被忽略，工具返回的 `note` 里会写明——看到就按提示修正，别重复塞。
+
+## 五、自检清单
 
 调用 `mo_image_generate` 前逐条检查：
 
@@ -230,7 +266,7 @@ negative_prompt: low quality, blurry, oversaturated, deformed hands, extra finge
 7. 是否需要 negative prompt？当前模型支持吗？
 8. 有没有互相冲突的风格词、光线或视角？
 
-## 五、调用
+## 六、调用
 
 - 生图前先调用 `mo_image_settings` 读当前配置：它返回当前提供商和模型的 id、提示词优化开关，以及一句该模型的写法提示（Auto 模式再给可选模型 id）。没读就调用生图工具会被拒绝。
 - 插件配置文件可以只读查看（`read` / `grep`），但对它的任何写入（`write` / `edit` / shell 重定向）都会被守卫拒绝。
