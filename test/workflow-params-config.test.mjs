@@ -153,7 +153,8 @@ test('the prompt section tells the model to tune exposed params proactively', ()
   });
   assert.match(section, /可调参数：steps、cfg_scale/);
   assert.match(section, /主动调整/);
-  assert.match(section, /重绘幅度/);
+  assert.match(section, /参数调优/, 'point the model at the skill section');
+  assert.doesNotMatch(section, /karras|denoising_strength/, 'the details live in the skill, not every request');
 });
 
 test('the prompt section never mentions parameters when optimization is Off', () => {
