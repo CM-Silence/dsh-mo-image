@@ -4,6 +4,7 @@
   "description": "DSH plugin: generate and edit images with model-aware prompt guidance over an OpenAI-compatible image model",
   "type": "module",
   "main": "lib/index.js",
+  "icon": "./icon.png",
   "scripts": {
     "test": "node --test",
     "build:locales": "node scripts/build-locales.mjs",
@@ -20,6 +21,7 @@
     "locale",
     "scripts",
     "skills",
+    "icon.png",
     "cordis.patch.yml",
     "CHANGELOG.md",
     "THIRD-PARTY-NOTICES.md",
