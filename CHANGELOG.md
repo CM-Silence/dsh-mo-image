@@ -1,5 +1,9 @@
 # 更新日志
 
+## v0.8.1
+
+1. 状态服务把 DSH 凭据来源（`file` / `keychain` / `process`）归一成 `credentials` / `env`，体检不再把 DSH 凭据库误写成“Key 来源：配置文件”。
+
 ## v0.8.0
 
 1. Auto 模式改图自动忽略不能图生图的模型：`mo_image_settings` 增加 `editModels`，`mo_image_edit` 不传 model 时自动取第一个可改图模型，传了不能改图的模型会直接报出可选项。

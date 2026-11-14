@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildImageStatus, canEditModel, editCapableModels, pickAutoEditModel, STATUS_CONTRACT } from '../lib/status.js';
+import { buildImageStatus, canEditModel, editCapableModels, normalizeKeySource, pickAutoEditModel, STATUS_CONTRACT } from '../lib/status.js';
 import { resolveAdapter } from '../lib/adapters.js';
 
 const defaults = { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true };
@@ -158,6 +158,16 @@ test('ComfyUI 工作流有 {{image}} 或图片映射时可以编辑', () => {
     optionalKey: true, models: ['sd.safetensors']
   };
   assert.equal(canEditModel(builtin, 'sd.safetensors', resolveAdapter(builtin, 'sd.safetensors')), true);
+});
+
+test('凭据来源归一成契约里的四种', () => {
+  assert.equal(normalizeKeySource('file'), 'credentials', 'DSH 凭据文件不是“配置文件”');
+  assert.equal(normalizeKeySource('keychain'), 'credentials');
+  assert.equal(normalizeKeySource('env'), 'env');
+  assert.equal(normalizeKeySource('process'), 'env');
+  assert.equal(normalizeKeySource('config'), 'config');
+  assert.equal(normalizeKeySource('optional'), 'optional');
+  assert.equal(normalizeKeySource(''), '');
 });
 
 test('默认值原样带出，尺寸策略跟随 defaults.auto', () => {
