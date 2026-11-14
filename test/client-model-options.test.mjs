@@ -253,11 +253,19 @@ test('the workflow textarea is compact but still usable', async () => {
   assert.ok(Number(textarea.props.style.minHeight) >= 160, 'textarea should keep a usable minimum height');
 });
 
-test('the model options toggle is disabled for a local provider that does not use ComfyUI workflows', async () => {
-  const { tree } = await openEditor(A1111_CONFIG);
+test('the model options toggle is disabled for a local provider with no parameter model', async () => {
+  const { tree } = await openEditor({
+    providers: [{
+      id: 'p5', name: 'Local SwarmUI', baseUrl: 'http://127.0.0.1:7801',
+      key: '', hasKey: false, adapter: 'swarmui', protocol: 'openai-images', optionalKey: true,
+      models: ['sdxl.safetensors'], names: {}
+    }],
+    active: { providerId: 'p5', model: 'sdxl.safetensors' },
+    defaults: {}
+  });
   const toggle = optionsToggle(tree);
   assert.ok(toggle, 'chevron stays rendered so the row layout is stable');
-  assert.equal(toggle.props.disabled, true, 'A1111 has its own parameter model, no custom workflow');
+  assert.equal(toggle.props.disabled, true, 'SwarmUI has no parameter table to configure');
 });
 
 test('a disabled toggle never expands the workflow panel', async () => {
@@ -374,4 +382,52 @@ test('parsing keeps the mapping when the same analyze response also carries para
   assert.deepEqual(entry.mapping.prompt, { node: '18:17', input: 'value' },
     'the mapping must survive the params write');
   assert.ok(Array.isArray(entry.params) && entry.params.length === 2, 'params must be stored too');
+});
+
+const A1111_SAMPLING_CONFIG = {
+  providers: [{
+    id: 'p4', name: 'Local A1111', baseUrl: 'http://127.0.0.1:7860',
+    key: '', hasKey: false, adapter: 'a1111', protocol: 'openai-images', optionalKey: true,
+    models: ['sd15.safetensors'], names: {}
+  }],
+  active: { providerId: 'p4', model: 'sd15.safetensors' },
+  defaults: {}
+};
+
+test('the model options toggle is enabled for A1111 too', async () => {
+  const { tree } = await openEditor(A1111_SAMPLING_CONFIG);
+  const toggle = optionsToggle(tree);
+  assert.ok(toggle, 'expected the chevron toggle');
+  assert.notEqual(toggle.props.disabled, true);
+});
+
+test('the A1111 panel lists sampling parameters unchecked by default', async () => {
+  const { harness, tree } = await openEditor(A1111_SAMPLING_CONFIG);
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  assert.ok(panel, 'expected the expanded panel');
+  const text = textOf(panel).join(' ');
+  assert.match(text, /Steps/i);
+  assert.match(text, /CFG scale/i);
+  assert.ok(!findAll(panel, (node) => node.type === 'textarea').length, 'A1111 has no workflow box');
+  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  assert.equal(boxes.length, 6);
+  assert.ok(boxes.every((box) => box.props.checked === false), 'everything starts unchecked');
+});
+
+test('switching an A1111 parameter on persists it in the expose map', async () => {
+  const { harness, tree } = await openEditor(A1111_SAMPLING_CONFIG);
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  boxes[0].props.onChange({ target: { checked: true } });
+  opened = harness.renderRoot();
+  const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
+  await save.props.onClick();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
+  const body = JSON.parse(posted[posted.length - 1].body);
+  const provider = body.config.providers.find((item) => item.id === 'p4');
+  assert.equal(provider.modelOptions['sd15.safetensors'].expose.steps, true);
 });

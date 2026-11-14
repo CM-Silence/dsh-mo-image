@@ -48,7 +48,7 @@ test('normalizeModelOptions keeps per-parameter exposure flags', () => {
 
 test('normalizeModelOptions drops a malformed parameter list instead of half-keeping it', () => {
   const out = normalizeModelOptions({
-    m1: { workflow: '{"1":{}}', params: [{ name: 'steps' }] }
+    m1: { workflow: '{"1":{}}', params: [{ name: '', node: '1', input: 'x' }] }
   }, ['m1']);
   assert.equal(out.m1.params, undefined);
 });
@@ -102,4 +102,46 @@ test('role params take their type from object_info and never report a link as a 
   const width = params.find((item) => item.name === 'width');
   assert.equal(width.type, 'INT');
   assert.equal(width.default, undefined, 'a link is not a usable default');
+});
+
+const A1111_PROVIDER = {
+  modelOptions: { 'sd15.safetensors': { expose: { steps: true, seed: false } } }
+};
+
+test('A1111 keeps every parameter hidden until it is switched on', () => {
+  const provider = { modelOptions: { 'sd15.safetensors': { expose: {} } } };
+  assert.equal(workflowParamsOf(provider, 'sd15.safetensors', { id: 'a1111' }), undefined);
+});
+
+test('A1111 returns only the parameters the user switched on', () => {
+  const out = workflowParamsOf(A1111_PROVIDER, 'sd15.safetensors', { id: 'a1111' });
+  assert.deepEqual(out.map((param) => param.name), ['steps']);
+});
+
+test('A1111 falls back to another model entry on the same provider', () => {
+  const out = workflowParamsOf(A1111_PROVIDER, 'other.safetensors', { id: 'a1111' });
+  assert.deepEqual(out.map((param) => param.name), ['steps']);
+});
+
+test('normalizeModelOptions accepts an A1111 entry without a workflow', () => {
+  const out = normalizeModelOptions(
+    { 'sd15.safetensors': { expose: { steps: true } } },
+    ['sd15.safetensors'],
+    'a1111'
+  );
+  assert.deepEqual(out['sd15.safetensors'].expose, { steps: true });
+  assert.equal(out['sd15.safetensors'].workflow, undefined);
+});
+
+test('normalizeModelOptions still requires a workflow for ComfyUI', () => {
+  const out = normalizeModelOptions({ m1: { expose: { steps: true } } }, ['m1'], 'comfyui');
+  assert.deepEqual(out, {});
+});
+
+test('settingsPayload reports A1111 parameters without node positions', () => {
+  const payload = settingsPayload({
+    provider, model: 'sd15.safetensors', adapter: { id: 'a1111' },
+    workflowParams: [{ name: 'steps', type: 'INT' }]
+  });
+  assert.deepEqual(payload.params, [{ name: 'steps', type: 'INT' }]);
 });
