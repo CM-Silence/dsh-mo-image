@@ -68,7 +68,9 @@ test('response reader falls back when content-length is shorter than the body', 
   assert.equal(bytes.toString(), 'longer-body');
 });
 
-test('looksLikeImage accepts a minimal PNG signature buffer', () => {
-  assert.equal(looksLikeImage(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), true);
+test('looksLikeImage rejects a bare PNG signature without a valid IHDR', () => {
+  // 只有签名、没有 IHDR/CRC 的 8 字节内容不是可解码图片；参考图和下载结果
+  // 必须按结构校验，否则截断文件会一路混到上游或保存目录里。
+  assert.equal(looksLikeImage(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), false);
   assert.equal(looksLikeImage(Buffer.from('not an image')), false);
 });

@@ -8,36 +8,30 @@ whenToUse: 用户要求画图、生成图片、出海报/主图/角色图/分镜
 
 ## 硬性约束（先读）
 
-- 只负责把提示词（和编辑时的参考图）交给生图模型，不做提示词以外的加工。
-- **生图前确认配置是最新的**：系统提示词里的「配置状态」说还没读过或用户刚改过，就先调用 `mo_image_settings`，按它返回的当前模型、提示词优化开关和写法来写；状态一致就直接生图，不用重复读。漏了这一步也不会报错——生图工具会把当前配置随结果交回来，按它重写提示词再调用一次即可。
-- **`model` 不用传**：非 Auto 时工具直接用选择器里选中的模型；传了不一致的值会被拒绝。只有 Auto 模式必须从当前提供商列表里选一个传进去。
-- **图片返回即交付**：最终回复只输出工具给的图片链接；不评价画质、不描述画面。除非用户明确要求看图，否则不要打开或读取生成的图片。
-- **只用用户在选择器里选中的提供商和模型**：不要自行切换，也不要用其他工具（本地生图、建模/Blender、脚本绘图）替代。
-- **失败时原样报错**：可以问用户是否要更换模型或服务商，但不要自己更换，也不要换别的模型重试。
+- 只负责把提示词交给生图模型，不做提示词以外的加工。
+- 生图前确认配置最新：系统提示词的「配置状态」说没读过或刚改过，就先调用 `mo_image_settings`；状态一致直接生图，别重复读。漏了也不会报错——工具返回 `{"path":"","needsSettings":true,"settings":…}`，按它重写再调一次即可。
+- `model` 不用传：非 Auto 时用选择器里的模型，传别的值会被拒绝；Auto 必须从当前列表里选一个。
+- 图片返回即交付：最终回复只输出工具给的图片行；不评价画质、不描述画面。除非用户明确要求看图，否则不要打开或读取图片。
+- 只用选择器里的提供商和模型：不要自行切换，也不要用本地生图、建模/Blender、脚本绘图替代。
+- 失败时原样报错：可以问用户是否换模型或服务商，但不要自己换、也不要换模型重试。
 
-当前模型和它的写法以 `mo_image_settings` 的返回为准（系统提示词里的 `mo-image-prompt` 节是同一份信息的摘要）。用户中途换了模型或关了提示词优化后，上一次读到的配置已经作废，必须重读；不要拿上一条提示词的习惯继续写。同一个会话里读过一次、配置又没变时，再读只会得到 `{"unchanged":true,...}`，所以别把重复读取当习惯；只有上下文里已经看不到那份配置（例如被压缩过）时才传 `refresh: true` 重读。
-
-> 本技能同时包含**工具调用与输出规则**和**提示词公式/模板**，两者是分开的：生图/重做图片时加载一次即可，不用重复加载；`提示词优化：Off` 时只使用调用与输出部分，跳过下面的公式、模板和自检清单，直接把用户原话作为 prompt，只做最低限度的文本整理；只有用户明确要求优化时才改写。模型由生图选择器决定、不需要传；尺寸、质量也由选择器控制，工具不接受这两个参数。
+`提示词优化：Off` 时只用下面的调用与输出规则，跳过公式、模板和自检清单，直接把用户原话当 prompt，只做最低限度整理；只有用户明确要求优化时才改写。上下文压缩后看不到配置时用 `refresh: true` 重读。
 
 ## 一、通用公式
 
 `主体 + 动作 + 环境 + 艺术风格 + 光影 + 构图 + 限制条件`
 
-| 元素 | 写什么 | 差 → 好 |
-|---|---|---|
-| 主体 | 谁/什么，具体到年龄、发型、服装、材质 | 一个女孩 → 17 岁高中女生，披肩金发，JK 制服，白丝皮鞋 |
-| 动作 | 正在做什么，制造故事感 | 站着 → 在雨水打湿的小巷里奔跑 |
-| 环境 | 地点、时间、天气、周围细节 | 日本街道 → 两侧日式一户建和商店，路灯整齐排列的干净街道 |
-| 艺术风格 | 摄影/插画/3D/游戏/电影风格，可给参考 | 好看 → 佳能 5D Mark IV 拍摄，日系胶片，轻微颗粒 |
-| 光影 | 光线方向、软硬、色温、情绪 | 亮一点 → 暖色夕阳侧逆光，柔和阴影 |
-| 构图 | 景别、机位、视角、留白 | 全身 → 中景，平视，主体居中，右侧留白 |
-| 限制条件 | 人数、UI、文字、水印、不能变的部分 | 单人，无 UI，无文字，8K 细节 |
+| 元素 | 写什么 |
+|---|---|
+| 主体 | 谁/什么，具体到年龄、发型、服装、材质 |
+| 动作 | 正在做什么，制造故事感 |
+| 环境 | 地点、时间、天气、周围细节 |
+| 艺术风格 | 摄影/插画/3D/游戏/电影，可给参考 |
+| 光影 | 方向、软硬、色温、情绪 |
+| 构图 | 景别、机位、视角、留白 |
+| 限制条件 | 人数、UI、文字、水印、不能变的部分 |
 
-三条原则：
-
-1. **具体**：能画出来的细节才有用；“氛围感”“高级感”要翻译成材质、光线、镜头。
-2. **叙事**：主体 + 动作 + 环境构成一个瞬间，比关键词列表更容易出好图。
-3. **公式**：垃圾进垃圾出，公式进杰作出；先写完整公式，再按模型调整。
+三条原则：**具体**（“氛围感”要翻译成材质、光线、镜头）、**叙事**（主体 + 动作 + 环境构成一个瞬间）、**公式**（先写全，再按模型调整）。
 
 ## 二、按模型写
 
@@ -56,12 +50,11 @@ whenToUse: 用户要求画图、生成图片、出海报/主图/角色图/分镜
 
 ### GPT-Image
 
-- 顺序：**场景/背景 → 主体 → 关键细节 → 明确约束**；复杂需求用短标签或换行分段。
-- 先写用途与画幅（电商主图、海报、UI、信息图、摄影），再用位置词安排布局和留白。
-- 图中文字用引号原样写出，指定字体、颜色、大小、位置；小字或密集排版时，提醒用户把质量挡位调高。
-- 没有 negative prompt：把排除项写成硬约束（`no watermark`, `no extra text`, `no logo`）。
-- 编辑时只改 X，其余保持不变；每轮重复身份、构图、文字、光线的保留清单。
-- 英文优先；具体到材质、镜头、光线；避免 `masterpiece, 8k, best quality` 这类空话。
+- 场景/背景 → 主体 → 关键细节 → 明确约束；先写用途与画幅，再用位置词安排布局和留白。
+- 图中文字用引号原样写出，指定字体、颜色、大小、位置；小字或密集排版时提醒用户把质量挡位调高。
+- 无 negative prompt：排除项写成硬约束（`no watermark`, `no extra text`, `no logo`）。
+- 编辑只改 X，其余保持不变；每轮重复身份、构图、文字、光线的保留清单。
+- 英文优先，具体到材质、镜头、光线；避免 `masterpiece, 8k, best quality` 这类空话。
 
 示例：
 
@@ -69,41 +62,11 @@ whenToUse: 用户要求画图、生成图片、出海报/主图/角色图/分镜
 A clean e-commerce hero image for a minimalist skincare serum bottle, centered on a warm beige seamless background with soft shadow and generous negative space on the right. The frosted glass bottle has a matte cream cap; the label reads "AQUA" exactly in a thin black sans-serif font. Soft diffused studio lighting from the upper left, subtle rim light, photorealistic product photography, 85mm lens, shallow depth of field. No extra text, no watermark, no logo, no hands.
 ```
 
-### DALL·E 3
-
-- 用完整自然语言段落（2–5 句），不要关键词列表或标签堆叠。
-- 写清主体、动作、场景、媒介/风格、光线、氛围；模型会自动改写扩展，细节要明确。
-- 文字渲染弱：避免长文字和 logo；文字需求改用 GPT-Image 等模型。
-- 不支持透明背景：需要纯色背景时直接写“纯白背景”，不要写 `transparent`。
-- 不要用 `no / without` 否定句；把不要的东西改写成正面描述。
-
-示例：
-
-```text
-A cozy reading corner in a sunlit attic, with a linen armchair, a small wooden side table holding a ceramic mug, and tall stacks of well-worn books. Warm afternoon light streams through a dusty window, casting long soft shadows across the floorboards. The mood is quiet, lived-in, and inviting, rendered as a natural editorial photograph.
-```
-
-### FLUX / Kontext
-
-- 自然语言散文，前置主体和动作；30–80 词最佳，最多约 512 tokens。
-- 顺序：主体 + 动作 + 风格/媒介 + 环境 + 光线 + 镜头/技术细节。
-- 只写你想要的：FLUX 不支持 negative prompt，用正面描述替代排除项。
-- 文字渲染弱：不要依赖长文字；需要文字用 GPT-Image/Qwen/Seedream。
-- Kontext 编辑：明确“改什么 + 保持什么”，参考图按图1/图2指代。
-
-示例：
-
-```text
-A knight in weathered silver armor stands in a misty pine forest at dawn, one hand resting on a moss-covered sword, the other holding a lantern. Soft volumetric light filters through the canopy, cool blue shadows with a warm rim light. Cinematic medium shot, shallow depth of field, shot on 35mm film, muted natural color grading.
-```
-
 ### Seedream
 
 - 简洁连贯的中文自然语言：主体 + 行为 + 环境，再补风格、色彩、光影、构图。
-- 不要关键词堆砌；说明用途/类型（海报、电商、角色设定、分镜）和画幅。
-- 文字放双引号中；需要多张时写“一组/四张/分镜”等，可生成统一风格的组图。
-- 编辑：用“增加/删除/替换/修改”明确对象和变化，避免代词；强调其余保持不变。
-- 支持图1/图2参考和多图输入；按顺序说明每张图的作用。
+- 说明用途/类型（海报/电商/角色设定/分镜）和画幅；文字放双引号；需要多张时写“一组/四张/分镜”。
+- 支持图1/图2参考和多图输入，按顺序说明每张图的作用；编辑用“增加/删除/替换/修改”，避免代词。
 
 示例：
 
@@ -111,62 +74,17 @@ A knight in weathered silver armor stands in a misty pine forest at dawn, one ha
 电商主图，3:4 竖版。一瓶磨砂玻璃精华液放在暖米色无缝背景中央，哑光奶油色瓶盖，瓶身标签写着“AQUA”，细黑无衬线字体。左上方柔光，右下方淡阴影，右侧留白，极简产品摄影，85mm 镜头，浅景深。不要多余文字、水印、手和 logo。
 ```
 
-### Qwen-Image
+### 其余模型要点
 
-- 中文或英文自然语言，主体、场景、风格、构图写具体；支持长提示词和复杂版面。
-- 文字渲染强：把文字放引号中，指定字体、颜色、位置和层级。
-- 支持 negative prompt：把畸变、水印、多余文字、低质量等放进 `negative_prompt`。
-- 编辑：按图1/图2说明参考关系，只改指定元素，保持其余不变。
-- 需要精确控制时，把“必须出现/必须保留”的内容写成清单。
+- **DALL·E 3**：完整段落 2–5 句；模型会自动改写扩展，细节要明确；文字弱，避免长文字和 logo；不支持透明背景，写“纯白背景”；不要用 `no / without` 否定句，改写成正面描述。
+- **Nano Banana**：叙事 + 正向描述；参考图公式 `参考图 + 关系指令 + 新场景`；文字放引号并指定字体/位置，支持多语言和 1K/2K/4K；编辑用强动词开头，可文字描述蒙版区域。
+- **FLUX / Kontext**：散文，主体和动作前置，30–80 词、最多约 512 tokens；顺序为主体 + 动作 + 风格/媒介 + 环境 + 光线 + 镜头；只写想要的，无 negative prompt；文字弱。Kontext 编辑写“改什么 + 保持什么”，参考图按图1/图2指代。
+- **Qwen-Image**：中英文自然语言，可长可细；文字强，放引号并指定字体/颜色/位置/层级；支持 negative prompt；精确控制时把“必须出现/必须保留”写成清单。
+- **Stable Diffusion**：SD3.5 用段落，SDXL/1.5 用逗号短语标签；支持 negative prompt；文字弱；避免互相冲突的风格词；编辑说明保留区域和修改区域。
+- **通义万相 / Kolors**：中文自然语言，简洁具体，避免长文字；支持 negative prompt；写清画幅用途与人物年龄、发型、服装、材质；万相编辑能力有限，局部修改换模型。
+- **通用兼容**：自然语言覆盖七要素；不确定是否支持 negative prompt 就省略；一次只改一个变量。
 
-示例：
-
-```text
-一张极简风格的咖啡海报，竖版 2:3。背景是温暖的米白色，画面中央是一只俯视视角的白色陶瓷咖啡杯，杯口有细腻的拉花。上方用粗体黑色无衬线字体写着“MORNING”，下方用小号灰色字体写着“Slow coffee, slow living”。整体留白充足，柔和自然光，编辑级排版。
-```
-
-### Nano Banana / Gemini Image
-
-- 自然语言叙事，先写主体/动作/场景，再写构图、风格、镜头；不要只列关键词。
-- 正向描述：说“空荡的街道”而不是“没有车”；不要用否定句。
-- 参考图公式：`参考图 + 关系指令 + 新场景`；按图1/图2说明用途。
-- 文字放引号中并指定字体/位置；支持多语言文字和 1K/2K/4K。
-- 文字多的图，先用对话把文案定下来，再让模型出图；文字仍放引号中。
-- 编辑：用强动词开头（添加/移除/替换/改成），明确保留项；可用文字描述蒙版区域。
-
-示例：
-
-```text
-Using the attached jacket photo as the exact garment reference and the attached model photo as the pose and identity reference, dress the model in the jacket. Keep her face, hair, body shape, pose, and the studio background unchanged. Match the jacket's fabric texture and lighting to the original photo so it looks naturally worn, not pasted on. Editorial fashion photography, softbox lighting, 85mm lens.
-```
-
-### Stable Diffusion / Stability
-
-- SD3.5 用自然语言段落；SDXL/1.5 用逗号分隔的短语标签（媒介、主体、构图、光线、细节）。
-- 支持 negative prompt：把低质量、畸变、多余肢体、水印等放进 `negative_prompt`。
-- 写清风格/媒介、主体、构图、光线、色彩；避免互相冲突的风格词。
-- 文字渲染弱：不要依赖长文字；需要文字用 GPT-Image/Qwen/Seedream。
-- 编辑：说明保留区域和修改区域；参考图按图1/图2指代。
-
-示例：
-
-```text
-editorial portrait of a woman in a red wool coat, standing in a snowy city street at dusk, soft overcast light, medium shot, shallow depth of field, muted cinematic color grading, 85mm lens, fine film grain
-```
-
-```text
-negative_prompt: low quality, blurry, oversaturated, deformed hands, extra fingers, watermark, text, logo, plastic skin
-```
-
-### 通义万相 / Kolors
-
-- 中文自然语言：主体 + 场景 + 风格 + 光影 + 构图，简洁具体。
-- 支持 negative prompt：把低质量、畸变、水印、多余文字放入 `negative_prompt`。
-- 写清画幅和用途；避免长文字渲染。
-- 编辑能力有限：需要局部修改时优先换支持编辑的模型。
-- 写清人物年龄、发型、服装、材质等可画细节。
-
-## 三、常见场景模板
+## 三、常用模板
 
 ### 电商主图
 
@@ -188,91 +106,42 @@ negative_prompt: low quality, blurry, oversaturated, deformed hands, extra finge
 约束：文字拼写准确，不新增无关文字，无水印。
 ```
 
-### 角色三视图
+### 版本图 / 分镜 / 风格迁移
 
 ```text
-参考图角色，制作三视图：正视图、侧视图、背视图，三个视图平行排开，比例一致，白色背景，全身，站姿 A-pose。保持发型、服装、配色和设计细节一致，线条干净，角色设定图风格。
+三视图：以图1角色为参考做正视图、侧视图、背视图，平行排开，比例一致，白色背景，全身，A-pose，保持发型服装配色一致。
+分镜：16:9 六格分镜，顺序为 <镜头1>…<镜头6>，统一角色、服装、场景和光影，每格独立构图，不要文字和对白框。
+风格迁移：图1 <内容>；图2 <风格>；图3 <元素>。保持图1主体构图，用图2风格重绘，把图3元素融合到<位置>，光影一致。
 ```
-
-### 分镜 / 故事板
-
-```text
-16:9 六格分镜，顺序为：<镜头1>、<镜头2>、<镜头3>、<镜头4>、<镜头5>、<镜头6>。统一角色、服装、场景和光影；每格有独立构图和景别；不要文字和对白框。
-```
-
-### 多角度 / 机位
-
-```text
-以图1的角色和场景为参考，生成同一场景的 8 个不同机位：正面特写、过肩镜头、低角度、俯视、广角全景、侧面、背面、远景。保持角色、服装、场景、光线和画风一致，不要改变设计。
-```
-
-### 风格迁移 / 多图融合
-
-```text
-图1：<内容/构图参考>；图2：<风格/材质参考>；图3：<元素参考>。
-保持图1的<主体/构图/视角>，用图2的<风格/色彩/笔触>重绘，把图3的<元素>融合到<位置>，保持光影一致，不改变其他部分。
-```
-
-### 局部修改
-
-见 `mo-image-editing` 技能。核心是：只改一个点，列全保留项，重复约束。
 
 ## 四、参数调优
 
-只有当 `mo_image_settings` 返回了 `params` 时这一节才适用：那说明用户已经把这些参数暴露给对话模型。**优化开启时，按用户的需求主动调，不要等用户点名**；没把握就留空，让工作流/WebUI 用默认值。
-
-### 各参数在管什么
+只有 `mo_image_settings` 返回了 `params` 才适用；优化开启时按需求主动调，没把握就留空，用工作流默认值。
 
 | 参数 | 作用 | 常用区间 |
 |---|---|---|
-| `steps`（步数） | 去噪迭代次数，越多细节越足，超过 30 收益递减 | SD1.5/SDXL 20–30；FLUX、LCM 类 4–8；草稿 8–12 |
-| `cfg` / `cfg_scale`（提示词强度） | 对提示词的贴合度。过高僵硬、过饱和；过低跑题 | SD1.5/SDXL 6–8；蒸馏模型（FLUX 等）1–3.5 |
-| `sampler_name`（采样器） | 收敛方式与质感 | `euler` 稳；`dpmpp_2m` 质量均衡；`dpmpp_2m_sde`/`dpmpp_3m_sde` 更细腻；带 ancestral 的每次结果都不同 |
-| `scheduler`（调度器） | 噪声曲线 | `normal` 通用；`karras` 细节更好；`sgm_uniform` 适合 SDXL；`simple` 常见于 FLUX/MOSS |
-| `denoise` / `denoising_strength`（重绘幅度） | 图生图保留原图的程度 | 0.2–0.4 微调；0.5 平衡；0.6–0.8 大改；1.0 等于忽略原图 |
-| `guidance` | 蒸馏模型的引导强度，通常固定不动 | FLUX 系 1–3.5 |
-| `seed`（种子） | 复现同一张图 | 需要复现才传固定值；否则留空 |
+| `steps` | 去噪迭代次数，超过 30 收益递减 | SD1.5/SDXL 20–30；FLUX/LCM 4–8；草稿 8–12 |
+| `cfg` / `cfg_scale` | 提示词贴合度，过高僵硬、过低跑题 | SD 6–8；蒸馏模型（FLUX 等）1–3.5 |
+| `sampler_name` | 收敛方式与质感 | `euler` 稳；`dpmpp_2m` 均衡；`dpmpp_2m_sde` 更细；ancestral 每次不同 |
+| `scheduler` | 噪声曲线 | `normal` 通用；`karras` 细节好；`sgm_uniform` 适合 SDXL；`simple` 常见于 FLUX |
+| `denoise` / `denoising_strength` | 图生图保留原图的程度 | 0.2–0.4 微调；0.5 平衡；0.6–0.8 大改；1.0 忽略原图 |
+| `guidance` | 蒸馏模型引导强度 | FLUX 系 1–3.5，通常固定 |
+| `seed` | 复现同一张图 | 要复现才传固定值 |
 
-### 从用户的话推到参数
+从需求推参数：更精细用 `steps` 28–30 + `scheduler=karras`；先看大概用 8–12 步；更贴合、文字更准把 `cfg` 提到 8–9（蒸馏模型别超 4）；更自由把 `cfg` 降到 5–6 或换 ancestral；要变体就固定 `seed` 只改一个点。
 
-| 用户想要 | 怎么调 |
-|---|---|
-| 更精细、细节更多、高清感 | `steps` 提到 28–30；`scheduler=karras`；采样器 `dpmpp_2m` |
-| 更快、先看个大概 | `steps` 降到 8–12 |
-| 更贴合描述、文字更准 | `cfg` 提到 8–9（蒸馏模型别超过 4） |
-| 更自由、更有创意、别太死板 | `cfg` 降到 5–6；采样器换 ancestral 系 |
-| 每次想要不一样的版本 | 不传 `seed`，或换 ancestral 采样器 |
-| 就要刚才那张的变体 | 固定 `seed`，只改提示词里的一个点 |
-| 改图只动一点点、保留构图 | `denoising_strength` 0.2–0.35 |
-| 改图换风格、大改 | `denoising_strength` 0.6–0.75 |
-
-### 边界
-
-- 只调 `params` 里出现过的参数；没出现的说明用户没暴露，不要传。
-- 一次最多动两三个参数，改完告诉用户改了哪些、为什么。
-- 参数名以 `params` 里的为准（A1111 是 `cfg_scale`，ComfyUI 是 `cfg`）。
-- 传了不支持或取值无效的参数会被忽略，工具返回的 `note` 里会写明——看到就按提示修正，别重复塞。
+边界：只调 `params` 里出现过的参数；一次最多动两三个并说明原因；参数名以 `params` 为准（A1111 是 `cfg_scale`，ComfyUI 是 `cfg`）；不支持或无效的值会被忽略，工具 `note` 会写明，按提示修正。
 
 ## 五、自检清单
 
-调用 `mo_image_generate` 前逐条检查：
-
-1. 主体是否具体到可画（年龄、发型、服装、材质）？
-2. 动作/环境是否构成一个瞬间，而不是静态标签？
-3. 风格、光影、构图是否明确？
-4. 图中文字是否加了引号，并指定字体/位置？
-5. 限制条件是否正面表述，或写成硬约束？
-6. 提示词语言和长度是否符合当前模型？
-7. 是否需要 negative prompt？当前模型支持吗？
-8. 有没有互相冲突的风格词、光线或视角？
+1. 主体是否具体到可画（年龄、发型、服装、材质），动作/环境是否构成一个瞬间？
+2. 风格、光影、构图是否明确，有没有互相冲突的风格词、光线或视角？
+3. 图中文字是否加了引号，并指定字体/位置？
+4. 语言和长度是否匹配当前模型？是否需要 negative prompt、当前模型支持吗？
 
 ## 六、调用
 
-- 生图前确认手上的配置是最新的：系统提示词里的「配置状态」说还没读过或用户刚改过，就先调用 `mo_image_settings`——它返回当前提供商和模型的 id、提示词优化开关，以及一句该模型的写法提示（Auto 模式再给可选模型 id）；状态一致就直接生图，不用重复读。漏了这一步也不会失败：工具返回 `{"path":"","needsSettings":true,"settings":…}`，按这份配置重写提示词再调用一次。
-- 插件配置文件可以只读查看（`read` / `grep`），但对它的任何写入（`write` / `edit` / shell 重定向）都会被守卫拒绝。
-- `prompt`：按当前模型写好的最终提示词。
-- `negative_prompt`：只在当前模型支持时传；不确定就省略。
-- 工具的参数只有 `prompt`、`negative_prompt`（Auto 模式再加 `model`），以及 `mo_image_settings` 报告 `sizeMode: "auto"` 时的可选 `size`；固定尺寸下不要传 `size`，质量始终由选择器控制。
-- 尺寸归谁看 `mo_image_settings`：`sizeMode: "fixed"` 表示选择器已经钉死尺寸，用户要别的尺寸就让他去选择器改；`"auto"` 表示只有用户明确提出形状时才传 `size`（如 `1024x1536`），工具结果里的 `sizeOptions` 是可选值。
-- `strict: true` 表示严格模式：成品尺寸会被强制等于请求尺寸，不需要你自己缩图；工具结果里的 `generated` 是上游原始尺寸，和 `size` 不同说明插件已经缩过，`original` 是插件替你留下的原始文件路径。
+- `prompt`：按当前模型写好的最终提示词；`negative_prompt`：只在当前模型支持时传，不确定就省略。
+- 工具参数只有 `prompt`、`negative_prompt`（Auto 再加 `model`），以及 `sizeMode: "auto"` 时的可选 `size`；`sizeOptions` 是可选值，固定尺寸不要传 `size`，质量始终由选择器控制。
+- `strict: true` 时成品尺寸强制等于请求尺寸，不需要自己缩图；结果里的 `generated` 是上游原始尺寸，`original` 是插件留下的原始文件路径。
 - 工具返回 Markdown 图片行；原样复制到最终回复。

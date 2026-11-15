@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 // Hook positions are centralized here; tests seed state by name so a hook
 // insertion only changes this table.
-const HOOK = { open: 2, pane: 3, view: 4, subProvider: 5, message: 10, menuPos: 14, fast: 17 };
+const HOOK = { open: 2, pane: 3, view: 4, subProvider: 5, message: 10, menuPos: 14, tip: 17 };
 function seed(values) {
   return new Map(Object.entries(values).map(([key, value]) => [HOOK[key], value]));
 }
@@ -183,6 +183,15 @@ function collectClass(node, className, out = []) {
   return out;
 }
 
+function collectType(node, type, out = []) {
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) { for (const item of node) collectType(item, type, out); return out; }
+  if (typeof node !== 'object') return out;
+  if (node.type === type) out.push(node);
+  for (const child of node.children || []) collectType(child, type, out);
+  return out;
+}
+
 const messages = {
   'seat.auto': '自动',
   'seat.fallback': '生图模型',
@@ -191,9 +200,8 @@ const messages = {
   'seat.menuSize': '尺寸',
   'seat.settingsAria': '生图设置',
   'seat.moreSettings': '其他设置',
-  'seat.promptSection': '提示词',
   'seat.menuPromptOptimization': '提示词优化',
-  'seat.fast': '快速预览',
+  'seat.promptOptimizationUsage': '用量更多',
   'seat.notSelected': '未选择',
   'seat.on': '开',
   'seat.off': '关',
@@ -526,6 +534,56 @@ test('the highest stop animates even when its id is not a quota peak', () => {
   assert.doesNotMatch(popovers[0].props.className, /message/);
 });
 
+test('the highest quality stop reads Ultra even when its backend id is high', () => {
+  const client = loadClient();
+  const four = {
+    options: [
+      { value: 'off' }, { value: 'low' }, { value: 'medium' }, { value: 'high' }
+    ]
+  };
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture({
+        defaults: { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true }
+      }),
+      setStore() {},
+      qualitySpec: four
+    }),
+    seed({ open: true, pane: 'quality' })
+  );
+  const text = collectText(tree).join(' ');
+  assert.match(text, /Ultra/);
+  assert.doesNotMatch(text, /最高/);
+});
+
+test('the highest quality stop reads Ultra in the codex peak ink', () => {
+  const client = loadClient();
+  const four = {
+    options: [
+      { value: 'off' }, { value: 'low' }, { value: 'medium' }, { value: 'high' }
+    ]
+  };
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture({
+        defaults: { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true }
+      }),
+      setStore() {},
+      qualitySpec: four
+    }),
+    seed({ open: true, pane: 'quality' })
+  );
+  const text = collectText(tree).join(' ');
+  assert.match(text, /Ultra/);
+  assert.doesNotMatch(text, /最高/);
+  const popover = collectClass(tree, 'cmes-popover')[0];
+  assert.equal(popover.props.style['--cmes-ink'], '#8b46ee', 'the heading inherits the violet Ultra ink');
+  const trigger = collectClass(tree, 'cmes-trigger')[0];
+  assert.equal(trigger.props.style['--cmes-ink'], '#8b46ee', 'the collapsed trigger uses the same violet ink');
+});
+
 test('opening a provider flips the viewport into the slide state', () => {
   const client = loadClient();
   const tree = client.render(
@@ -541,7 +599,8 @@ test('opening a provider flips the viewport into the slide state', () => {
   assert.match(viewport.props.className, /view2/);
   const pages = collectClass(tree, 'cmes-page');
   assert.equal(pages.length, 2);
-  assert.equal(pages[0].props.style.transition, 'transform .3s ease');
+  assert.equal(pages[0].props.style, undefined, 'the slide easing comes from codex CSS, not an inline ease');
+  assert.equal(pages[1].props.style, undefined);
   const text = collectText(tree).join(' ');
   assert.match(text, /OpenAI/);
   assert.match(text, /gpt-image-2\.5-flare/);
@@ -561,12 +620,16 @@ test('the size tool opens a second page with auto and both sides', () => {
   const text = collectText(tree).join(' ');
   assert.match(text, /其他设置/);
   assert.doesNotMatch(text, /自动尺寸，交给模型决定/);
-  assert.match(text, /提示词优化/);
   assert.match(text, /宽/);
   assert.match(text, /高/);
+  assert.equal(
+    collectType(tree, 'input').filter((input) => input.props['aria-label'] === ct('seat.menuPromptOptimization')).length,
+    0,
+    'the settings page has no prompt optimization checkbox'
+  );
 });
 
-test('other settings groups size and prompt and scrolls', () => {
+test('other settings keeps only size controls', () => {
   const client = loadClient();
   const tree = client.render(
     client.h(client.__test.CodexImageSeat, {
@@ -580,14 +643,56 @@ test('other settings groups size and prompt and scrolls', () => {
   const text = collectText(tree).join(' ');
   assert.match(text, /其他设置/);
   assert.match(text, /尺寸/);
-  assert.match(text, /提示词/);
-  assert.match(text, /提示词优化/);
-  assert.equal(collectClass(tree, 'cmes-rows').length >= 2, true);
+  assert.equal(
+    collectType(tree, 'input').filter((input) => input.props['aria-label'] === ct('seat.menuPromptOptimization')).length,
+    0,
+    'the settings page has no prompt optimization checkbox'
+  );
+  assert.equal(collectClass(tree, 'cmes-rows').length >= 1, true);
   const reset = collectClass(tree, 'cmes-reset')[0];
   assert.equal(reset.props.title, '其他设置');
 });
 
-test('the Fast bolt has no hover tooltip', () => {
+test('the prompt optimization star shows the quota hint and toggles the real default', () => {
+  const client = loadClient();
+  let saved = null;
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture(),
+      setStore(next) { saved = next; },
+      qualitySpec: railSpec,
+      sessionId: 's1'
+    }),
+    seed({ open: true, pane: 'quality' })
+  );
+  const star = collectClass(tree, 'cmes-star');
+  assert.ok(star.length >= 1, 'the prompt optimization star is rendered');
+  const starButton = collectClass(tree, 'cmes-fast')[0];
+  assert.ok(starButton, 'the star is the fast-slot button');
+  assert.equal(starButton.props.title, undefined, 'the native title is replaced by the codex tooltip');
+  assert.equal(starButton.props['aria-label'], '提示词优化');
+  assert.equal(starButton.props['aria-describedby'], 'mo-image-prompt-tip');
+  assert.equal(starButton.props['aria-pressed'], true);
+  const tip = collectClass(tree, 'cmes-tip')[0];
+  assert.ok(tip, 'the codex tooltip is rendered next to the popover');
+  assert.match(tip.props.className, /cmes-tip/);
+  assert.doesNotMatch(tip.props.className, /show/);
+  assert.equal(collectClass(tree, 'cmes-tipTitle').length, 1);
+  const text = collectText(tree).join(' ');
+  assert.match(text, /提示词优化/);
+  assert.match(text, /用量更多/);
+  const starPath = star[0].children[0].props.d;
+  assert.match(starPath, /^M12 3\.5/, 'the icon uses the three-sparkle AI cluster');
+  assert.equal(star[0].children.length, 3, 'large sparkle plus two small ones');
+  assert.equal(star[0].props.style.display, 'block');
+  assert.equal(starButton.props.style.justifyContent, 'center', 'the icon is centered in its button');
+  assert.equal(starButton.props.style.alignItems, 'center');
+  starButton.props.onClick();
+  assert.equal(saved.defaults.promptOptimization, false, 'clicking the star writes the real default');
+});
+
+test('hover shows the two-line codex tooltip card', () => {
   const client = loadClient();
   const tree = client.render(
     client.h(client.__test.CodexImageSeat, {
@@ -597,9 +702,31 @@ test('the Fast bolt has no hover tooltip', () => {
       qualitySpec: railSpec,
       sessionId: 's1'
     }),
-    seed({ open: true, pane: 'quality', fast: true })
+    seed({ open: true, pane: 'quality', tip: true })
   );
-  assert.equal(collectClass(tree, 'cmes-tip').length, 0);
+  const tip = collectClass(tree, 'cmes-tip')[0];
+  assert.match(tip.props.className, /cmes-tip show/);
+  assert.equal(tip.props.role, 'tooltip');
+  assert.equal(tip.props.id, 'mo-image-prompt-tip');
+  const lines = collectText(tip);
+  assert.deepEqual(lines, ['提示词优化', '用量更多']);
+});
+
+test('disabling prompt optimization removes the star from the trigger', () => {
+  const client = loadClient();
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture({ defaults: { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: false } }),
+      setStore() {},
+      qualitySpec: railSpec,
+      sessionId: 's1'
+    }),
+    seed({ open: true, pane: 'quality' })
+  );
+  assert.equal(collectClass(tree, 'cmes-trigger')[0].props.className.includes('fast'), false);
+  assert.equal(collectClass(tree, 'cmes-fast')[0].props['aria-pressed'], false);
+  assert.equal(collectClass(tree, 'cmes-star').length, 1, 'only the popover button keeps the outline star');
 });
 
 test('the codex portal is above the composer and keeps its last position when closed', () => {
@@ -622,7 +749,7 @@ test('the codex portal is above the composer and keeps its last position when cl
   assert.equal(popover.props.style.bottom, '50px');
 });
 
-test('Fast adds the codex fast-mode class and the trigger bolt', () => {
+test('prompt optimization adds the star to the trigger and fast-mode to the popover', () => {
   const client = loadClient();
   const tree = client.render(
     client.h(client.__test.CodexImageSeat, {
@@ -632,12 +759,14 @@ test('Fast adds the codex fast-mode class and the trigger bolt', () => {
       qualitySpec: railSpec,
       sessionId: 's1'
     }),
-    seed({ open: true, pane: 'quality', fast: true })
+    seed({ open: true, pane: 'quality' })
   );
   const popovers = collectClass(tree, 'cmes-popover');
   assert.equal(popovers.length, 1);
   assert.match(popovers[0].props.className, /fast-mode/);
-  assert.equal(collectClass(tree, 'cmes-bolt').length, 1);
+  const trigger = collectClass(tree, 'cmes-trigger')[0];
+  assert.match(trigger.props.className, /\bfast\b/);
+  assert.equal(collectClass(tree, 'cmes-star').length, 2, 'popover toggle and trigger both use the star');
 });
 
 test('the seat size value follows the control the model accepts', () => {

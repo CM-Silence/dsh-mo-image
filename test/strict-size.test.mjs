@@ -40,8 +40,8 @@ test('imageSizeOf reads PNG, JPEG, WebP and GIF headers', () => {
   gif.writeUInt16LE(90, 8);
   assert.deepEqual(imageSizeOf(gif), { width: 120, height: 90 });
 
-  // JPEG：FFD8 + SOF0 段（FFC0），高在前、宽在后。
-  const jpeg = Buffer.alloc(20);
+  // JPEG：FFD8 + SOF0 段（FFC0），高在前、宽在后（段长 17 含 2 字节长度，整段需 21 字节）。
+  const jpeg = Buffer.alloc(21);
   jpeg[0] = 0xff; jpeg[1] = 0xd8;
   jpeg[2] = 0xff; jpeg[3] = 0xc0;
   jpeg.writeUInt16BE(17, 4);
@@ -103,6 +103,22 @@ test('strict does nothing when the request carried no size', () => {
   assert.equal(out.generated, '200x150');
   assert.match(out.note, /未生效/);
   assert.deepEqual(imageSizeOf(out.bytes), { width: 200, height: 150 });
+});
+
+test('strict refuses an oversized target instead of allocating it', () => {
+  const before = png(32, 32);
+  const out = finalizeImage({
+    bytes: before,
+    contentType: 'image/png',
+    fitted: {
+      size: '99999x99999', width: 99999, height: 99999,
+      requested: requested(99999, 99999)
+    }
+  }, { strict: true });
+
+  assert.equal(out.bytes, before, 'the original image is kept');
+  assert.match(out.note, /未能缩放/, 'the note explains why strict mode did not apply');
+  assert.deepEqual(imageSizeOf(out.bytes), { width: 32, height: 32 });
 });
 
 test('strict never stretches a bare tier label to its nominal pixels', () => {

@@ -23,6 +23,9 @@ function fakeAsyncAdapter(overrides = {}) {
   return Object.assign({
     id: 'fake-async',
     label: 'Fake asynchronous',
+    // 这个假适配器把轮询地址放在 poll.test；按 A4 的规则，跨源目标必须显式声明，
+    // 否则 request-auth 不会把提交用的凭据带过去。
+    pollOrigins: ['https://poll.test'],
     endpoints: { generate: '/jobs', edit: '/jobs' },
     transport: { generate: 'json', edit: 'json' },
     editFields: ['image'],
