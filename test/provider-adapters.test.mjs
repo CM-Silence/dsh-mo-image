@@ -49,7 +49,7 @@ test('gemini sizes images per model and skips thought parts', async (t) => {
   const provider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'k' };
 
   await resolveAdapter(provider, 'gemini-3.1-flash-image').execute('generate', provider, {
-    model: 'gemini-3.1-flash-image', prompt: 'a cat', fitted: { width: 2048, height: 2048, size: '2048x2048' }
+    model: 'gemini-3.1-flash-image', prompt: 'a cat', fitted: { width: 2048, height: 2048, size: '2048x2048', aspect: '1:1', tier: '2K' }
   }, new AbortController().signal);
   let body = JSON.parse(calls.at(-1).init.body);
   assert.equal(body.generationConfig.imageConfig.imageSize, '2K');
@@ -68,6 +68,40 @@ test('gemini sizes images per model and skips thought parts', async (t) => {
     }, new AbortController().signal),
     /最多 3 张/
   );
+});
+
+test('gemini leaves the image config out while the size is Auto', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return jsonResponse({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_1PX } }] } }] });
+  };
+  const provider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'k' };
+  await resolveAdapter(provider, 'gemini-3.1-flash-image').execute('generate', provider, {
+    model: 'gemini-3.1-flash-image', prompt: 'a cat', fitted: { omit: true, size: 'none' }
+  }, new AbortController().signal);
+  const body = JSON.parse(calls.at(-1).init.body);
+  assert.equal(body.generationConfig.imageConfig, undefined, 'Auto means the endpoint picks the shape');
+  assert.deepEqual(body.generationConfig.responseModalities, ['TEXT', 'IMAGE'], 'the modalities stay');
+});
+
+test('xai imagine leaves the aspect ratio out while the size is Auto', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return jsonResponse({ data: [{ b64_json: PNG_1PX }] });
+  };
+  const provider = { baseUrl: 'https://api.x.ai/v1', adapter: 'xai-imagine', key: 'k' };
+  await resolveAdapter(provider, 'grok-imagine-1').execute('generate', provider, {
+    model: 'grok-imagine-1', prompt: 'a cat', fitted: { omit: true, size: 'none' }
+  }, new AbortController().signal);
+  const body = JSON.parse(calls.at(-1).init.body);
+  assert.equal(body.aspect_ratio, undefined, 'Auto means the endpoint picks the shape');
+  assert.equal(body.resolution, undefined);
 });
 
 test('host-specific adapters win over model-only matches', () => {
@@ -247,7 +281,7 @@ test('xAI Grok Imagine sends aspect/resolution and decodes image output', async 
   const adapter = resolveAdapter(provider, 'grok-imagine-image');
   const result = await adapter.execute('generate', provider, {
     model: 'grok-imagine-image', prompt: 'a robot',
-    fitted: { width: 1024, height: 1024, size: '1024x1024' }
+    fitted: { width: 1024, height: 1024, size: '1024x1024', aspect: '1:1', tier: '1k' }
   }, new AbortController().signal);
   assert.ok(result.bytes.length > 0);
   assert.ok(captured.url.endsWith('/images/generations'));
@@ -297,5 +331,5 @@ test('Ideogram sends an Api-Key multipart generation request', async (t) => {
   assert.equal(captured.init.headers.Authorization, undefined);
   assert.equal(captured.init.body.get('prompt'), 'a typographic poster');
   assert.equal(captured.init.body.get('rendering_speed'), 'QUALITY');
-  assert.equal(captured.init.body.get('aspect_ratio'), '1:1');
+  assert.equal(captured.init.body.get('aspect_ratio'), '1x1');
 });

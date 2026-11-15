@@ -38,6 +38,6 @@ test('prompt optimization off reaches the system prompt section', async (t) => {
   const text = section.text();
   assert.match(text, /提示词优化：Off/);
   assert.match(text, /用户原话/);
-  assert.match(text, /尺寸、质量、提供商、模型由用户选择器控制/);
+  assert.match(text, /尺寸由你决定/);
   assert.doesNotMatch(text, /生成公式/);
 });

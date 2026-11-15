@@ -156,7 +156,7 @@ test('bfl FLUX 3 omits seed and uses aspect_ratio plus resolution', async (t) =>
 
   const adapter = resolveAdapter({ baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', key: 'k' }, 'flux-3-image');
   await callImageApi('generate', adapter, { baseUrl: 'https://api.bfl.ai/v1', key: 'k' }, {
-    model: 'flux-3-image', prompt: 'a fox', fitted: { width: 1344, height: 768, size: '1344x768' }
+    model: 'flux-3-image', prompt: 'a fox', fitted: { width: 1344, height: 768, size: '1344x768', aspect: '16:9', tier: '1k' }
   }, new AbortController().signal);
 
   assert.equal(submitted.aspect_ratio, '16:9');
@@ -454,4 +454,22 @@ test('replicate without a schema sends prompt only and reports the omission', as
   assert.ok(result.bytes.length > 0);
   assert.equal(submitBody.input.image, undefined);
   assert.match(String(result.note || ''), /未识别模型输入字段/);
+  // 尺寸字段猜不到时提示开严格模式，别让 1K 在上游悄悄变成 2K。
+  assert.match(String(result.note || ''), /严格模式/);
+});
+
+test('a sync-only adapter that receives a task envelope points at the async protocol instead of a decode error', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => jsonResponse({ task_id: 'task-9', task_status: 'PENDING' });
+
+  const providerDef = { baseUrl: 'https://api.together.xyz/v1', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'black-forest-labs/FLUX.1-schnell');
+  assert.equal(adapter.id, 'together');
+  await assert.rejects(
+    () => callImageApi('generate', adapter, providerDef, {
+      model: 'black-forest-labs/FLUX.1-schnell', prompt: 'hi', fitted
+    }, new AbortController().signal),
+    /异步任务[\s\S]*自动识别/
+  );
 });

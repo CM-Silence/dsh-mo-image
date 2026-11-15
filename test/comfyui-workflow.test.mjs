@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveAdapter, applyWorkflowTemplate, COMFY_WORKFLOW_PLACEHOLDERS } from '../lib/adapters.js';
@@ -205,6 +205,92 @@ test('comfyui falls back to the builtin workflow when the model has no options',
     fitted: { width: 512, height: 512, size: '512x512' }
   }, new AbortController().signal);
   assert.equal(submitted.prompt['1'].class_type, 'CheckpointLoaderSimple');
+});
+
+/* ------------------------------------------------ 尺寸：自动就别碰工作流 */
+
+const MAPPED_T2I = JSON.stringify({
+  '4': { class_type: 'UNETLoader', inputs: { unet_name: 'm.safetensors' } },
+  '5': { class_type: 'CLIPTextEncode', inputs: { text: 'old prompt', clip: ['4', 1] } },
+  '6': { class_type: 'EmptyFlux2LatentImage', inputs: { width: 640, height: 960, batch_size: 1 } },
+  '8': { class_type: 'KSampler', inputs: { seed: 1, steps: 12, model: ['4', 0], positive: ['5', 0], latent_image: ['6', 0] } },
+  '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'mapped', images: ['8', 0] } }
+});
+
+const MAPPED_OPTIONS = {
+  workflow: MAPPED_T2I,
+  mapping: {
+    prompt: { node: '5', input: 'text' },
+    negative_prompt: null,
+    width: { node: '6', input: 'width' },
+    height: { node: '6', input: 'height' },
+    seed: { node: '8', input: 'seed' },
+    model: null,
+    image: null
+  }
+};
+
+function submitMapped(t, fitted) {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let submitted = null;
+  globalThis.fetch = comfyFetch((kind, init) => {
+    if (kind === 'prompt') { submitted = JSON.parse(init.body); return jsonResponse({ prompt_id: 'sz-1' }); }
+    if (kind === 'history') {
+      return jsonResponse({ 'sz-1': { outputs: { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } } } });
+    }
+    return jsonResponse({ error: 'unexpected' }, 404);
+  });
+  const provider = {
+    baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true,
+    modelOptions: { 'm.safetensors': MAPPED_OPTIONS }
+  };
+  return adapter0(provider).execute('generate', provider, {
+    model: 'm.safetensors', prompt: 'a lighthouse', negativePrompt: '', fitted
+  }, new AbortController().signal).then(() => submitted);
+}
+
+const adapter0 = (provider) => resolveAdapter(provider, '');
+
+test('an auto size leaves the mapped workflow resolution untouched', async (t) => {
+  const submitted = await submitMapped(t, { omit: true, size: 'none' });
+  assert.equal(submitted.prompt['6'].inputs.width, 640, 'the workflow own resolution must survive');
+  assert.equal(submitted.prompt['6'].inputs.height, 960);
+});
+
+test('a size the chat model asked for is written into the mapped inputs', async (t) => {
+  const submitted = await submitMapped(t, { width: 832, height: 1216, size: '832x1216' });
+  assert.equal(submitted.prompt['6'].inputs.width, 832);
+  assert.equal(submitted.prompt['6'].inputs.height, 1216);
+});
+
+test('a builtin workflow still needs concrete numbers when the size is auto', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let submitted = null;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target.includes('/object_info/CheckpointLoaderSimple')) {
+      return jsonResponse({ CheckpointLoaderSimple: { input: { required: { ckpt_name: [['sdxl.safetensors']] } } } });
+    }
+    if (target.includes('/object_info')) return jsonResponse({ error: 'not found' }, 404);
+    if (target.endsWith('/prompt')) { submitted = JSON.parse(init.body); return jsonResponse({ prompt_id: 'bi-2' }); }
+    if (target.includes('/history/')) {
+      return jsonResponse({ 'bi-2': { outputs: { '7': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } } } });
+    }
+    if (target.includes('/view?')) {
+      return new Response(Buffer.from(PNG_1PX, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } });
+    }
+    return jsonResponse({ error: 'unexpected ' + target }, 404);
+  };
+  const provider = { baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true };
+  await resolveAdapter(provider, '').execute('generate', provider, {
+    model: 'sdxl.safetensors', prompt: 'a cat', fitted: { omit: true, size: 'none' }
+  }, new AbortController().signal);
+  const latent = Object.values(submitted.prompt).find((node) => node.class_type === 'EmptyLatentImage');
+  assert.ok(latent, 'the builtin graph needs a latent node');
+  assert.equal(latent.inputs.width, 1024);
+  assert.equal(latent.inputs.height, 1024);
 });
 
 /* ------------------------------------------------ analyzeComfyWorkflow */

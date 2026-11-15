@@ -85,15 +85,25 @@ test('the settings output schema matches the payload and renders the same json',
 
   const tool = registered.find((item) => item.name === 'mo_image_settings');
   assert.ok(tool);
-  const value = await tool.execute({}, {});
+  const exec = { agent: { session: {} } };
+  const value = await tool.execute({}, exec);
   const schema = tool.output.schema;
-  assert.deepEqual([...schema.required].sort(), Object.keys(value).sort(), 'schema.required must describe the payload');
+  assert.deepEqual([...schema.required], ['hint'], 'only the hint is always present');
+  for (const key of Object.keys(value)) {
+    assert.ok(schema.properties[key], 'every returned field is declared: ' + key);
+  }
   assert.equal(schema.properties.models.type, 'array', 'only auto mode adds a model list');
+  assert.equal(schema.properties.unchanged.type, 'boolean', 'an unchanged read answers with this marker');
 
   const blocks = tool.output.render({}, value);
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].type, 'text');
   assert.equal(blocks[0].text, JSON.stringify(value));
   assert.match(blocks[0].text, /"model":"flux-2-klein-4b\.safetensors"/);
+
+  // 同一个会话再读一次：配置没变，只回一个「不用再看」的标记。
+  const again = await tool.execute({}, exec);
+  assert.deepEqual(Object.keys(again).sort(), ['hint', 'unchanged']);
+  assert.equal(again.unchanged, true);
 });
 

@@ -129,13 +129,13 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 模型会在需要时调用：
 
-- mo_image_settings：生图/改图前读当前配置（模型、提示词优化开关、该模型的写法）
+- mo_image_settings：读当前配置（模型、提示词优化开关、该模型的写法）；本会话读过且配置没变时可以不调
 - mo_image_generate：文生图 / 重做
 - mo_image_edit：参考图编辑 / 局部修改
 
 工具接收 prompt、negative_prompt、images；`model` 可选，尺寸和质量仍由生图选择器控制（工具不接收 `size` / `quality`）。
 
-**两步生图**：每次生图/改图前先调用 `mo_image_settings`，它返回一个很小的 JSON——当前提供商和模型的唯一 id、提示词优化开关、一句该模型的写法提示（Auto 模式下再加可选模型 id）：
+**一步确认配置**：`mo_image_settings` 返回一个很小的 JSON——当前提供商和模型的唯一 id、提示词优化开关、一句该模型的写法提示（Auto 模式下再加可选模型 id）：
 
 ```json
 {"provider":"comfyui","model":"flux-2-klein-4b.safetensors","promptOptimization":true,"hint":"自然语言散文，主体+动作前置，30–80 词；英文优先；无 negative prompt；完整写法没读过时先加载对应 skill，读过就不用再加载"}
@@ -143,7 +143,9 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 提示词优化开启时，`hint` 末尾会带这半句：完整写法（skill 里的模板与示例）只在当前模型的还没读过时才要加载，读过就不用重复加载；优化关闭时没有这半句，因为那时直接照用户原话写。
 
-模型每次写提示词前都得重读一遍。同一个会话里没有先读配置就调用生图工具会被直接拒绝，不会发请求。一次读取在当前回合内有效；用户在设置里换了模型、切了提示词优化开关或改了质量后，上一次读取自动作废，必须重读。
+系统提示词的 `mo-image-prompt` 节里有一行「配置状态」，由每个会话自己的快照决定：新会话还没读过时提示先调 `mo_image_settings`；读过之后只要配置没变就一直显示「一致」，模型可以直接生图，不必每轮重读。用户在设置里换了模型、切了提示词优化开关或改了尺寸/工作流参数后，这一行会变回「改过」（改回原值、中间没有对话则不算变化）。读取或交接会把这刻的配置锁成快照：之后配置再变只会产生新快照、让下一次调用重新判断，不会反过来影响已经发出去或已经锁定的那次生成。同一个会话里重复读一次配置，返回的是 `{"unchanged":true,"hint":"…"}`，不会再把整份配置重复一遍；上下文被压缩、已经看不到那份配置时，传 `refresh:true` 重读一次即可。
+
+**漏读不会报错**：没读过（或读了之后配置又变了）就调用生图/改图工具，不会发请求、也不会红字报错，而是返回 `{"path":"","needsSettings":true,"settings":{…}}`——把当前配置直接交回给对话模型，让它按新写法重写提示词再调用一次。这样既不会用旧模型的口径生成图片，也不会因为一次手快的调用在界面上留下一条失败记录。
 
 **`model` 是可选的核对项**：不传就用用户选中的那一项（提供商 + 模型 id 一起核对，不同提供商的同名模型不算同一个），传了不一致的值直接拒绝；Auto 模式下必须从当前提供商的模型列表里挑一个。传了 `provider` 也会核对，不一致同样拒绝——工具永远不会替用户切换提供商或模型。
 
@@ -266,17 +268,19 @@ $DSH_HOME/.credentials.yaml
 | **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
 | **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
+| **魔搭 ModelScope** | `modelscope` | `Qwen/Qwen-Image-2.1`、`Qwen/Qwen-Image-Edit` | 异步任务；提交带 `X-ModelScope-Async-Mode`，轮询 `/v1/tasks/{id}` |
 | **xAI Grok Imagine** | `xai-imagine` | `grok-imagine-image` | 生成；原生编辑暂未支持 |
 | **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
-| **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4` | 生成；模型写在路径里 |
+| **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4`、`ideogram-4-5`、`ideogram-4-transparent` | 生成；模型写在路径里，4 收 JSON+像素枚举，4-5 只收 `size`，3/transparent 收字母 `x` 的比例 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
 | **Together AI** | `together` | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
 | **Fireworks AI** | `openai-images` | `accounts/fireworks/models/flux-1-schnell` | OpenAI Images 兼容网关 |
 | **Novita AI** | `openai-images` | `flux-1-schnell` | OpenAI Images 兼容网关 |
-| 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；尺寸支持 `2K/3K/4K` 预设与任意宽高 |
+| 自定义 / 新网关 | `openai-images` | 手动/获取 | 同步或异步自动识别（见下文） |
+| 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；档位按模型分（5.x 是 `1K/1.5K/2K`，lite 是 `2K/3K/4K`，4.5 是 `2K/4K`），也收任意宽高 |
 | 火山方舟 Agent Plan | `volcengine-ark` | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
-| 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wanx2.1-t2i-turbo` | 异步入队任务 |
+| 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 异步入队任务；只有 wan2.7 认 `1K/2K/4K` 档位 |
 | 硅基流动 | `siliconflow` | 手动/获取 | 生成 + 单图编辑 |
 | 智谱 BigModel | `zhipu` | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 
@@ -288,6 +292,8 @@ $DSH_HOME/.credentials.yaml
 - 这些云端提供商的密钥仍只写入 DSH 凭据库，不写进 `config.json`。
 - 内置列表来自宿主 manifest，客户端不单独维护一份；新增提供商会同时影响设置页和模型列表能力判断。
 - Replicate 的输入字段由模型 schema 决定；schema 拉不到时只发 prompt 并在结果里注明，不会猜字段名。
+- 魔搭是**异步任务**：提交 `POST /v1/images/generations`（带 `X-ModelScope-Async-Mode: true`）拿 `task_id`，再轮询 `GET /v1/tasks/{task_id}`（带 `X-ModelScope-Task-Type: image_generation`），图片在 `output_images`。`size` 是 `1024x1024` 这样的字符串，网关按每边 64–2048 校验（插件会提前把超界尺寸按比例收进区间）；参考图走 `image_url`，一张发字符串、多张发数组，data URI 可直接用。提交响应可能提前回 `SUCCEED` 但还没有图，插件一律以轮询结果为准。
+- 自定义模型 API 和不认识的域名走 `openai-images`：响应里有图就同步返回，有任务信号就自动轮询，新厂商大多不用再写适配器。识别不了的异步形状（需要专用请求头/轮询头）仍走专用适配器。
 
 文档：
 
@@ -299,6 +305,7 @@ $DSH_HOME/.credentials.yaml
 - [Together AI image generation](https://docs.together.ai/docs/inference/images/overview)
 - [Fireworks AI](https://docs.fireworks.ai/)
 - [Novita AI](https://novita.ai/docs/api-reference/api-reference-overview)
+- [ModelScope API-Inference](https://www.modelscope.cn/docs/model-service/API-Inference/intro)
 
 ## 本地模型
 
@@ -314,7 +321,7 @@ $DSH_HOME/.credentials.yaml
 | AUTOMATIC1111 / Forge / SD.Next / Draw Things | `a1111` | `http://127.0.0.1:7860` | `/sdapi/v1/sd-models` | 生成 + `/sdapi/v1/img2img` |
 | ComfyUI | `comfyui` | `http://127.0.0.1:8188` | `/object_info`（CheckpointLoaderSimple） | 生成；原生编辑暂不支持 |
 | SwarmUI | `swarmui` | `http://127.0.0.1:7801` | `/API/ListModels` | 生成；原生编辑暂不支持 |
-| 其他 OpenAI 兼容网关 | `openai-images` | `http://127.0.0.1:3000/v1` | `/v1/models` | 取决于网关 |
+| 其他 OpenAI 兼容网关 | `openai-images` | `http://127.0.0.1:3000/v1` | `/v1/models` | 取决于网关；异步任务自动轮询 |
 
 说明：
 
@@ -391,35 +398,42 @@ $DSH_HOME/.credentials.yaml
 | 字段 | 作用 |
 |---|---|
 | `send[]` | 白名单：只有列出来的字段才会写进请求体，没列的一律不发 |
-| `size` | 尺寸怎么编码、该模型接受哪些尺寸（`allowed` 白名单，或用 `minPixels` / `maxPixels` / `multiple` 约束） |
+| `size` | 尺寸怎么编码、该模型接受哪些尺寸。`control` 决定选择器给什么控件（`wh` 宽高 / `aspect` 比例+档位 / `preset` 档位下拉+自定义 / `prompt` 宽高写进提示词），`wire` 说明上游真实吃什么，`tiers` 是档位名与像素，`allowed` 是白名单（`allowCustom: true` 时白名单外的宽高也照发），`sizeByModel` 按模型覆盖整套策略 |
 | `quality` | 该模型是否有质量档位、档位名称/数量，以及如何映射成平台参数（如 DALL·E 的 `standard/hd`、Ideogram 的 `rendering_speed`）；没有就不下发，选择器也不显示质量行 |
 | `transport` | `json` 或 `multipart` |
 | `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
 | `authHeader` | `bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal） |
 | `endpoints` | 可以是字符串，也可以是按模型拼路径的函数（Ideogram、fal、Replicate） |
 | `async` + `poll` | 异步入队型；新描述符自带 `build / submitPath / pollUrl / pollHeaders / statusOf / resolve` |
+| `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置适配器：`openai-images`（通用兜底）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`gpt-image`、`dall-e-3`、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`together`、`siliconflow`、`volcengine-ark`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`a1111`、`comfyui`、`swarmui`、`localai`。
+内置适配器：`openai-images`（通用兜底，自动同步/异步）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`gpt-image`、`dall-e-3`、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`together`、`siliconflow`、`volcengine-ark`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`、`localai`。
 
-两种交互形态都覆盖：
+交互形态都覆盖：
 
 - **同步**：一次请求直接返回图片
-- **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate 四家的提交与状态词都收在适配器的 `async` 描述符里
+- **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate、魔搭五家的提交与状态词都收在适配器的 `async` 描述符里
+- **通用兜底自动识别**：自定义 API 和不认识的域名走 `openai-images`，它会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
 
 选择规则：设置页的「API 协议」下拉可直接指定适配器；选「自动识别」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → `openai-images` 兜底」匹配。
 
 ## 已知限制
 
-- **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`、`bfl`、`fal`、`replicate` 的协议形状来自 2026-11 官方文档，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
+- **通用异步识别有边界**：`openai-images` 的自动轮询只覆盖「OpenAI 兼容形状 + 常见任务字段/状态词」。如果厂商要求专用请求头（如魔搭的 `X-ModelScope-Async-Mode`）、专用轮询头、或者完全不同的 envelope，仍然需要专用适配器——这类平台已经内置了适配器（`modelscope`、`bfl`、`fal`、`replicate`、`dashscope-wanx`）。
+- **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`、`bfl`、`fal`、`replicate`、`modelscope` 的协议形状来自 2026-11 官方文档/官方示例代码，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
 - **gpt-image 的新参数没做 UI**：`background` / `moderation` / `output_compression` 等 2026 年新增字段暂不发送，等设置页有入口再接。
 - **C 级协议未实现**：Krea、Luma Photon、Runway、腾讯混元、百度文心一格、Adobe Firefly、Gemini Interactions API 留在后续版本。
 - **Google Imagen 已停用**：Gemini API 下线、Vertex 侧 2026-06-30 停服，插件不再支持；请改用 `gemini-3.1-flash-image` 等 Nano Banana 模型。
 - **Vertex AI 未支持**：需要 OAuth access token（1 小时过期）且没有模型列表端点。
 
-**尺寸自动适配**：你写 `256x256` 而模型最小只能出 `1024x1024` 时，插件会按最近的合法尺寸生成，再把结果缩回 `256x256`（内置零依赖 PNG 缩放）。反过来，请求尺寸大于模型上限时按上限生成并附注说明，不会把小图放大冒充目标尺寸。缩放和上限调整都会写进 `$DSH_HOME/mo-image/host.log`。
+**尺寸控件跟着模型变**：选择器的「尺寸」面板按当前模型能接受什么渲染——收宽高就给两个输入框（`wh`）、只收宽高比就给比例下拉加档位下拉（`aspect`）、只认档位/固定像素表就给尺寸下拉加「自定义」（`preset`）、完全不收尺寸参数就给宽高输入框并把尺寸写进提示词（`prompt`）。自动尺寸复选框仍在上方；**严格**复选框始终可用，自动尺寸下模型自己填了 `size` 时同样生效。
 
-**错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；报尺寸超限时往上抬一档重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
+**严格模式**：开启后成品尺寸一定等于请求尺寸——上游出大了就缩、出小了就放大（会注明画质有损），比例不符时先按居中裁切再缩，绝不拉伸。工具结果同时给 `size`（成品）和 `generated`（上游原始尺寸）；缩过图时上游那张原图会留在同一目录（文件名加 `-original`），结果的 `original` 指向它，缩放失败也会明说并保留原图。档位型模型（如方舟的 `2K`）的档位只是参考值，官方并不保证像素，这种情况下严格模式不缩，只回报真实尺寸。
+
+**尺寸被拒不再自动改大**：上游报「尺寸超限/非法」时直接失败，并把该模型的合法范围写进错误（白名单、档位名，或像素/单边/倍数约束）。白名单吸附与像素夹取仍然保留——它们是把你的尺寸落成该模型真正接受的尺寸，和「偷偷换一个更大尺寸再试」不是一回事。
+
+**错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
 
 新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
 

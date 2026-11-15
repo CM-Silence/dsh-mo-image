@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  resolvePromptProfile, promptSectionText, listPromptProfiles
+  resolvePromptProfile, promptSectionText, listPromptProfiles,
+  configStateText, CONFIG_STATE_MARKER
 } from '../lib/prompt-profiles.js';
 import { resolveAdapter, prepareGenerate } from '../lib/adapters.js';
 
@@ -82,7 +83,7 @@ test('prompt optimization off instructs raw user wording', () => {
   assert.match(text, /用户原话/);
   assert.match(text, /不要扩写/);
   assert.match(text, /不要自动补 negative_prompt/);
-  assert.match(text, /尺寸、质量、提供商、模型由用户选择器控制/);
+  assert.match(text, /尺寸由你决定/);
   assert.doesNotMatch(text, /生成公式/);
   assert.doesNotMatch(text, /主体 \+ 动作 \+ 环境/);
 });
@@ -95,13 +96,46 @@ test('neither prompt mode makes the model echo the selected model id', () => {
   }
 });
 
-test('both prompt modes keep generation parameters out of tool args', () => {
+test('both prompt modes describe who owns the size', () => {
   const on = promptSectionText({ model: 'gpt-image-2.5-flare' });
   const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false });
   for (const text of [on, off]) {
-    assert.match(text, /尺寸、质量、提供商、模型由用户选择器控制/);
-    assert.match(text, /工具不接受这些参数/);
+    // 默认是「自动尺寸」：模型可以传 size，质量/提供商/模型仍由选择器控制。
+    assert.match(text, /尺寸由你决定/);
+    assert.match(text, /质量、提供商、模型/);
   }
+});
+
+test('the config-state marker is one line the host can interpolate', () => {
+  const on = promptSectionText({ model: 'gpt-image-2.5-flare' }, CONFIG_STATE_MARKER);
+  const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false }, CONFIG_STATE_MARKER);
+  const auto = promptSectionText({ model: 'auto', models: ['gpt-image-2.5-flare'] }, CONFIG_STATE_MARKER);
+  for (const text of [on, off, auto]) {
+    assert.match(text, /\{\{mo_image_config\}\}/, 'the section carries the placeholder, not a stale value');
+    const lines = text.split('\n').filter((line) => line.includes('{{mo_image_config}}'));
+    assert.equal(lines.length, 1, 'the marker appears exactly once');
+    assert.match(lines[0], /配置状态/);
+  }
+});
+
+test('no marker line is added when the host cannot interpolate it', () => {
+  for (const state of [
+    { model: 'gpt-image-2.5-flare' },
+    { model: 'gpt-image-2.5-flare', promptOptimization: false },
+    { model: 'auto', models: ['gpt-image-2.5-flare'] }
+  ]) {
+    assert.doesNotMatch(promptSectionText(state), /配置状态/);
+  }
+});
+
+test('each config state explains whether the settings tool has to be read', () => {
+  assert.match(configStateText('unread'), /还没读过/);
+  assert.match(configStateText('unread'), /mo_image_settings/);
+  assert.match(configStateText('stale'), /改过/);
+  assert.match(configStateText('stale'), /mo_image_settings/);
+  assert.match(configStateText('fresh'), /一致/);
+  assert.match(configStateText('fresh'), /不用再读/);
+  assert.equal(configStateText('nonsense'), configStateText('unread'), 'an unknown state must fail safe');
 });
 
 test('negative prompt is sent only to adapters that whitelist it', () => {

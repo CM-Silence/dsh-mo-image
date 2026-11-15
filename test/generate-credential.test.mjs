@@ -76,7 +76,7 @@ test('generation resolves the key from the credentials service without a config 
   assert.ok(captured);
   const body = JSON.parse(captured.init.body);
   assert.equal(body.quality, 'max');
-  assert.equal(body.size, undefined);
+  assert.equal(body.size, '2048x2048', 'with the size on Auto the chat model may pick the shape');
   const headers = captured.init.headers;
   const auth = typeof headers.get === 'function' ? headers.get('authorization') : (headers.Authorization || headers.authorization);
   assert.equal(auth, 'Bearer sk-test-key');

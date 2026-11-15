@@ -639,3 +639,19 @@ test('Fast adds the codex fast-mode class and the trigger bolt', () => {
   assert.match(popovers[0].props.className, /fast-mode/);
   assert.equal(collectClass(tree, 'cmes-bolt').length, 1);
 });
+
+test('the seat size value follows the control the model accepts', () => {
+  const { __test } = loadClient();
+  assert.equal(__test.sizeValueLabel({ control: 'aspect' }, { auto: false, aspect: '3:4', tier: '2K' }), '3:4 · 2K');
+  assert.equal(__test.sizeValueLabel({ control: 'preset' }, { auto: false, preset: '2K' }), '2K');
+  assert.equal(__test.sizeValueLabel({ control: 'preset' }, { auto: false, preset: '1024x1024' }), '1024 × 1024');
+  assert.equal(__test.sizeValueLabel({ control: 'wh' }, { auto: false, width: 1024, height: 768 }), '1024 × 768');
+  assert.equal(__test.sizeValueLabel({ control: 'aspect' }, { auto: true }), ct('seat.sizeAutoValue'));
+});
+
+test('an unknown control falls back to width/height and a missing spec is null', () => {
+  const { __test } = loadClient();
+  assert.equal(__test.sizeControlOf({ control: 'nonsense' }), 'wh');
+  assert.equal(__test.sizeControlOf(null), 'wh');
+  assert.equal(__test.sizeSpecFor('missing-provider', 'missing-model'), null);
+});

@@ -66,6 +66,23 @@ test('A1111 adapter lists checkpoints and sends txt2img/img2img bodies', async (
   assert.equal(Array.isArray(editBody.init_images), true);
 });
 
+test('A1111 leaves the size out of the body while the size is Auto', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return jsonResponse({ images: [PNG_1PX] });
+  };
+  const provider = { baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111', optionalKey: true };
+  await resolveAdapter(provider, '').execute('generate', provider, {
+    model: 'sdxl-base.safetensors', prompt: 'a cat', fitted: { omit: true, size: 'none' }
+  }, new AbortController().signal);
+  const body = JSON.parse(calls.find((call) => call.url.endsWith('/sdapi/v1/txt2img')).init.body);
+  assert.equal(body.width, undefined, 'Auto means the endpoint picks the shape');
+  assert.equal(body.height, undefined);
+});
+
 test('ComfyUI adapter lists CheckpointLoaderSimple checkpoints', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
@@ -153,6 +170,26 @@ test('SwarmUI adapter creates a session, lists models, and downloads the result'
   assert.equal(body.session_id, 'session-1');
   assert.equal(body.model, 'OfficialStableDiffusion/sdxl');
   assert.equal(body.width, 512);
+});
+
+test('SwarmUI leaves the size out of the body while the size is Auto', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push({ target, init });
+    if (target.endsWith('/API/GetNewSession')) return jsonResponse({ session_id: 'session-1' });
+    if (target.endsWith('/API/GenerateText2Image')) return jsonResponse({ images: ['data:image/png;base64,' + PNG_1PX] });
+    return jsonResponse({ error: 'unexpected ' + target }, 404);
+  };
+  const provider = { baseUrl: 'http://127.0.0.1:7801', adapter: 'swarmui', optionalKey: true };
+  await resolveAdapter(provider, '').execute('generate', provider, {
+    model: 'OfficialStableDiffusion/sdxl', prompt: 'a cat', fitted: { omit: true, size: 'none' }
+  }, new AbortController().signal);
+  const body = JSON.parse(calls.find((call) => call.target.endsWith('/API/GenerateText2Image')).init.body);
+  assert.equal(body.width, undefined, 'Auto means the endpoint picks the shape');
+  assert.equal(body.height, undefined);
 });
 
 test('ComfyUI lists checkpoints and diffusion models together', async (t) => {

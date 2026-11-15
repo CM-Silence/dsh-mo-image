@@ -64,11 +64,14 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(generate);
   assert.ok(edit);
   assert.ok(settings, 'the model needs a tool that reads the current settings');
-  assert.match(settings.description, /before every generation/i, 'the description says when to call it');
-  assert.match(settings.description, /rejected/i, 'the description says generation is gated on it');
+  assert.match(settings.description, /配置状态/, 'the description ties the read to the per-session marker');
+  assert.match(settings.description, /mo_image_generate/, 'the description says which tool the read is for');
+  assert.match(settings.description, /unchanged/, 'the description says an unchanged read answers briefly');
+  assert.match(generate.description, /needsSettings/, 'the description says an outdated read gets a config handoff instead of an image');
   assert.ok(generate.parameters.properties.negative_prompt);
   assert.equal(generate.parameters.properties.quality, undefined);
-  assert.equal(generate.parameters.properties.size, undefined);
+  assert.ok(generate.parameters.properties.size, 'the model may ask for a shape while size is Auto');
+  assert.match(String(generate.parameters.properties.size.description), /auto/i);
   assert.equal(generate.parameters.properties.provider.type, 'string');
   assert.match(String(generate.parameters.properties.provider.description), /validated/);
   assert.match(String(generate.parameters.properties.model.description), /Auto/);
@@ -78,13 +81,26 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(!(edit.parameters.required || []).includes('model'), 'model must be optional for edits too');
   assert.ok(edit.parameters.properties.negative_prompt);
   assert.equal(edit.parameters.properties.quality, undefined);
-  assert.match(generate.description, /Model, size, and quality come from the picker/);
+  assert.ok(edit.parameters.properties.size, 'edits can pick a shape too');
+  assert.match(generate.description, /Model and quality come from the picker/);
+  assert.match(generate.description, /sizeMode/);
   assert.match(generate.description, /dialect/);
   assert.doesNotMatch(generate.description, /only when optimization is On/);
   assert.match(generate.description, /mo-image-generation skill/);
   assert.match(edit.description, /图1\/图2/);
   assert.match(edit.description, /optimization is Off/);
   assert.equal(edit.output.schema.properties.model.type, 'string', 'edit reports the model it actually used');
+  assert.equal(edit.output.schema.properties.needsSettings.type, 'boolean', 'an outdated read returns the config handoff');
+  assert.equal(edit.output.schema.properties.settings.type, 'object', 'the handoff carries the settings payload');
+  const handoffBlocks = generate.output.render({}, {
+    path: '', needsSettings: true, settings: { model: 'x' }, note: '配置改过了，这次没有生成。'
+  });
+  assert.equal(handoffBlocks.length, 1);
+  assert.doesNotMatch(handoffBlocks[0].text, /!\[/, 'a handoff has no image to render');
+  const handoff = JSON.parse(handoffBlocks[0].text);
+  assert.equal(handoff.needsSettings, true, 'the whole handoff is JSON, not a bare sentence');
+  assert.equal(handoff.settings.model, 'x', 'the model sees the settings in the result it reads');
+  assert.match(handoff.note, /没有生成/);
   assert.equal(settings.output.schema.properties.editModels.type, 'array', 'Auto mode reports edit-capable models');
 
   const section = sections.find((item) => item.name === 'mo-image:prompt-recipe');

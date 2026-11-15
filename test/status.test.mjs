@@ -176,12 +176,17 @@ test('默认值原样带出，尺寸策略跟随 defaults.auto', () => {
     config: configOf(provider, { providerId: 'p11', model: 'gpt-image-1' }),
     version: '0.7.0', key: okKey
   });
-  assert.deepEqual(picker.capabilities.size, { mode: 'picker' });
+  // 契约扩了 strict / control：外部插件据此知道"严格模式开没开、控件是哪种"。
+  assert.equal(picker.capabilities.size.mode, 'auto');
+  assert.equal(picker.capabilities.size.strict, false);
+  assert.equal(picker.capabilities.size.control, 'wh');
   assert.equal(picker.promptOptimization, true);
 
   const fixed = buildImageStatus({
     config: configOf(provider, { providerId: 'p11', model: 'gpt-image-1' }, { auto: false, width: 2000, height: 2000 }),
     version: '0.7.0', key: okKey
   });
-  assert.deepEqual(fixed.capabilities.size, { mode: 'fixed', width: 2000, height: 2000 });
+  assert.equal(fixed.capabilities.size.mode, 'fixed');
+  assert.equal(fixed.capabilities.size.width, 2000);
+  assert.equal(fixed.capabilities.size.height, 2000);
 });

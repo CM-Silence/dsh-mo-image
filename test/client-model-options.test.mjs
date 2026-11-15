@@ -431,3 +431,72 @@ test('switching an A1111 parameter on persists it in the expose map', async () =
   const provider = body.config.providers.find((item) => item.id === 'p4');
   assert.equal(provider.modelOptions['sd15.safetensors'].expose.steps, true);
 });
+
+/* 尺寸：值由选择器经 mapping 注入，列表里不再占一行；认不出来时才留手选。 */
+
+const SIZED_ANALYSIS = {
+  ok: true,
+  format: 'api',
+  mapping: {
+    prompt: { node: '18:17', input: 'value' },
+    width: { node: '18:6', input: 'width' },
+    height: { node: '18:6', input: 'height' },
+    image: null
+  },
+  candidates: {
+    prompt: [{ node: '18:17', input: 'value', classType: 'PrimitiveStringMultiline' }],
+    width: [{ node: '18:6', input: 'width', classType: 'EmptyFlux2LatentImage' }],
+    height: [{ node: '18:6', input: 'height', classType: 'EmptyFlux2LatentImage' }]
+  },
+  params: [
+    { name: 'prompt', role: true, node: '18:17', input: 'value', type: 'STRING' },
+    { name: 'width', role: true, node: '18:6', input: 'width', type: 'INT' },
+    { name: 'height', role: true, node: '18:6', input: 'height', type: 'INT' },
+    { name: 'steps', node: '18:7', input: 'steps', type: 'INT' }
+  ],
+  warnings: []
+};
+
+/** 打开面板 → 填工作流 → 解析 → 返回渲染后的树。 */
+async function openParsed(analysis, config = CONFIG) {
+  const { harness, tree } = await openEditor(config, { analyze: analysis });
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
+  textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  const parse = findButton(opened, (node) => /parse workflow/i.test(textOf(node).join('')));
+  await parse.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  return harness.renderRoot();
+}
+
+const hasRow = (tree, key) => findAll(tree, (node) => node.props && node.props.key === key).length > 0;
+
+const FIXED_SIZE_CONFIG = { ...CONFIG, defaults: { auto: false, width: 768, height: 1024 } };
+
+test('the panel shows width and height while the size is Auto', async () => {
+  const tree = await openParsed(SIZED_ANALYSIS);
+  assert.ok(hasRow(tree, 'prompt'), 'the prompt row must stay');
+  assert.ok(hasRow(tree, 'width'), 'Auto lets the model move the size, so show where it lands');
+  assert.ok(hasRow(tree, 'height'));
+});
+
+test('the panel hides width and height while the picker pins the size', async () => {
+  const tree = await openParsed(SIZED_ANALYSIS, FIXED_SIZE_CONFIG);
+  assert.ok(hasRow(tree, 'prompt'), 'the prompt row must stay');
+  assert.ok(!hasRow(tree, 'width'), 'a pinned size is the picker\'s business');
+  assert.ok(!hasRow(tree, 'height'));
+});
+
+test('the panel still offers width and height when the graph does not reveal them', async () => {
+  const analysis = {
+    ...SIZED_ANALYSIS,
+    mapping: { prompt: { node: '18:17', input: 'value' }, width: null, height: null, image: null }
+  };
+  const tree = await openParsed(analysis, FIXED_SIZE_CONFIG);
+  assert.ok(hasRow(tree, 'width'), 'an undetected size needs the manual fallback');
+  assert.ok(hasRow(tree, 'height'), 'an undetected size needs the manual fallback');
+});
+

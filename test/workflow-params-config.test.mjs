@@ -92,6 +92,35 @@ test('seed and model stay hidden by default even though they are role params', (
   assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined);
 });
 
+test('width and height stay hidden by default because the picker already injects them', () => {
+  const provider = {
+    modelOptions: {
+      m1: {
+        workflow: '{}',
+        params: [
+          { name: 'prompt', role: true, node: '1', input: 'value', type: 'STRING' },
+          { name: 'width', role: true, node: '2', input: 'width', type: 'INT' },
+          { name: 'height', role: true, node: '2', input: 'height', type: 'INT' }
+        ]
+      }
+    }
+  };
+  assert.deepEqual(workflowParamsOf(provider, 'm1', { id: 'comfyui' }).map((param) => param.name), ['prompt']);
+});
+
+test('a size parameter can still be switched on by hand when a workflow needs it', () => {
+  const provider = {
+    modelOptions: {
+      m1: {
+        workflow: '{}',
+        params: [{ name: 'width', role: true, node: '2', input: 'width', type: 'INT' }],
+        expose: { width: true }
+      }
+    }
+  };
+  assert.deepEqual(workflowParamsOf(provider, 'm1', { id: 'comfyui' }).map((param) => param.name), ['width']);
+});
+
 test('role params take their type from object_info and never report a link as a string', () => {
   const objectInfo = JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
   const graph = {
@@ -144,6 +173,25 @@ test('settingsPayload reports A1111 parameters without node positions', () => {
     workflowParams: [{ name: 'steps', type: 'INT' }]
   });
   assert.deepEqual(payload.params, [{ name: 'steps', type: 'INT' }]);
+});
+
+test('settingsPayload reports the auto size mode with the sizes the model may pick', () => {
+  const payload = settingsPayload({
+    provider, model: 'flux.safetensors', adapter: { id: 'comfyui' },
+    sizeMode: 'auto', sizeOptions: ['1024x1024', '1024x1536']
+  });
+  assert.equal(payload.sizeMode, 'auto');
+  assert.deepEqual(payload.sizeOptions, ['1024x1024', '1024x1536']);
+  assert.match(payload.hint, /size/);
+});
+
+test('settingsPayload says the size is fixed so the model leaves it alone', () => {
+  const payload = settingsPayload({
+    provider, model: 'flux.safetensors', adapter: { id: 'comfyui' },
+    sizeMode: 'fixed', size: '768x1024'
+  });
+  assert.equal(payload.sizeMode, 'fixed');
+  assert.match(payload.hint, /768x1024/);
 });
 
 test('the prompt section tells the model to tune exposed params proactively', () => {
