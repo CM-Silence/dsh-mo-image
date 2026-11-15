@@ -145,6 +145,49 @@ test('analyzeWorkflow offers every literal string input as a prompt candidate', 
   assert.ok(nodes.includes('18:14'), 'the system prompt is offered as a candidate, just not the default');
 });
 
+/* 空值：ComfyUI 导出和模板里的文本框默认就是空的，空槽位仍然是角色的槽位。 */
+
+test('an empty negative widget still maps to its own node', () => {
+  const graph = moss();
+  graph['18:5'].inputs.text = '';
+  const { mapping } = analyzeWorkflow(graph, objectInfo());
+  assert.deepEqual(mapping.negative_prompt, { node: '18:5', input: 'text' });
+});
+
+test('an empty prompt widget maps to the prompt node instead of the system prompt', () => {
+  const graph = moss();
+  graph['18:17'].inputs.value = '';
+  const { mapping } = analyzeWorkflow(graph, objectInfo());
+  assert.deepEqual(mapping.prompt, { node: '18:17', input: 'value' },
+    'falling through to 18:14 would overwrite the LLM system prompt');
+});
+
+test('a whitespace-only widget is still a literal the mapping can use', () => {
+  const graph = moss();
+  graph['18:5'].inputs.text = '   ';
+  const { mapping } = analyzeWorkflow(graph, objectInfo());
+  assert.deepEqual(mapping.negative_prompt, { node: '18:5', input: 'text' });
+});
+
+test('an as-exported workflow still lists the negative prompt parameter', () => {
+  const graph = moss();
+  graph['18:17'].inputs.value = '';
+  graph['18:5'].inputs.text = '';
+  const analysis = analyzeWorkflow(graph, objectInfo());
+  assert.ok(analysis.params.some((param) => param.name === 'negative_prompt'),
+    'without the param the chat model never learns the slot exists');
+  assert.ok(analysis.candidates.negative_prompt.length,
+    'the settings panel hides a role row when its candidate pool is empty');
+});
+
+test('a shared positive/negative node is never exposed as the negative prompt', () => {
+  const graph = moss();
+  graph['18:7'].inputs.negative = ['18:4', 0];
+  const { mapping } = analyzeWorkflow(graph, objectInfo());
+  assert.equal(mapping.negative_prompt, null,
+    'writing a negative prompt there would land on the positive text too');
+});
+
 /* ---------------------------------------------------------------- 注入 */
 
 test('injectByMapping writes values and keeps numeric types', () => {
@@ -191,6 +234,18 @@ test('injectByMapping leaves untouched values alone when a field is not supplied
   assert.equal(graph['18:7'].inputs.seed, moss()['18:7'].inputs.seed);
 });
 
+test('injectByMapping writes into an as-exported empty workflow without touching the system prompt', () => {
+  const graph = moss();
+  graph['18:17'].inputs.value = '';
+  graph['18:5'].inputs.text = '';
+  const systemPrompt = graph['18:14'].inputs.value;
+  const { mapping } = analyzeWorkflow(graph, objectInfo());
+  const { graph: out } = injectByMapping(graph, mapping, { prompt: '一只猫', negativePrompt: 'blurry' });
+  assert.equal(out['18:17'].inputs.value, '一只猫');
+  assert.equal(out['18:5'].inputs.text, 'blurry');
+  assert.equal(out['18:14'].inputs.value, systemPrompt, 'the system prompt is not a prompt slot');
+});
+
 /* ------------------------------------------------- FLUX.2 / SamplerCustomAdvanced */
 
 const flux = () => JSON.parse(readFileSync('test/fixtures/flux-t2i.api.json', 'utf8'));
@@ -205,9 +260,10 @@ test('analyzeWorkflow reads prompt, seed and model through a custom sampler chai
   assert.deepEqual(mapping.height, { node: '15', input: 'height' });
 });
 
-test('analyzeWorkflow leaves negative empty instead of copying the positive prompt', () => {
+test('an empty negative slot maps to its own node, never to the positive prompt', () => {
   const { mapping } = analyzeWorkflow(flux(), objectInfo());
-  assert.equal(mapping.negative_prompt, null);
+  assert.deepEqual(mapping.negative_prompt, { node: '11', input: 'text' });
+  assert.notDeepEqual(mapping.negative_prompt, mapping.prompt, 'the positive node must not be reused');
 });
 
 test('uiToApi lists the classes it could not convert', () => {
