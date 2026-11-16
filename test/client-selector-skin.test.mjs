@@ -677,6 +677,39 @@ test('the settings page follows the active model shape even without a provider s
   );
 });
 
+test('the codex size rows open a menu page instead of a select', () => {
+  const client = loadClient();
+  client.__test.applyCatalog({
+    capabilities: [{
+      providerId: 'p1',
+      models: [{
+        model: 'gemini-nano-banana-2.1',
+        size: { control: 'aspect', aspects: ['1:1', '16:9'], tiers: [{ value: '1K' }, { value: '2K' }], custom: false, wire: ['aspect'], stitch: false, hint: '' }
+      }]
+    }]
+  });
+  const store = storeFixture({
+    providers: [{
+      id: 'p1', name: 'APIYI', baseUrl: 'https://api.apiyi.com/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['gemini-nano-banana-2.1'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'gemini-nano-banana-2.1' },
+    defaults: { quality: 'high', auto: false, width: 1024, height: 1024, aspect: '16:9', tier: '1K', promptOptimization: true }
+  });
+  const renderSettings = (subProvider) => client.render(
+    client.h(client.__test.CodexImageSeat, { t: ct, store: store, setStore() {}, qualitySpec: railSpec }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: subProvider })
+  );
+  const settings = renderSettings('__size');
+  assert.equal(collectType(settings, 'select').length, 0, 'no native select anywhere in the size page');
+  const ratioRow = collectType(settings, 'button').find((node) => collectText(node).join(' ').includes(ct('seat.sizeAspect')));
+  assert.ok(ratioRow, 'the ratio row is a menu button');
+  ratioRow.props.onClick({ currentTarget: { focus() {} }, preventDefault() {}, stopPropagation() {} });
+
+  const list = renderSettings('__size-aspect');
+  assert.match(collectText(list).join(' '), /16:9/, 'the second level lists the ratios');
+  assert.equal(collectType(list, 'select').length, 0);
+});
 test('other settings keeps only size controls', () => {
   const client = loadClient();
   const tree = client.render(
