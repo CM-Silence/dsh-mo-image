@@ -784,3 +784,13 @@ test('an unknown control falls back to width/height and a missing spec is null',
   assert.equal(__test.sizeControlOf(null), 'wh');
   assert.equal(__test.sizeSpecFor('missing-provider', 'missing-model'), null);
 });
+
+test('the size settings survive the client store round-trip', () => {
+  const { __test } = loadClient();
+  const next = __test.normalizeImageStore({ defaults: { width: 1024, height: 1536, strict: true, aspect: '2:3', tier: '2K', preset: '2K' } });
+  assert.equal(next.defaults.strict, true, 'strict must not be dropped by the client normaliser');
+  assert.equal(next.defaults.aspect, '2:3');
+  assert.equal(next.defaults.tier, '2K');
+  assert.equal(next.defaults.preset, '2K');
+  assert.equal(next.defaults.width, 1024);
+});
