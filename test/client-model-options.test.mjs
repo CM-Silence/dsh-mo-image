@@ -995,3 +995,166 @@ test('拉模型列表后，新增的模型自动填未上锁的键（不锁）',
   assert.equal(entry.locked, undefined, '自动填不是「普通上锁」的三种情况之一');
 });
 
+/* ───────────────────── 参数面板的排版：单行 vs 方框（只改布局） ───────────────────── */
+
+/** 面板里的一行：单输入的参数一行，多输入的参数放进方框里。 */
+const paramRow = (tree, key) => findAll(tree, (node) => node.props && node.props['data-param-row'] === key)[0] || null;
+const paramBox = (tree, key) => findAll(tree, (node) => node.props && node.props['data-param-box'] === key)[0] || null;
+/** 行内可直接看到的控件（input / select / button）。 */
+const controlsOf = (node) => (node.children || []).filter((child) => child && ['input', 'select', 'button'].includes(child.type));
+
+/** 用 modelOptions 里的尺寸覆盖把面板摆成指定编码方式的样子。 */
+function sizedConfig(mode, extra = {}) {
+  return {
+    providers: [{
+      id: 'p7', name: 'Sized Relay', baseUrl: 'https://gateway.example/v1',
+      key: '', hasKey: true, adapter: '', protocol: 'openai-images', optionalKey: false,
+      models: ['m1'], names: {},
+      modelOptions: { m1: { size: Object.assign({ mode }, extra) } }
+    }],
+    active: { providerId: 'p7', model: 'm1' },
+    defaults: {}
+  };
+}
+
+test('单输入的参数渲染成一行：label 左、输入框中间、锁在行尾', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  for (const key of ['quality', 'prompt', 'negative', 'model', 'n']) {
+    const row = paramRow(opened, key);
+    assert.ok(row, key + ' 应该是一行');
+    assert.equal(row.children[0].type, 'span', key + ' 的 label 在行首');
+    const input = row.children[1];
+    assert.equal(input.type, 'input', key + ' 的输入框紧跟在 label 后面');
+    assert.equal(input.props['data-param-key'], key);
+    const lock = row.children[2];
+    assert.equal(lock.type, 'button', key + ' 的锁在行尾');
+    assert.equal(lock.props['data-lock-key'], key);
+    assert.equal(controlsOf(row).filter((child) => child.type === 'input').length, 1, key + ' 一行只有一个输入框');
+    assert.equal(row.children.filter((child) => child && child.type === 'p').length, 0, key + ' 行内不再有说明段落');
+  }
+});
+
+test('单行用 flex 排版：label 不伸缩，输入框吃满剩余宽度，锁原地不动', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const row = paramRow(opened, 'model');
+  assert.equal(row.props.style.display, 'flex');
+  assert.equal(row.props.style.minWidth, 0);
+  assert.equal(row.children[0].props.style.flex, 'none', 'label 不参与伸缩：变长时挤的是输入框，右侧不变');
+  const input = row.children[1];
+  assert.equal(input.props.style.flex, '1 1 auto');
+  assert.equal(input.props.style.minWidth, 0, 'min-width:0 才允许被长 label 挤窄');
+  assert.equal(row.children[2].props.style.flex, 'none');
+});
+
+test('尺寸是多输入参数：一个方框，标题行带锁，框内每行一个输入', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'size');
+  assert.ok(box, '尺寸应该被方框框起来');
+  const head = box.children[0];
+  assert.equal(textOf(head.children[0]).join(''), 'Size', '第一行是标题「尺寸」');
+  assert.ok(findAll(head, (node) => node.type === 'button' && node.props['data-lock-key'] === 'size').length === 1,
+    '锁在标题行上，不在每一行的行尾');
+  assert.equal(findAll(head, (node) => node.type === 'input').length, 0, '标题行不放输入框');
+  assert.ok(paramRow(box, 'size:mode'), '第二行是编码方式');
+  assert.ok(paramRow(box, 'size:field'), '第三行是参数名');
+  assert.equal(findAll(box, (node) => node.type === 'p').length, 0, '框里不再有说明段落');
+});
+
+test('说明文字改成 title：悬停才显示，不占一行', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'size');
+  const modeSelect = findAll(box, (node) => node.type === 'select' && node.props['data-param-key'] === 'size')[0];
+  assert.ok(modeSelect, '有编码方式下拉');
+  assert.match(String(modeSelect.props.title || ''), /adapter decides/i, '尺寸块的说明挂在编码方式上');
+  const nameInput = findAll(box, (node) => node.type === 'input' && node.props['data-param-key'] === 'size')[0];
+  assert.match(String(nameInput.props.title || ''), /dotted paths/i, '参数名的说明挂在输入框上');
+});
+
+test('宽+高 编码方式下有两个参数名输入：宽 / 高', async () => {
+  const { harness } = await openEditor(sizedConfig('wh-fields'));
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'size');
+  assert.ok(box);
+  const width = paramRow(box, 'size:width');
+  const height = paramRow(box, 'size:height');
+  assert.ok(width, '「参数名：宽」这一行在');
+  assert.ok(height, '「参数名：高」这一行在');
+  assert.equal(textOf(width).join(''), 'Parameter name: width');
+  assert.equal(textOf(height).join(''), 'Parameter name: height');
+  assert.equal(width.children[1].props.value, 'width');
+  assert.equal(height.children[1].props.value, 'height');
+  assert.equal(paramRow(box, 'size:field'), null, '宽+高 不再有单个通用参数名');
+  assert.equal(paramRow(box, 'size:second'), null, '宽+高 的第二个参数名就是「高」');
+});
+
+test('比例+分辨率 编码方式下有两个参数名输入：比例 / 分辨率', async () => {
+  const { harness } = await openEditor(sizedConfig('aspect', {
+    field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
+  }));
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'size');
+  const aspect = paramRow(box, 'size:field');
+  const resolution = paramRow(box, 'size:second');
+  assert.ok(aspect, '「参数名：比例」这一行在');
+  assert.ok(resolution, '「参数名：分辨率」这一行在');
+  assert.equal(textOf(aspect).join(''), 'Parameter name: ratio');
+  assert.equal(textOf(resolution.children[0]).join(''), 'Parameter name: resolution');
+  assert.equal(aspect.children[1].props.value, 'aspect_ratio');
+  assert.equal(resolution.children[1].props.value, 'imageSize');
+});
+
+test('其它编码方式只有一个参数名输入', async () => {
+  for (const mode of ['wh-string', 'tier']) {
+    const { harness } = await openEditor(sizedConfig(mode, { field: 'image_size' }));
+    const opened = openModelPanel(harness);
+    const box = paramBox(opened, 'size');
+    assert.ok(paramRow(box, 'size:field'), mode + ' 有参数名这一行');
+    assert.equal(paramRow(box, 'size:width'), null, mode + ' 没有「宽」');
+    assert.equal(paramRow(box, 'size:height'), null, mode + ' 没有「高」');
+    assert.equal(paramRow(box, 'size:second'), null, mode + ' 没有「分辨率」');
+    assert.equal(textOf(paramRow(box, 'size:field')).join(''), 'Parameter name', mode + ' 的 label 是通用的「参数名」');
+    const nameInputs = findAll(box, (node) => node.type === 'input' && node.props['data-param-key'] === 'size');
+    assert.equal(nameInputs.length, 1, mode + ' 只有一个参数名输入');
+  }
+});
+
+test('上锁时框里的输入全部禁用', async () => {
+  const cases = [
+    ['aspect', { field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' } }, 3], // 编码方式 + 比例 + 分辨率
+    ['wh-fields', {}, 3] // 编码方式 + 只读的宽 / 高
+  ];
+  for (const [mode, extra, least] of cases) {
+    const config = sizedConfig(mode, extra);
+    config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+    const { harness } = await openEditor(config);
+    const opened = openModelPanel(harness);
+    const box = paramBox(opened, 'size');
+    const controls = findAll(box, (node) => node.type === 'input' || node.type === 'select');
+    assert.ok(controls.length >= least, mode + ' 框里的控件数够了');
+    assert.equal(paramLock(opened, 'size').props['aria-pressed'], 'true', mode + ' 这个键是上锁的');
+    for (const control of controls) {
+      assert.equal(control.props.disabled, true, mode + ' 上锁后框里每个控件都该禁用');
+    }
+  }
+});
+
+test('参考图有两个输入，也用方框框起来：字段名 / 传法', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'image');
+  assert.ok(box, '参考图应该是一个方框');
+  const field = paramRow(box, 'image:field');
+  const as = paramRow(box, 'image:as');
+  assert.ok(field && as, '字段名与传法各占一行');
+  assert.equal(textOf(field.children[0]).join(''), 'Field name');
+  assert.equal(textOf(as.children[0]).join(''), 'Encoding');
+  assert.equal(field.children[1].props['data-param-key'], 'image');
+  assert.equal(as.children[1].props['data-param-key'], 'image.as');
+  assert.ok(findAll(box, (node) => node.type === 'button' && node.props['data-lock-key'] === 'image').length === 1,
+    '参考图的锁在标题行');
+  assert.equal(paramRow(opened, 'image'), null, '参考图不再挤成一整行');
+});
