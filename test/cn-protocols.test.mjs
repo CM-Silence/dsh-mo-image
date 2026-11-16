@@ -83,7 +83,7 @@ test('ark sends preset sizes and puts reference images in the image field', () =
 
   const big = prepareGenerate(adapter, provider, {
     model: 'doubao-seedream-4-0-250828', prompt: 'x',
-    fitted: fitSize(adapter, '2048x2048')
+    fitted: fitSize(provider, '2048x2048', 'doubao-seedream-4-0-250828')
   }, new Set());
   assert.equal(JSON.parse(big.body).size, '2K');
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, filterImageModels } from '../lib/adapters.js';
+import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, mapQuality, filterImageModels } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -10,10 +10,11 @@ function jsonResponse(value, status = 200) {
 }
 
 test('gpt-image accepts arbitrary 16-multiple sizes and xhigh quality', () => {
-  const gpt = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare');
-  const fitted = fitSize(gpt, '2048x1152');
+  const provider = { baseUrl: 'https://api.openai.com/v1' };
+  const gpt = resolveAdapter(provider, 'gpt-image-2.5-flare');
+  const fitted = fitSize(provider, '2048x1152', 'gpt-image-2.5-flare');
   assert.equal(fitted.size, '2048x1152');
-  const options = qualityOptionsFor(gpt, 'gpt-image-2.5-flare');
+  const options = qualityOptionsFor(provider, 'gpt-image-2.5-flare', gpt);
   assert.deepEqual(options.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'auto']);
 });
 
@@ -111,8 +112,9 @@ test('host-specific adapters win over model-only matches', () => {
 });
 
 test('xhigh stays a first-class quality value', () => {
-  const gpt = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare');
-  assert.equal(qualityForAdapter(gpt, 'xhigh', 'gpt-image-2.5-flare'), 'xhigh');
+  const provider = { baseUrl: 'https://api.openai.com/v1' };
+  const gpt = resolveAdapter(provider, 'gpt-image-2.5-flare');
+  assert.equal(qualityForAdapter(provider, 'gpt-image-2.5-flare', 'xhigh', gpt), 'xhigh');
 });
 
 test('recraft routes edits to imageToImage', () => {
@@ -193,25 +195,50 @@ test('filter recognizes the built-in image model families', () => {
 });
 
 test('quality capabilities are per adapter and unsupported models hide quality', () => {
-  const gpt = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare');
-  const gptQuality = qualityOptionsFor(gpt);
+  const openai = { baseUrl: 'https://api.openai.com/v1' };
+  const gpt = resolveAdapter(openai, 'gpt-image-2.5-flare');
+  const gptQuality = qualityOptionsFor(openai, 'gpt-image-1.5', gpt);
   assert.deepEqual(gptQuality.options.map((item) => item.value), ['off', 'low', 'medium', 'high', 'auto']);
-  assert.equal(qualityForAdapter(gpt, 'max'), 'high');
+  assert.equal(qualityForAdapter(openai, 'gpt-image-1.5', 'max', gpt), 'high');
 
-  const dalle = resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'dall-e-3');
-  const dalleQuality = qualityOptionsFor(dalle);
+  const dalle = resolveAdapter(openai, 'dall-e-3');
+  const dalleQuality = qualityOptionsFor(openai, 'dall-e-3', dalle);
   assert.deepEqual(dalleQuality.options.map((item) => item.value), ['off', 'standard', 'hd']);
-  assert.equal(qualityForAdapter(dalle, 'high'), 'standard');
+  assert.equal(qualityForAdapter(openai, 'dall-e-3', 'high', dalle), 'standard');
 
-  const gemini = resolveAdapter({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta' }, 'gemini-2.5-flash-image');
-  assert.equal(qualityOptionsFor(gemini), null);
+  const geminiProvider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta' };
+  const gemini = resolveAdapter(geminiProvider, 'gemini-2.5-flash-image');
+  assert.equal(qualityOptionsFor(geminiProvider, 'gemini-2.5-flash-image', gemini), null);
 
-  const ideogram = resolveAdapter({ baseUrl: 'https://api.ideogram.ai' }, 'ideogram-3');
-  assert.deepEqual(qualityOptionsFor(ideogram).options.map((item) => item.value), ['off', 'turbo', 'default', 'quality']);
-  assert.equal(qualityForAdapter(ideogram, 'max'), 'default');
+  const ideogramProvider = { baseUrl: 'https://api.ideogram.ai' };
+  const ideogram = resolveAdapter(ideogramProvider, 'ideogram-3');
+  assert.deepEqual(qualityOptionsFor(ideogramProvider, 'ideogram-3', ideogram).options.map((item) => item.value), ['off', 'turbo', 'default', 'quality']);
+  assert.equal(qualityForAdapter(ideogramProvider, 'ideogram-3', 'max', ideogram), 'default');
 
-  const local = resolveAdapter({ baseUrl: 'http://127.0.0.1:7860' }, 'anything');
-  assert.equal(qualityOptionsFor(local), null);
+  const localProvider = { baseUrl: 'http://127.0.0.1:7860' };
+  const local = resolveAdapter(localProvider, 'anything');
+  assert.equal(qualityOptionsFor(localProvider, 'anything', local), null);
+});
+
+test('quality off means the field is not sent at all', () => {
+  const openai = { baseUrl: 'https://api.openai.com/v1' };
+  const gpt = resolveAdapter(openai, 'gpt-image-2.5-flare');
+  // off 是全局固定档位：翻译成"不发这个参数"，不能变成 quality:"off" 发上去。
+  assert.equal(mapQuality(openai, 'gpt-image-2.5-flare', 'off', gpt), undefined);
+  assert.equal(mapQuality(openai, 'gpt-image-2.5-flare', 'auto', gpt), undefined);
+  assert.equal(mapQuality(openai, 'gpt-image-2.5-flare', '', gpt), undefined);
+
+  const ideogramProvider = { baseUrl: 'https://api.ideogram.ai' };
+  const ideogram = resolveAdapter(ideogramProvider, 'ideogram-4');
+  assert.equal(mapQuality(ideogramProvider, 'ideogram-4', 'off', ideogram), undefined);
+  assert.equal(mapQuality(ideogramProvider, 'ideogram-4', 'quality', ideogram), 'QUALITY');
+
+  // 端到端：档位是 off 时，组装出来的 body 里连 quality 这个键都不该有。
+  const body = JSON.parse(prepareGenerate(gpt, openai, {
+    model: 'gpt-image-2.5-flare', prompt: 'p', quality: 'off', fitted: fitSize(openai, '1024x1024', 'gpt-image-2.5-flare')
+  }, new Set()).body);
+  assert.equal(body.quality, undefined);
+  assert.equal(body.size, '1024x1024');
 });
 
 test('Google Gemini lists image models and sends generateContent image parts', async (t) => {

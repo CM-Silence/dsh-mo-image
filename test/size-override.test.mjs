@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { resolveAdapter, sizeSpecFor, fitSize, prepareGenerate } from '../lib/adapters.js';
 import { normalizeModelOptions } from '../lib/config-store.js';
 
-/* 模型选项里那份「尺寸参数」覆盖：用户手填的形态/参数名/分隔符要压过适配器默认。 */
+/* 模型选项里那份「尺寸参数」覆盖：用户手填的形态/参数名/分隔符要压过规则表默认。 */
 
 function relay(size) {
   return {
@@ -18,11 +18,11 @@ const MODEL = 'gemini-nano-banana-2.1';
 test('an override can rename the size parameter and change the separator', () => {
   const provider = relay({ mode: 'wh-string', field: 'image_size', separator: '*' });
   const adapter = resolveAdapter(provider, MODEL);
-  const spec = sizeSpecFor(adapter, MODEL);
+  const spec = sizeSpecFor(provider, MODEL, adapter);
   assert.equal(spec.control, 'wh');
   assert.equal(spec.field, 'image_size');
 
-  const fitted = fitSize(adapter, { kind: 'size', text: '1024x1024' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'size', text: '1024x1024' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.equal(body.image_size, '1024*1024');
   assert.equal(body.size, undefined, 'the old field name must not leak through');
@@ -31,7 +31,7 @@ test('an override can rename the size parameter and change the separator', () =>
 test('an override can switch to two numeric fields', () => {
   const provider = relay({ mode: 'wh-fields' });
   const adapter = resolveAdapter(provider, MODEL);
-  const fitted = fitSize(adapter, { kind: 'size', text: '1368x768' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'size', text: '1368x768' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.equal(body.width, 1368);
   assert.equal(body.height, 768);
@@ -41,12 +41,12 @@ test('an override can switch to two numeric fields', () => {
 test('an override can switch to a ratio even on a plain images gateway', () => {
   const provider = relay({ mode: 'aspect' });
   const adapter = resolveAdapter(provider, MODEL);
-  const spec = sizeSpecFor(adapter, MODEL);
+  const spec = sizeSpecFor(provider, MODEL, adapter);
   assert.equal(spec.control, 'aspect');
   assert.ok(spec.aspects.includes('16:9'), 'a default ratio list keeps the dropdown usable');
   assert.equal(spec.field, 'aspect_ratio');
 
-  const fitted = fitSize(adapter, { kind: 'aspect', text: '1024x1024' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'aspect', text: '1024x1024' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.equal(body.aspect_ratio, '1:1');
 });
@@ -54,11 +54,11 @@ test('an override can switch to a ratio even on a plain images gateway', () => {
 test('an override can send a tier label', () => {
   const provider = relay({ mode: 'tier', field: 'resolution' });
   const adapter = resolveAdapter(provider, MODEL);
-  const spec = sizeSpecFor(adapter, MODEL);
+  const spec = sizeSpecFor(provider, MODEL, adapter);
   assert.equal(spec.control, 'preset');
   assert.deepEqual(spec.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
 
-  const fitted = fitSize(adapter, { kind: 'preset', text: '2K' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'preset', text: '2K' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.equal(body.resolution, '2K');
 });
@@ -66,7 +66,7 @@ test('an override can send a tier label', () => {
 test('a dotted parameter name builds a nested object', () => {
   const provider = relay({ mode: 'wh-string', field: 'generationConfig.imageConfig.imageSize' });
   const adapter = resolveAdapter(provider, MODEL);
-  const fitted = fitSize(adapter, { kind: 'size', text: '1024x1536' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'size', text: '1024x1536' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.deepEqual(body.generationConfig, { imageConfig: { imageSize: '1024x1536' } });
 });
@@ -74,7 +74,7 @@ test('a dotted parameter name builds a nested object', () => {
 test('the user override beats the built-in model family table', () => {
   // 官方家族表认为 nano-banana 收比例，用户说这个中转只认 width/height。
   const provider = relay({ mode: 'wh-fields' });
-  const spec = sizeSpecFor(resolveAdapter(provider, MODEL), MODEL);
+  const spec = sizeSpecFor(provider, MODEL);
   assert.equal(spec.control, 'wh');
 });
 
@@ -83,10 +83,10 @@ test('without an override the model name still picks a sensible default', () => 
   const adapter = resolveAdapter(plain, MODEL);
   assert.equal(adapter.sizeOverride, undefined);
   // 名字里有 banana：按 nano-banana 的比例 + 档位兜底，用户仍然可以覆盖。
-  assert.equal(sizeSpecFor(adapter, MODEL).control, 'aspect');
-  assert.deepEqual(sizeSpecFor(adapter, MODEL).tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
+  assert.equal(sizeSpecFor(plain, MODEL).control, 'aspect');
+  assert.deepEqual(sizeSpecFor(plain, MODEL).tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
   // 认不出来的模型保持宽高。
-  assert.equal(sizeSpecFor(adapter, 'mystery-image-v9').control, 'wh');
+  assert.equal(sizeSpecFor(plain, 'mystery-image-v9').control, 'wh');
 });
 
 test('the config sanitiser keeps a size-only model option', () => {
@@ -126,7 +126,7 @@ test('a second field can carry the ratio or the tier', () => {
     }
   };
   const adapter = resolveAdapter(provider, MODEL);
-  const fitted = fitSize(adapter, { kind: 'aspect', text: '1368x768' }, MODEL);
+  const fitted = fitSize(provider, { kind: 'aspect', text: '1368x768' }, MODEL);
   const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
   assert.equal(body.aspect_ratio, '16:9');
   assert.equal(body.imageSize, fitted.tier, 'the tier goes to the second field');

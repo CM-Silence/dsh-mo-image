@@ -15,14 +15,14 @@ const adapter = {
 };
 
 test('sizeHintText lists the allowed sizes', () => {
-  assert.match(sizeHintText(adapter), /1024x1024/);
-  assert.match(sizeHintText(adapter), /1792x1024/);
+  assert.match(sizeHintText({}, 'dall-e-3'), /1024x1024/);
+  assert.match(sizeHintText({}, 'dall-e-3'), /1792x1024/);
 });
 
 test('sizeHintText falls back to pixel budget and multiple', () => {
-  const loose = { size: { multiple: 16, minPixels: 655360, maxPixels: 8294400 } };
-  assert.match(sizeHintText(loose), /16/);
-  assert.match(sizeHintText(loose), /0\.66/);
+  const loose = {};
+  assert.match(sizeHintText(loose, 'gpt-image-1.5'), /16/);
+  assert.match(sizeHintText(loose, 'gpt-image-1.5'), /0\.66/);
 });
 
 test('a size rejection is reported once and never retried', async (t) => {

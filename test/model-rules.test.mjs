@@ -172,8 +172,13 @@ test('同一族模型在魔搭是宽高串、上限 1664', () => {
   assert.equal(size.domain.maxSide, 1664);
 });
 
-test('qwen-image 在未知网关不命中，由用户覆盖', () => {
-  assert.equal(detectSizeRule('qwen-image-3.0-pro', 'https://gateway.example/v1'), null);
+test('qwen-image 在未知网关落到兜底规则，由用户覆盖', () => {
+  // 硅基流动/百炼的主机指纹都不匹配，按设计走最后那条 OpenAI 兼容兜底（发 size），
+  // 不要它的形态就由模型选项覆盖。
+  const fallback = detectSizeRule('qwen-image-3.0-pro', 'https://gateway.example/v1');
+  assert.equal(fallback.size.mode, 'wh-string');
+  assert.equal(fallback.size.field, 'size');
+  assert.equal(fallback.domain.multiple, 1);
 });
 
 /* ------------------------------------------------------------ 主机隔离 */
@@ -216,11 +221,20 @@ test('没有质量声明的模型返回 null，不发质量字段', () => {
 
 /* ------------------------------------------------------------------ 未命中 */
 
-test('不认识的模型返回 null', () => {
-  assert.equal(detectSizeRule('some-private-model'), null);
+/* ------------------------------------------------- 兜底与「真的没有」 */
+
+test('认不出的模型落兜底尺寸规则，质量仍然是没有', () => {
+  // 尺寸：兜底规则（match 通配、无主机）保证中转站不会突然不发 size。
+  for (const rule of [detectSizeRule('some-private-model'), detectSizeRule('some-private-model', 'https://gateway.example/v1')]) {
+    assert.ok(rule, '尺寸必须有兜底，未命中不许变成"不发"');
+    assert.equal(rule.size.mode, 'wh-string');
+    assert.equal(rule.size.field, 'size');
+    assert.equal(rule.domain.multiple, 1);
+  }
+  // 质量没有兜底：没有质量声明的模型就是不报档位。
   assert.equal(detectQualityRule('some-private-model'), null);
-  assert.equal(detectSizeRule('some-private-model', 'https://gateway.example/v1'), null);
   assert.equal(detectQualityRule('some-private-model', 'https://gateway.example/v1'), null);
+  // 空模型名什么都不命中。
   assert.equal(detectSizeRule(''), null);
   assert.equal(detectQualityRule(''), null);
 });

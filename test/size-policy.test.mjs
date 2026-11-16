@@ -5,25 +5,20 @@ import { fitSize, sizePolicyFor, parseTier, nearestTier, sizeForAspect } from '.
 
 /* 尺寸策略：能力按模型分档，档位名保留档位、像素另给。 */
 
-const ark = {
-  size: {
-    control: 'preset', custom: true, field: 'size', style: 'string',
-    tiers: [{ value: '1K', pixels: 1048576 }, { value: '2K', pixels: 4194304 }]
-  },
-  sizeByModel: [
-    { match: /5\.0-lite/, size: { tiers: [{ value: '2K', pixels: 4194304 }, { value: '3K', pixels: 9437184 }] } }
-  ]
-};
+const ARK = { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' };
+const SILICONFLOW = { baseUrl: 'https://api.siliconflow.cn/v1' };
 
-test('sizeByModel overrides the tier set for the matching model', () => {
-  assert.deepEqual(sizePolicyFor(ark, 'seedream-5.0-lite').tiers.map((item) => item.value), ['2K', '3K']);
-  assert.deepEqual(sizePolicyFor(ark, 'seedream-5.5').tiers.map((item) => item.value), ['1K', '2K']);
+// 原来这里放的是「基础策略 + sizeByModel 覆盖」的假适配器；分档现在由规则表给，
+// 同一件事用真实模型（seedream 的版本分叉）来锁。
+test('each seedream version gets its own tier set from the rule table', () => {
+  assert.deepEqual(sizePolicyFor(ARK, 'seedream-5.0-lite').tiers.map((item) => item.value), ['2K', '3K', '4K']);
+  assert.deepEqual(sizePolicyFor(ARK, 'seedream-5.5').tiers.map((item) => item.value), ['1K', '1.5K', '2K']);
 });
 
 test('parseTier keeps the label and resolves pixels', () => {
-  assert.deepEqual(parseTier(ark, '2K'), { value: '2K', pixels: 4194304 });
-  assert.equal(parseTier(ark, '9K'), null);
-  assert.deepEqual(parseTier(ark, '1024x1536'), { value: '1024x1536', pixels: 1572864, width: 1024, height: 1536 });
+  assert.deepEqual(parseTier(ARK, '2K', 'seedream-5.5'), { value: '2K', pixels: 4194304 });
+  assert.equal(parseTier(ARK, '9K', 'seedream-5.5'), null);
+  assert.deepEqual(parseTier(ARK, '1024x1536', 'seedream-5.5'), { value: '1024x1536', pixels: 1572864, width: 1024, height: 1536 });
 });
 
 test('nearestTier picks by pixel budget, not by a fixed threshold', () => {
@@ -38,14 +33,16 @@ test('sizeForAspect aligns both sides to 8', () => {
 });
 
 test('allowCustom keeps an off-list WxH instead of snapping', () => {
-  const loose = { size: { control: 'wh', allowed: ['1024x1024'], allowCustom: true, minPixels: 262144, maxPixels: 4194304 } };
-  assert.equal(fitSize(loose, '1328x1328').size, '1328x1328');
-  const strictList = { size: { control: 'preset', allowed: ['1024x1024', '2048x2048'], allowCustom: false } };
-  assert.equal(fitSize(strictList, '1328x1328').adjusted, true, 'without allowCustom it still snaps');
+  // 硅基流动的非 qwen 表只有白名单 + allowCustom：表外的 WxH 原样保留。
+  const loose = SILICONFLOW;
+  assert.equal(fitSize(loose, '1328x1328', 'Kwai-Kolors/Kolors').size, '1328x1328');
+  // dall-e-3 只有三个固定尺寸：白名单外必须吸附到最近的合法值。
+  const strictList = {};
+  assert.equal(fitSize(strictList, '1328x1328', 'dall-e-3').adjusted, true, 'without allowCustom it still snaps');
 });
 
 test('a tier label survives fitSize as a label with pixels attached', () => {
-  const out = fitSize(ark, { kind: 'preset', text: '2K' }, 'seedream-5.5');
+  const out = fitSize(ARK, { kind: 'preset', text: '2K' }, 'seedream-5.5');
   assert.equal(out.size, '2K');
   assert.equal(out.width, 2048);
   assert.equal(out.height, 2048);

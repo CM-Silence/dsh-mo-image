@@ -35,10 +35,8 @@ test('normalizeConfig keeps the active model and drops unknown provider fields',
 });
 
 test('resolveSizeRequest keeps the fixed-size contract', () => {
-  const adapter = {
-    size: { control: 'wh', style: 'string', field: 'size', multiple: 8, default: '1024x1024', onUnsupported: 'nearest' }
-  };
-  const out = resolveSizeRequest(adapter, 'm', { auto: false, width: 768, height: 1024 }, {});
+  // 形态来自模型规则（认不出的模型走 OpenAI 兼容兜底：宽高输入框）。
+  const out = resolveSizeRequest({ baseUrl: 'https://gateway.example/v1' }, 'm', { auto: false, width: 768, height: 1024 }, {});
   assert.equal(out.control, 'wh');
   assert.equal(out.arg, '768x1024');
 });

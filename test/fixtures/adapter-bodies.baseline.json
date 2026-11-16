@@ -88,15 +88,12 @@
       "generate": {
         "supported": true,
         "path": "/models",
-        "body": {
-          "aspect_ratio": "1:1"
-        }
+        "body": {}
       },
       "edit": {
         "supported": true,
         "path": "/models",
         "body": {
-          "aspect_ratio": "1:1",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
       }

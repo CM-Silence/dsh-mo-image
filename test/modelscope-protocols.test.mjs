@@ -164,10 +164,11 @@ test('modelscope edit sends one reference as a string and several as an array', 
 });
 
 test('modelscope fits sizes inside the gateway per-side limits', () => {
-  const adapter = resolveAdapter(scopeProvider(), 'Qwen/Qwen-Image-2.1');
-  assert.equal(fitSize(adapter, '4096x2304').size, '2048x1152');
-  assert.equal(fitSize(adapter, '32x32').size, '64x64');
-  assert.equal(fitSize(adapter, '1024x768').size, '1024x768');
+  // 网关级的每边限制来自 modelscope 那条 `.*` 主机规则（模型族的更严上限另算）。
+  const provider = scopeProvider();
+  assert.equal(fitSize(provider, '4096x2304', 'stabilityai/stable-diffusion-xl').size, '2048x1152');
+  assert.equal(fitSize(provider, '32x32', 'stabilityai/stable-diffusion-xl').size, '64x64');
+  assert.equal(fitSize(provider, '1024x768', 'stabilityai/stable-diffusion-xl').size, '1024x768');
 });
 
 test('modelscope is a named adapter, preset and an editable model family', () => {

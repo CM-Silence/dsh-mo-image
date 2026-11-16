@@ -29,17 +29,18 @@
  * 见 FIXED / MODELS / BASE_URLS。四个刻意的选择：
  *   - model 取该协议「典型」模型的真实 id（dall-e-3、gpt-image-2.5-flare、qwen-image-3.0-pro、
  *     doubao-seedream-4-0-250828 …），否则按模型分叉的策略根本命中不了；
- *   - fitted = fitSize(adapter, '1024x1024', model)，**带上 model**：同一协议里尺寸形态按模型
+ *   - fitted = fitSize(provider, '1024x1024', model)，**带上 model**：同一协议里尺寸形态按模型
  *     分叉（ideogram-4 收 resolution 像素表、seedream 收档位名），只按协议算会录到一条谁都不发的 body；
- *   - quality = qualityOptionsFor(adapter, model).default，没有质量声明的协议记 null。
- *   - baseUrl 现在不参与 prepare*，但搬迁后的规则要按主机区分（qwen-image 在硅基流动是
- *     image_size、在百炼是 size 且用 *），所以固定输入先给真实主机，免得搬迁后这条测试失效。
+ *   - quality = qualityOptionsFor(provider, model, adapter).default，没有质量声明的协议记 null。
+ *   - baseUrl 现在不参与 prepare*，但迁移后的规则要按主机区分（qwen-image 在硅基流动是
+ *     image_size、在百炼是 size 且用 *），所以固定输入先给真实主机，免得迁移后这条测试失效。
  *
- * ---- 搬迁时怎么用这个文件 -------------------------------------------------------
+ * ---- 迁移时怎么用这个文件 -------------------------------------------------------
  *
- *   任务 2/3 会把 sizePolicyFor / fitSize / qualityOptionsFor 的入参从 adapter 改成 provider。
- *   到时候本文件里的调用点要跟着机械改（只改参数，断言一个字不动），基线 JSON 也不许动：
- *   改完调用点仍然全绿，才是「只搬不改」的证据。
+ *   任务 2/3 已经把 sizePolicyFor / fitSize / qualityOptionsFor 的入参从 adapter 改成
+ *   provider（adapter 只在协议级例外——openai-chat 的 control:'prompt'——和质量闸门里
+ *   作为可选第三参出现）。本文件的调用点跟着机械改过，断言一个字没动，基线 JSON 只变了
+ *   google-gemini 那一条（gemini-2.5-flash-image 的 mode:'none' 收口：尺寸字段消失）。
  *   另外：16 条「自己拼 body」的协议里，fal 和 replicate **没有任何 size 声明**，
  *   composeBody 是靠 encodeSizePrimary 的默认参数名兜出一个 {size:"1024x1024"}，上游根本不看；
  *   规则表里没有它们时这个兜底很可能会变成「不发尺寸」→ 这两条基线会合理地变红。
@@ -53,7 +54,7 @@
  *   - 尺寸被上游拒绝后的降级（drops / 严格模式）不在基线范围内，见 test/strict-size.test.mjs。
  *   - edit 的参考图是固定的 1×1 PNG，只验证「参考图挂到哪个字段」，不验证上传细节。
  *   - 固定输入用的是每个协议的**默认**质量档；质量 off（mapQuality 把 off 翻成「不发该参数」）
- *     不在基线里，而且目前没有别的测试锁这条 —— 搬 quality 时请自己补一条。
+ *     不在基线里，由 test/provider-adapters.test.mjs 的 "quality off means the field is not sent at all" 锁住。
  *
  * ---- 重建基线 -----------------------------------------------------------------
  *
@@ -252,12 +253,12 @@ function recordAdapter(id) {
   const provider = providerOf(id);
   const adapter = adapterFor(id);
   assert.equal(adapter.id, id, 'adapter: ' + id + ' 解析到了 ' + adapter.id + '，固定输入对不上');
-  const spec = qualityOptionsFor(adapter, model);
+  const spec = qualityOptionsFor(provider, model, adapter);
   const input = {
     model,
     prompt: FIXED.prompt,
     negativePrompt: FIXED.negativePrompt,
-    fitted: fitSize(adapter, FIXED.sizeRequest, model),
+    fitted: fitSize(provider, FIXED.sizeRequest, model),
     quality: spec ? spec.default : null,
     images: [FIXED.image]
   };
