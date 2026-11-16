@@ -1,7 +1,7 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, sizePolicyFor } from '../lib/adapters.js';
+import { resolveAdapter, sizePolicyFor, sizeSpecFor, fitSize, prepareGenerate } from '../lib/adapters.js';
 
 /* 各平台的尺寸形态：字段名、分隔符、档位、比例都得跟官方文档对齐。 */
 
@@ -123,4 +123,29 @@ test('ideogram transparent sends aspect plus output_resolution', async (t) => {
   const form = calls[0].init.body;
   assert.equal(form.get('aspect_ratio'), '1x1');
   assert.equal(form.get('output_resolution'), '2k');
+});
+
+test('a relay serving gemini models exposes the ratio dropdown, not width/height', () => {
+  // APIYI 这类 OpenAI 兼容中转：域名不认识，走通用适配器，但模型本身是比例型的。
+  const provider = { baseUrl: 'https://api.apiyi.com/v1', adapter: '', key: 'k' };
+  const nano = resolveAdapter(provider, 'gemini-nano-banana-2.1');
+  assert.equal(nano.id, 'openai-images');
+  const spec = sizeSpecFor(nano, 'gemini-nano-banana-2.1');
+  assert.equal(spec.control, 'aspect');
+  assert.ok(spec.aspects.includes('16:9'));
+  assert.deepEqual(spec.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
+
+  const flash = sizeSpecFor(resolveAdapter(provider, 'gemini-3.1-flash-image'), 'gemini-3.1-flash-image');
+  assert.deepEqual(flash.tiers.map((tier) => tier.value), ['512', '1K', '2K', '4K']);
+});
+
+test('a relay still sends a WxH size string for a ratio model', () => {
+  const provider = { baseUrl: 'https://api.apiyi.com/v1', adapter: '', key: 'k' };
+  const adapter = resolveAdapter(provider, 'gemini-nano-banana-2.1');
+  const fitted = fitSize(adapter, { kind: 'aspect', text: '1368x768' }, 'gemini-nano-banana-2.1');
+  assert.equal(fitted.size, '1368x768');
+  assert.equal(fitted.aspect, '16:9');
+  assert.equal(fitted.tier, '1K');
+  const built = prepareGenerate(adapter, provider, { model: 'gemini-nano-banana-2.1', prompt: 'p', fitted: fitted }, new Set());
+  assert.equal(JSON.parse(built.body).size, '1368x768');
 });
