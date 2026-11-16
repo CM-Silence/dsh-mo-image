@@ -198,6 +198,15 @@ const messages = {
   'seat.menuModel': '模型',
   'seat.menuQuality': '质量',
   'seat.menuSize': '尺寸',
+  'seat.sizeAspect': '比例',
+  'seat.sizeTier': '档位',
+  'seat.sizePreset': '预设',
+  'seat.sizeCustom': '自定义',
+  'seat.width': '宽',
+  'seat.height': '高',
+  'seat.sizeAutoValue': '自动尺寸',
+  'seat.sizeStrict': '严格',
+  'seat.back': '返回',
   'seat.settingsAria': '生图设置',
   'seat.moreSettings': '其他设置',
   'seat.menuPromptOptimization': '提示词优化',
@@ -626,6 +635,45 @@ test('the size tool opens a second page with auto and both sides', () => {
     collectType(tree, 'input').filter((input) => input.props['aria-label'] === ct('seat.menuPromptOptimization')).length,
     0,
     'the settings page has no prompt optimization checkbox'
+  );
+});
+
+test('the settings page follows the active model shape even without a provider submenu', () => {
+  const client = loadClient();
+  // 设置页没有 provider 上下文（subProvider === '__size'），能力必须回到当前生效的提供商；
+  // 模型是 auto 时取该提供商的第一张模型，否则面板会退化成只剩宽高。
+  client.__test.applyCatalog({
+    capabilities: [{
+      providerId: 'p1',
+      models: [{
+        model: 'gemini-nano-banana-2.1',
+        size: { control: 'aspect', aspects: ['1:1', '16:9'], tiers: [{ value: '1K' }, { value: '2K' }], custom: false, wire: ['aspect'], stitch: false, hint: '' }
+      }]
+    }]
+  });
+  const store = storeFixture({
+    providers: [{
+      id: 'p1', name: 'APIYI', baseUrl: 'https://api.apiyi.com/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['gemini-nano-banana-2.1'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'gemini-nano-banana-2.1' }
+  });
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: store,
+      setStore() {},
+      qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: '__size' })
+  );
+  const text = collectText(tree).join(' ');
+  assert.match(text, /比例/, 'the ratio row must appear for a ratio model');
+  assert.match(text, /档位/, 'the tier row must appear when the model has tiers');
+  assert.equal(
+    collectType(tree, 'input').filter((input) => input.props['aria-label'] === ct('seat.width')).length,
+    0,
+    'a ratio model has no width input'
   );
 });
 
