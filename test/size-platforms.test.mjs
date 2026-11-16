@@ -149,3 +149,28 @@ test('a relay still sends a WxH size string for a ratio model', () => {
   const built = prepareGenerate(adapter, provider, { model: 'gemini-nano-banana-2.1', prompt: 'p', fitted: fitted }, new Set());
   assert.equal(JSON.parse(built.body).size, '1368x768');
 });
+test('a relay serving seedream exposes the tier presets, hyphens and all', () => {
+  // APIYI 的模型 ID 是 seedream-5-5-261028（连字符），文档说 size 收 1K/1.5K/2K 档位或精确 WxH。
+  const provider = { baseUrl: 'https://api.apiyi.com/v1', adapter: '', key: 'k' };
+  const spec = sizeSpecFor(resolveAdapter(provider, 'doubao-seedream-5-5-261028'), 'doubao-seedream-5-5-261028');
+  assert.equal(spec.control, 'preset');
+  assert.deepEqual(spec.tiers.map((tier) => tier.value), ['1K', '1.5K', '2K']);
+  assert.equal(spec.custom, true, 'arbitrary WxH is allowed too');
+  const adapter = resolveAdapter(provider, 'doubao-seedream-5-5-261028');
+  const fitted = fitSize(adapter, { kind: 'preset', text: '2K' }, 'doubao-seedream-5-5-261028');
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: 'doubao-seedream-5-5-261028', prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.size, '2K', 'the tier label goes on the wire as-is');
+});
+
+test('gpt-image-2-all ignores size, so the panel talks to the prompt instead', () => {
+  const provider = { baseUrl: 'https://api.apiyi.com/v1', adapter: '', key: 'k' };
+  const model = 'gpt-image-2.5-all';
+  const adapter = resolveAdapter(provider, model);
+  const spec = sizeSpecFor(adapter, model);
+  assert.equal(spec.control, 'prompt', 'the only way to set a size is the prompt');
+  assert.equal(spec.stitch, true);
+  assert.deepEqual(spec.wire, []);
+  const fitted = fitSize(adapter, { kind: 'size', text: '1024x1024' }, model);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: model, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.size, undefined, 'size must not be sent to a model that ignores it');
+});
