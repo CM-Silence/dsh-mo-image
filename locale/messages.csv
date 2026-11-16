@@ -16,6 +16,11 @@ form.displayName,"显示名称","Display name","表示名","Nombre visible","Nom
 form.baseUrl,"API 地址","API URL","API URL","URL de la API","URL de l'API","API-URL","URL API","URL da API"
 form.protocol,"API 协议","API protocol","API プロトコル","Protocolo de API","Protocole d'API","API-Protokoll","Протокол API","Protocolo da API"
 form.protocolAuto,"自动识别","Auto-detect","自動判別","Detección automática","Détection automatique","Automatisch erkennen","Автоопределение","Detecção automática"
+form.route.generate,文生图,Text-to-image,テキストから生成,Texto a imagen,Texte vers image,Text zu Bild,Из текста,Texto para imagem
+form.route.edit,图生图,Image-to-image,画像から生成,Imagen a imagen,Image vers image,Bild zu Bild,Из изображения,Imagem para imagem
+form.route.models,获取模型列表,List models,モデル一覧,Listar modelos,Lister les modèles,Modelle laden,Список моделей,Listar modelos
+form.routeUnsupported,不支持,Not supported,非対応,No compatible,Non pris en charge,Nicht unterstützt,Не поддерживается,Não suportado
+form.customProtocol,自定义（自己填地址）,Custom (enter URLs),カスタム（URL を入力）,Personalizado (introducir URLs),Personnalisé (saisir les URL),Benutzerdefiniert (URLs eingeben),Свой (ввести адреса),Personalizado (inserir URLs)
 form.hostModel,"调度模型","Host model","ホストモデル","Modelo anfitrión","Modèle hôte","Host-Modell","Ведущая модель","Modelo host"
 form.hostModelHint,"Responses API 需要一个能调用生图工具的主模型。","The Responses API needs a main model that can call the image tool.","Responses API では画像ツールを呼び出せるメインモデルが必要です。","La API Responses necesita un modelo principal que pueda llamar a la herramienta de imagen.","L'API Responses nécessite un modèle principal capable d'appeler l'outil d'image.","Die Responses-API benötigt ein Hauptmodell, das das Bildwerkzeug aufrufen kann.","Responses API требует основную модель, которая может вызывать инструмент изображений.","A API Responses precisa de um modelo principal que possa chamar a ferramenta de imagem."
 form.apiKey,"API 密钥","API key","API キー","Clave de API","Clé d'API","API-Schlüssel","Ключ API","Chave de API"
@@ -188,8 +193,6 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.modelMappingFormatApi","API 格式","API format","API 形式","Formato API","Format API","API-Format","Формат API","Formato API"
 "form.modelMappingFormatUi","UI 格式","UI format","UI 形式","Formato UI","Format UI","UI-Format","Формат UI","Formato UI"
 "form.modelMappingSampler","采样器","Sampler","サンプラー","Muestreador","Sampler","Sampler","Сэмплер","Amostrador"
-"form.modelMappingPrompt","提示词","Prompt","プロンプト","Prompt","Prompt","Prompt","Промпт","Prompt"
-"form.modelMappingNegative","负面词","Negative prompt","ネガティブプロンプト","Prompt negativo","Prompt négatif","Negativ-Prompt","Негативный промпт","Prompt negativo"
 "form.modelMappingWidth","宽度","Width","幅","Ancho","Largeur","Breite","Ширина","Largura"
 "form.modelMappingHeight","高度","Height","高さ","Alto","Hauteur","Höhe","Высота","Altura"
 "form.modelMappingSeed","种子","Seed","シード","Semilla","Graine","Seed","Сид","Semente"
@@ -198,6 +201,7 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.modelMappingColName","参数名","Parameter","パラメータ","Parámetro","Paramètre","Parameter","Параметр","Parâmetro"
 "form.modelMappingColTarget","参数映射","Mapping","マッピング","Mapeo","Correspondance","Zuordnung","Привязка","Mapeamento"
 "form.modelMappingColExpose","是否暴露","Exposed","公開","Expuesto","Exposé","Freigeben","Доступен","Exposto"
+"form.modelAutoInjectHint","提示词与负面词由工具参数直接写入，不需要在这里配置。","The prompt and negative prompt come straight from the tool call, so there is nothing to configure here.","プロンプトとネガティブプロンプトはツール引数から直接書き込まれるため、ここでの設定は不要です。","El prompt y el prompt negativo llegan de la llamada de la herramienta, así que aquí no hay nada que configurar.","Les prompts positif et négatif viennent de l'appel d'outil : rien à configurer ici.","Prompt und Negativ-Prompt kommen direkt aus dem Werkzeugaufruf, hier ist nichts einzustellen.","Промпт и негативный промпт подставляются из вызова инструмента, здесь настраивать нечего.","O prompt e o prompt negativo vêm da chamada da ferramenta; não há nada para configurar aqui."
 "param.steps","步数","Steps","ステップ数","Pasos","Étapes","Schritte","Шаги","Passos"
 "param.cfg","提示词强度","CFG scale","プロンプト強度","Intensidad del prompt","Intensité du prompt","Prompt-Stärke","Сила промпта","Intensidade do prompt"
 "param.sampler_name","采样器","Sampler","サンプラー","Muestreador","Échantillonneur","Sampler","Сэмплер","Amostrador"

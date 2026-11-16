@@ -494,14 +494,12 @@ const FIXED_SIZE_CONFIG = { ...CONFIG, defaults: { auto: false, width: 768, heig
 
 test('the panel shows width and height while the size is Auto', async () => {
   const tree = await openParsed(SIZED_ANALYSIS);
-  assert.ok(hasRow(tree, 'prompt'), 'the prompt row must stay');
   assert.ok(hasRow(tree, 'width'), 'Auto lets the model move the size, so show where it lands');
   assert.ok(hasRow(tree, 'height'));
 });
 
 test('the panel hides width and height while the picker pins the size', async () => {
   const tree = await openParsed(SIZED_ANALYSIS, FIXED_SIZE_CONFIG);
-  assert.ok(hasRow(tree, 'prompt'), 'the prompt row must stay');
   assert.ok(!hasRow(tree, 'width'), 'a pinned size is the picker\'s business');
   assert.ok(!hasRow(tree, 'height'));
 });
@@ -514,5 +512,17 @@ test('the panel still offers width and height when the graph does not reveal the
   const tree = await openParsed(analysis, FIXED_SIZE_CONFIG);
   assert.ok(hasRow(tree, 'width'), 'an undetected size needs the manual fallback');
   assert.ok(hasRow(tree, 'height'), 'an undetected size needs the manual fallback');
+});
+
+/* 提示词与负面词由工具参数直接写入：参数列表里不占行。 */
+
+test('the params table has no prompt or negative prompt rows', async () => {
+  const tree = await openParsed(SIZED_ANALYSIS);
+  assert.ok(!hasRow(tree, 'prompt'), 'the prompt travels as the tool argument, not as a row');
+  assert.ok(!hasRow(tree, 'negative_prompt'));
+  assert.match(textOf(tree).join(' '), /straight from the tool call/i,
+    'the panel has to say why these two are absent');
+  const boxes = findAll(tree, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  assert.equal(boxes.length, 3, 'width, height and steps keep their switches');
 });
 

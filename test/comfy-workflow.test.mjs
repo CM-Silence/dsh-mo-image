@@ -169,15 +169,17 @@ test('a whitespace-only widget is still a literal the mapping can use', () => {
   assert.deepEqual(mapping.negative_prompt, { node: '18:5', input: 'text' });
 });
 
-test('an as-exported workflow still lists the negative prompt parameter', () => {
+test('an as-exported workflow still maps the empty negative widget', () => {
   const graph = moss();
   graph['18:17'].inputs.value = '';
   graph['18:5'].inputs.text = '';
   const analysis = analyzeWorkflow(graph, objectInfo());
-  assert.ok(analysis.params.some((param) => param.name === 'negative_prompt'),
-    'without the param the chat model never learns the slot exists');
+  assert.deepEqual(analysis.mapping.negative_prompt, { node: '18:5', input: 'text' },
+    'the tool own negative_prompt argument has to land on this slot');
   assert.ok(analysis.candidates.negative_prompt.length,
     'the settings panel hides a role row when its candidate pool is empty');
+  assert.ok(!analysis.params.some((param) => param.name === 'negative_prompt'),
+    'it arrives as a tool argument, so it must not also show up as a tunable param');
 });
 
 test('a shared positive/negative node is never exposed as the negative prompt', () => {

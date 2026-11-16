@@ -178,6 +178,37 @@ test('comfyui rejects a custom workflow that is not valid JSON', async (t) => {
   );
 });
 
+test('a params.prompt cannot override the prompt argument', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let submitted = null;
+  globalThis.fetch = comfyFetch((kind, init) => {
+    if (kind === 'prompt') { submitted = JSON.parse(init.body); return jsonResponse({ prompt_id: 'pp-1' }); }
+    if (kind === 'history') {
+      return jsonResponse({ 'pp-1': { outputs: { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } } } });
+    }
+    return jsonResponse({ error: 'unexpected' }, 404);
+  });
+  const provider = {
+    baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true,
+    modelOptions: {
+      'm.safetensors': Object.assign({}, MAPPED_OPTIONS, {
+        params: [
+          { name: 'prompt', role: true, node: '5', input: 'text', type: 'STRING' },
+          { name: 'steps', node: '8', input: 'steps', type: 'INT' }
+        ]
+      })
+    }
+  };
+  const result = await adapter0(provider).execute('generate', provider, {
+    model: 'm.safetensors', prompt: 'a lighthouse', negativePrompt: '', fitted: {},
+    params: { prompt: 'hijacked', steps: 30 }
+  }, new AbortController().signal);
+  assert.equal(submitted.prompt['5'].inputs.text, 'a lighthouse', 'the prompt argument wins');
+  assert.equal(submitted.prompt['8'].inputs.steps, 30, 'a real tunable still applies');
+  assert.match(String(result.note), /prompt/, 'the ignored key is reported back');
+});
+
 test('comfyui falls back to the builtin workflow when the model has no options', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

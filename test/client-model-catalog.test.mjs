@@ -478,9 +478,10 @@ test('the protocol select lists every adapter and reveals the responses host mod
     && findAll(node, (child) => child.type === 'option').some((option) => option.props.value === 'bfl'))[0];
   assert.ok(protocolSelect, 'expected a protocol select that lists the adapters');
   assert.equal(protocolSelect.props.disabled, undefined);
+  // 末尾永远是「自定义」：它不在 manifest 里，由客户端补上去。
   assert.deepEqual(
     findAll(protocolSelect, (child) => child.type === 'option').map((option) => option.props.value),
-    ['', 'openai-responses', 'bfl']
+    ['', 'openai-responses', 'bfl', 'custom']
   );
   assert.equal(findAll(edited, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length, 0);
 

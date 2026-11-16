@@ -180,6 +180,33 @@ test('config route migrates keys to the credentials store and never returns them
     globalThis.fetch = originalFetch;
   }
 
+  // 自定义协议：模型列表走用户自己填的那个绝对地址，不跟 baseUrl 拼
+  let customUrl = '';
+  globalThis.fetch = async (url) => {
+    customUrl = String(url);
+    return new Response(JSON.stringify({ data: [{ id: 'flux-x' }] }), {
+      status: 200, headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    const customRes = makeRes();
+    await modelsRoute.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://g.example',
+      adapter: 'custom',
+      protocol: 'openai-images',
+      customEndpoints: {
+        generate: 'https://g.example/v1/images/generations',
+        edit: '',
+        models: 'https://g.example/v1/models'
+      }
+    })), customRes);
+    assert.equal(customRes.status, 200, customRes.body);
+    assert.equal(customUrl, 'https://g.example/v1/models');
+    assert.deepEqual(JSON.parse(customRes.body).models, ['flux-x']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
   globalThis.fetch = async () => new Response(JSON.stringify({
     data: [{ id: 'Qwen/Qwen-Image' }, { id: 'Qwen/Qwen2.5-72B-Instruct' }]
   }), {

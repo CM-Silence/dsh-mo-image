@@ -55,21 +55,23 @@ test('normalizeModelOptions drops a malformed parameter list instead of half-kee
 
 const MIXED = [
   { name: 'prompt', role: true, node: '1', input: 'value', type: 'STRING', default: 'x' },
+  { name: 'negative_prompt', role: true, node: '1', input: 'negative', type: 'STRING', default: '' },
   { name: 'steps', node: '2', input: 'steps', type: 'INT', default: 25 }
 ];
 
-test('role params are exposed by default while tunables stay hidden', () => {
-  const provider = { modelOptions: { m1: { workflow: '{}', params: MIXED } } };
-  const out = workflowParamsOf(provider, 'm1', { id: 'comfyui' });
-  assert.deepEqual(out.map((param) => param.name), ['prompt']);
+test('prompt and negative prompt are never params, even when an old config exposes them', () => {
+  const provider = {
+    modelOptions: { m1: { workflow: '{}', params: MIXED, expose: { prompt: true, negative_prompt: true } } }
+  };
+  assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined,
+    'these two arrive as the tool own arguments, so the model must not see them in params');
 });
 
-test('an explicit expose flag overrides the default in both directions', () => {
-  const provider = {
-    modelOptions: { m1: { workflow: '{}', params: MIXED, expose: { prompt: false, steps: true } } }
-  };
-  const out = workflowParamsOf(provider, 'm1', { id: 'comfyui' });
-  assert.deepEqual(out.map((param) => param.name), ['steps']);
+test('a tunable parameter stays hidden until it is switched on', () => {
+  const hidden = { modelOptions: { m1: { workflow: '{}', params: MIXED } } };
+  assert.equal(workflowParamsOf(hidden, 'm1', { id: 'comfyui' }), undefined);
+  const shown = { modelOptions: { m1: { workflow: '{}', params: MIXED, expose: { steps: true } } } };
+  assert.deepEqual(workflowParamsOf(shown, 'm1', { id: 'comfyui' }).map((param) => param.name), ['steps']);
 });
 
 test('non-comfy adapters never get workflow params', () => {
@@ -105,7 +107,27 @@ test('width and height stay hidden by default because the picker already injects
       }
     }
   };
-  assert.deepEqual(workflowParamsOf(provider, 'm1', { id: 'comfyui' }).map((param) => param.name), ['prompt']);
+  assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined);
+});
+
+test('role params only offer what the model can still tune', () => {
+  const graph = {
+    '1': { class_type: 'CLIPTextEncode', inputs: { text: 'a cat' } },
+    '1-': { class_type: 'CLIPTextEncode', inputs: { text: 'blurry' } },
+    '2': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 } },
+    '3': { class_type: 'KSampler', inputs: { seed: 1 } }
+  };
+  const mapping = {
+    prompt: { node: '1', input: 'text' },
+    negative_prompt: { node: '1-', input: 'text' },
+    width: { node: '2', input: 'width' },
+    height: { node: '2', input: 'height' },
+    seed: { node: '3', input: 'seed' },
+    model: null,
+    image: null
+  };
+  assert.deepEqual(collectRoleParams(graph, mapping, null).map((param) => param.name),
+    ['width', 'height', 'seed']);
 });
 
 test('a size parameter can still be switched on by hand when a workflow needs it', () => {

@@ -72,3 +72,11 @@ test('analyzed params carry the candidate inputs the panel can rebind to', () =>
   assert.ok(Array.isArray(steps.candidates), 'a param needs candidates for its dropdown');
   assert.ok(steps.candidates.some((item) => item.node === '18:7' && item.input === 'steps'));
 });
+
+test('analyzed params leave the prompt out of the tunable list', () => {
+  const analysis = analyzeWorkflow(moss(), objectInfo());
+  const names = analysis.params.map((param) => param.name);
+  assert.ok(!names.includes('prompt'), 'the prompt travels as the tool argument, not as params');
+  assert.ok(!names.includes('negative_prompt'));
+  assert.ok(names.includes('seed'), 'the seed still needs a switch to be overridable');
+});
