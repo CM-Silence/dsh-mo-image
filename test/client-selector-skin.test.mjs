@@ -783,6 +783,42 @@ test('the preset page labels the custom entry in both skins', () => {
   assert.equal(saved.defaults.preset, '__custom', 'picking the custom entry stores its sentinel');
 });
 
+test('the preset rows hide the width and height unless custom is selected', () => {
+  const client = loadClient();
+  client.__test.applyCatalog({
+    capabilities: [{
+      providerId: 'p1',
+      models: [{
+        model: 'doubao-seedream-4.5',
+        size: { control: 'preset', tiers: [{ value: '2K' }, { value: '4K' }], custom: true, wire: ['size'], stitch: false, hint: '' }
+      }]
+    }]
+  });
+  const storeFor = (preset) => storeFixture({
+    providers: [{
+      id: 'p1', name: 'Ark', baseUrl: 'https://ark.test/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['doubao-seedream-4.5'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'doubao-seedream-4.5' },
+    defaults: { quality: 'high', auto: false, width: 1024, height: 1024, preset: preset, promptOptimization: true }
+  });
+  const sides = (tree) => collectType(tree, 'input')
+    .filter((input) => input.props['aria-label'] === ct('seat.width') || input.props['aria-label'] === ct('seat.height'));
+  const codexPage = (preset) => client.render(
+    client.h(client.__test.CodexImageSeat, { t: ct, store: storeFor(preset), setStore() {}, qualitySpec: railSpec }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: '__size' })
+  );
+  const nativePage = (preset) => client.render(
+    client.h(client.__test.OfficialImageSeat, { t: ct, store: storeFor(preset), setStore() {} }),
+    new Map([[0, true], [1, 'size']])
+  );
+  // 档位就是最终尺寸，宽高在这时没有输入的意义，不该占两行。
+  assert.equal(sides(codexPage('2K')).length, 0, 'a tier preset hides both sides in the codex panel');
+  assert.equal(sides(nativePage('2K')).length, 0, 'a tier preset hides both sides in the native panel');
+  assert.equal(sides(codexPage('__custom')).length, 2, 'the custom preset brings both sides back in the codex panel');
+  assert.equal(sides(nativePage('__custom')).length, 2, 'the custom preset brings both sides back in the native panel');
+});
+
 test('other settings keeps only size controls', () => {
   const client = loadClient();
   const tree = client.render(
