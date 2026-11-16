@@ -323,10 +323,10 @@ test('bfl kontext sends aspect_ratio instead of width and height', async (t) => 
   assert.ok(String(submitted.input_image).startsWith('data:image/png;base64,'));
 });
 
-test('bfl ultra uses aspect_ratio instead of width/height', () => {
+test('bfl ultra uses aspect_ratio instead of width/height', async () => {
   const providerDef = { baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', key: 'k' };
   const adapter = resolveAdapter(providerDef, 'flux-pro-1.1-ultra');
-  const body = adapter.async.build({
+  const body = await adapter.async.build({
     model: 'flux-pro-1.1-ultra', prompt: 'x', fitted: { width: 1344, height: 768, size: '1344x768' }
   }, providerDef);
   assert.equal(body.aspect_ratio, '16:9');
