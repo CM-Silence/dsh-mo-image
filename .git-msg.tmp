@@ -1,8 +1,0 @@
-fix(config): 云端模型的尺寸与质量覆盖不再被丢弃
-
-- normalizeConfig 原本只在 comfyui/a1111 时保留 modelOptions，云端 provider 的尺寸覆盖保存后被整条删掉；
-  改成一律保留，只按适配器剥掉它不认的字段（工作流/映射只给 ComfyUI，参数开关只给 A1111）
-- normalizeQuality 不再锁死白名单：模型选项支持自定义档位，这里只做结构校验，
-  客户端 normalizeQuality 同步改成同一套口径
-
-tests: node --test 691 passed
