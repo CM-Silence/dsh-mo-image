@@ -78,11 +78,15 @@ test('the user override beats the built-in model family table', () => {
   assert.equal(spec.control, 'wh');
 });
 
-test('no override leaves the adapter defaults untouched', () => {
+test('without an override the model name still picks a sensible default', () => {
   const plain = { id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k' };
   const adapter = resolveAdapter(plain, MODEL);
   assert.equal(adapter.sizeOverride, undefined);
-  assert.equal(sizeSpecFor(adapter, MODEL).control, 'wh', 'a relay stays width/height until the user says otherwise');
+  // 名字里有 banana：按 nano-banana 的比例 + 档位兜底，用户仍然可以覆盖。
+  assert.equal(sizeSpecFor(adapter, MODEL).control, 'aspect');
+  assert.deepEqual(sizeSpecFor(adapter, MODEL).tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
+  // 认不出来的模型保持宽高。
+  assert.equal(sizeSpecFor(adapter, 'mystery-image-v9').control, 'wh');
 });
 
 test('the config sanitiser keeps a size-only model option', () => {
