@@ -10,7 +10,6 @@ const adapter = {
   id: 'x', label: 'X',
   endpoints: { generate: '/images/generations', edit: '' },
   transport: { generate: 'json', edit: 'json' },
-  send: ['prompt', 'size'],
   size: { style: 'string', field: 'size', allowed: ['1024x1024', '1792x1024'], allowCustom: false }
 };
 

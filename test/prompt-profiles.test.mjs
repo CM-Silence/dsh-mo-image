@@ -138,12 +138,21 @@ test('each config state explains whether the settings tool has to be read', () =
   assert.equal(configStateText('nonsense'), configStateText('unread'), 'an unknown state must fail safe');
 });
 
-test('negative prompt is sent only to adapters that whitelist it', () => {
-  const gpt = resolveAdapter({ baseUrl: 'https://api.example.test/v1' }, 'gpt-image-2.5-flare');
-  const gptBody = JSON.parse(prepareGenerate(gpt, provider, {
+test('negative prompt follows the field template, not a protocol whitelist', () => {
+  // 官方 OpenAI 端点收未知参数会 400：negative 归零。
+  const official = { baseUrl: 'https://api.openai.com/v1' };
+  const officialAdapter = resolveAdapter(official, 'gpt-image-2.5-flare');
+  const officialBody = JSON.parse(prepareGenerate(officialAdapter, official, {
     model: 'gpt-image-2.5-flare', prompt: 'p', negativePrompt: 'bad', fitted: { omit: true, size: 'none' }
   }, new Set()).body);
-  assert.equal(gptBody.negative_prompt, undefined);
+  assert.equal(officialBody.negative_prompt, undefined);
+
+  // 中转站上的同名模型一直收 negative_prompt，别把所有人都当成官方端点。
+  const relay = resolveAdapter({ baseUrl: 'https://api.example.test/v1' }, 'gpt-image-2.5-flare');
+  const relayBody = JSON.parse(prepareGenerate(relay, provider, {
+    model: 'gpt-image-2.5-flare', prompt: 'p', negativePrompt: 'bad', fitted: { omit: true, size: 'none' }
+  }, new Set()).body);
+  assert.equal(relayBody.negative_prompt, 'bad');
 
   const silicon = resolveAdapter({ baseUrl: 'https://api.siliconflow.cn/v1' }, 'kwai-kolors/kolors');
   const siliconBody = JSON.parse(prepareGenerate(silicon, provider, {
@@ -151,6 +160,7 @@ test('negative prompt is sent only to adapters that whitelist it', () => {
   }, new Set()).body);
   assert.equal(siliconBody.negative_prompt, 'bad');
 
+  // 认不出的网关按 OpenAI 兼容兜底，同样发 negative_prompt。
   const generic = resolveAdapter({ baseUrl: 'https://api.example.test/v1' }, 'some-compatible-model');
   const genericBody = JSON.parse(prepareGenerate(generic, provider, {
     model: 'some-compatible-model', prompt: 'p', negativePrompt: 'bad', fitted: { omit: true, size: 'none' }

@@ -195,14 +195,13 @@ test('fetchResultImage reports the status of a rejected download and refuses non
 
 const fitted = { width: 1024, height: 1024, size: '1024x1024' };
 
-/** 旧式（描述符之前的）异步适配器：提交体由 send 白名单决定，便于观察参数摘除。 */
+/** 旧式（描述符之前的）异步适配器：提交体走通用组装（字段模板），便于观察参数摘除。 */
 function legacyAsyncAdapter(overrides = {}) {
   return Object.assign({
     id: 'fake-legacy-async',
     label: 'Fake legacy async',
     endpoints: { generate: '/jobs', edit: '/jobs' },
     transport: { generate: 'json', edit: 'json' },
-    send: ['prompt', 'seed', 'foo'],
     maxN: 1,
     async: true,
     poll: {
@@ -233,21 +232,21 @@ test('a rejected optional field is dropped once, and an identical resend is refu
   globalThis.fetch = async (url, init = {}) => {
     if (String(init.method || '').toUpperCase() === 'POST') {
       posts.push(JSON.parse(String(init.body)));
-      return jsonResponse({ error: { message: 'unknown parameter: seed' } }, 400);
+      return jsonResponse({ error: { message: 'unknown parameter: negative_prompt' } }, 400);
     }
     return jsonResponse({ task_id: 'job', status: 'RUNNING' });
   };
 
   await assert.rejects(
     () => callImageApi('generate', legacyAsyncAdapter(), gatewayProvider(), {
-      model: 'm', prompt: 'p', seed: 7, foo: 'bar', fitted: fitted
+      model: 'm', prompt: 'p', negativePrompt: 'blurry', fitted: fitted
     }, new AbortController().signal),
-    /unknown parameter: seed/
+    /unknown parameter: negative_prompt/
   );
 
   assert.equal(posts.length, 2, 'one retry after dropping the field, never a third identical POST');
-  assert.equal(posts[0].seed, 7);
-  assert.equal(posts[1].seed, undefined, 'the rejected field is gone from the retried request');
+  assert.equal(posts[0].negative_prompt, 'blurry');
+  assert.equal(posts[1].negative_prompt, undefined, 'the rejected field is gone from the retried request');
   assert.equal(posts[1].prompt, 'p', 'the rest of the request is untouched');
 });
 
@@ -394,7 +393,7 @@ test('polling a cross-origin task URL never carries the provider key', async (t)
     id: 'gateway', label: 'Gateway',
     endpoints: { generate: '/images/generations', edit: '/images/edits' },
     transport: { generate: 'json', edit: 'json' },
-    send: ['prompt'], maxN: 1, autoAsync: true
+    maxN: 1, autoAsync: true
   };
   const provider = gatewayProvider('https://gateway.test/v1', 'super-secret');
 

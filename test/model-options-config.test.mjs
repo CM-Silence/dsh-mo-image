@@ -100,6 +100,37 @@ test('normalizeModelOptions keeps a valid mapping next to the workflow', () => {
   assert.equal(out.m1.mapping.width, null);
 });
 
+test('normalizeConfig keeps field template overrides for cloud adapters', () => {
+  // 任务 7' 把通用请求体交给字段模板以后，用户覆盖也要真的能落盘（否则面板改了等于没改）。
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'relay', baseUrl: 'https://relay.example.com/v1', adapter: 'openai-images',
+      models: ['flux-1-schnell'],
+      modelOptions: {
+        'flux-1-schnell': { fields: { prompt: { path: 'input.prompt' }, negative: null } }
+      }
+    }],
+    active: { providerId: 'p1', model: 'flux-1-schnell' }
+  });
+  const options = config.providers[0].modelOptions;
+  assert.ok(options, '字段模板覆盖必须能存下来');
+  assert.deepEqual(options['flux-1-schnell'].fields, {
+    prompt: { path: 'input.prompt' },
+    negative: null
+  });
+});
+
+test('normalizeModelOptions drops a field template it cannot parse', () => {
+  const out = normalizeModelOptions({ m: { fields: { prompt: { nonsense: true } } } }, ['m']);
+  assert.deepEqual(out, {}, '认不出的模板整条丢掉，别存一个发送时才炸的东西');
+  // 一条坏模板不影响同一个模型上其它合法的字段模板。
+  const mixed = normalizeModelOptions({
+    m: { fields: { prompt: { nonsense: true }, n: { path: 'num_images' } } }
+  }, ['m']);
+  assert.deepEqual(mixed.m.fields, { n: { path: 'num_images' } });
+});
+
 test('normalizeModelOptions drops a mapping that is not shaped node/input', () => {
   const out = normalizeModelOptions({ 'm1': { workflow: '{"1":{}}', mapping: { prompt: 'nope' } } }, ['m1']);
   assert.equal(out.m1.mapping, undefined);

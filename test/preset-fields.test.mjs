@@ -1,31 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PROVIDER_PRESETS, LOCAL_PRESETS, resolveAdapter } from '../lib/adapters.js';
-import { applyFields, multipartFields, promptParts } from '../lib/field-templates.js';
+import {
+  PROVIDER_PRESETS, LOCAL_PRESETS, resolveAdapter, listAdapters, prepareGenerate
+} from '../lib/adapters.js';
+import { applyFields, multipartFields, promptParts, resolveFields } from '../lib/field-templates.js';
 import { FIELD_RULES, detectFieldRule } from '../lib/model-rules.js';
 
 /*
- * 内置提供商 / 本地部署预设的字段模板（docs/…/2026-11-16-model-size-quality-rules.md 任务 6'）。
+ * 内置提供商 / 本地部署预设的字段模板（docs/…/2026-11-16-model-size-quality-rules.md 任务 6'、7'）。
  *
- * 这一轮只加数据，不接线：请求组装仍然走各自的 send 白名单 / execute()。
- * 所以这里锁的是三件事：
+ * 任务 6' 只加数据；任务 7' 把通用路径接上以后，这里同时锁三件事：
  *
- *   1. 每条预设都有 prompt / negative / model / n / image 五个逻辑字段，
+ *   1. 每条预设都有 prompt / negative / model / n / image / quality 六个逻辑字段，
  *      值是字段模板或 null（null = 这个网关没有这个字段，写 body 时跳过）；
  *   2. 同一条协议被多条预设复用时，各预设内联的那几份 fields 必须一字不差
- *      —— 字段名是照抄协议代码的，一份改错另一份没改，7' 接线时就会一半协议发对、
- *      一半发错；
+ *      —— 字段名是照抄协议代码的，一份改错另一份没改，接线后就会一半协议发对、
+ *      一半发错（quality 例外：它随模型收不收，见下面的用例）；
  *   3. 模板的形状能被 lib/field-templates.js 的口径接受（三个出口都试一遍），
- *      以及「字段名确实来自协议代码」：扁平的 path 必须在该协议的 send 白名单里，
- *      multipart 的参考图名必须是协议的 editFields 第一个。
+ *      而且协议上**不再有任何字段名**（send / acceptsQuality 删干净）。
  *
  * 模型规则那半边（lib/model-rules.js 的 FIELD_RULES）同样有形状与命中断言；
  * 它按模型名收窄，认不出就返回 null 回落到预设，所以这里也盯着「不许有兜底规则」：
  * 一条匹配任意模型的通配规则会把所有预设盖掉。
  */
 
-const LOGICAL_FIELDS = ['prompt', 'negative', 'model', 'n', 'image'];
+const LOGICAL_FIELDS = ['prompt', 'negative', 'model', 'n', 'image', 'quality'];
 
 /** 两份清单摊平成一张表：字段模板对提供商与本地部署是同一套口径。 */
 function presets() {
@@ -51,7 +51,7 @@ const SAMPLE = {
 
 /* ------------------------------------------------------------------ 形状 */
 
-test('每条内置预设都带五个逻辑字段的模板键（模板对象或 null）', () => {
+test('每条内置预设都带六个逻辑字段的模板键（模板对象或 null）', () => {
   const list = presets();
   assert.equal(list.length, 27, '预设数量变了：新增的预设也要补 fields，否则面板里它没有只读摘要');
   for (const preset of list) {
@@ -63,7 +63,7 @@ test('每条内置预设都带五个逻辑字段的模板键（模板对象或 n
     assert.deepEqual(
       Object.keys(preset.fields).sort(),
       LOGICAL_FIELDS.slice().sort(),
-      label + ' 的逻辑字段必须正好是 prompt / negative / model / n / image'
+      label + ' 的逻辑字段必须正好是 prompt / negative / model / n / image / quality'
     );
     for (const name of LOGICAL_FIELDS) {
       const spec = preset.fields[name];
@@ -76,6 +76,13 @@ test('每条内置预设都带五个逻辑字段的模板键（模板对象或 n
 });
 
 /* -------------------------------------------------------------- 同协议一致 */
+
+/** 这家网关把提示词 / 负面词 / 模型 / 张数 / 参考图叫什么（quality 随模型，见下一个用例）。 */
+function gatewayFields(fields) {
+  const rest = {};
+  for (const [key, value] of Object.entries(fields || {})) if (key !== 'quality') rest[key] = value;
+  return rest;
+}
 
 test('同一条协议的所有预设，fields 必须完全一致（防止两份漂移）', () => {
   const byProtocol = new Map();
@@ -102,12 +109,28 @@ test('同一条协议的所有预设，fields 必须完全一致（防止两份�
     // 缺 fields 时 deepEqual(undefined, undefined) 会假通过，所以先点名第一份。
     assert.ok(first.fields, first.id + ' 没有 fields');
     for (const preset of group.slice(1)) {
+      // quality 是模型级的：openai 预设自己的模型认质量，通用 OpenAI 兼容网关上的 flux 不认，
+      // 两份预设会落到同一条协议上但 quality 不同，所以这一层只比五项网关字段。
       assert.deepEqual(
-        preset.fields,
-        first.fields,
+        gatewayFields(preset.fields),
+        gatewayFields(first.fields),
         preset.id + ' 与 ' + first.id + ' 同为 ' + protocol + ' 协议，fields 必须一字不差'
       );
     }
+  }
+});
+
+test('收质量的只有原来那 4 条协议对应的 3 份预设（acceptsQuality 删掉后改由模板声明）', () => {
+  const accepting = presets()
+    .filter((preset) => preset.fields.quality)
+    .map((preset) => preset.group + '/' + preset.id)
+    .sort();
+  // dall-e-3 与 gpt-image 共用 openai 预设；ideogram、azure-openai 各一份。
+  assert.deepEqual(accepting, ['provider/azure', 'provider/ideogram', 'provider/openai']);
+  for (const preset of presets()) {
+    const quality = preset.fields.quality;
+    if (!quality) continue;
+    assert.deepEqual(quality, { path: 'quality' }, preset.id + ' 的 quality 模板只该说明发到哪个字段');
   }
 });
 
@@ -123,10 +146,10 @@ test('预设模板的形状能被 applyFields / multipartFields / promptParts �
         preset.id + '.' + name + ' 的模板形状不被 applyFields 接受'
       );
     }
-    // 五条一起写进空 body：字段之间不能在同一个容器上互相踩。
+    // 六条一起写进空 body：字段之间不能在同一个容器上互相踩。
     assert.doesNotThrow(
       () => applyFields({}, preset.fields, SAMPLE),
-      preset.id + ' 的五条模板不能一起写进同一个 body'
+      preset.id + ' 的六条模板不能一起写进同一个 body'
     );
     // multipart 与拼提示词是两个出口，同一份模板必须同样认得。
     assert.doesNotThrow(
@@ -140,27 +163,33 @@ test('预设模板的形状能被 applyFields / multipartFields / promptParts �
   }
 });
 
-/* ----------------------------------------------------- 字段名来自协议代码 */
+/* ----------------------------------------------------- 协议上没有字段名了 */
 
-test('扁平 path 必须出现在该协议的 send 白名单里（照抄，不自造字段名）', () => {
-  for (const preset of presets()) {
-    const adapter = protocolOf(preset);
-    // 没有 send 白名单的协议（自拼 body 的那 16 条）另行核对，见各自的 execute。
-    if (!Array.isArray(adapter.send)) continue;
-    // 有 compose() 的协议（dashscope-wanx）白名单是折叠前的扁平键，模板写的却是折叠后的
-    // 嵌套路径，两套名字不能直接对比。
-    if (typeof adapter.compose === 'function') continue;
-    for (const name of LOGICAL_FIELDS) {
-      // 参考图不走 send 白名单（它归 editFields），由下一条测试核。
-      if (name === 'image') continue;
-      const spec = preset.fields[name];
-      if (!spec || typeof spec.path !== 'string') continue;
-      assert.ok(
-        adapter.send.includes(spec.path),
-        preset.id + '.' + name + ' 用了 ' + spec.path + '，但它不在 ' + adapter.id + ' 的 send 白名单里'
-      );
-    }
+test('协议上不再有字段名：send / acceptsQuality 都删干净了', () => {
+  for (const entry of listAdapters()) {
+    const adapter = resolveAdapter({ adapter: entry.id, baseUrl: 'https://example.test/v1' }, 'some-model');
+    assert.equal(adapter.id, entry.id);
+    assert.equal('send' in adapter, false, entry.id + ' 还留着 send 白名单');
+    assert.equal('acceptsQuality' in adapter, false, entry.id + ' 还留着 acceptsQuality');
   }
+  // custom 协议是 resolveAdapter 现场生成的，同样不该持有字段名。
+  const custom = resolveAdapter({ adapter: 'custom', baseUrl: 'https://example.test/v1' }, '');
+  assert.equal('send' in custom, false, 'custom 协议还留着 send 白名单');
+});
+
+test('通用协议的请求体就是预设模板写出来的：字段一个不多一个不少', () => {
+  // openai-gateway 预设（openai-images 协议）是「按字段模板组装」的活例子。
+  const provider = { adapter: 'openai-images', baseUrl: 'http://127.0.0.1:3000/v1', key: 'k' };
+  const adapter = resolveAdapter(provider, 'flux-1-schnell');
+  assert.equal(adapter.id, 'openai-images');
+  const body = JSON.parse(prepareGenerate(adapter, provider, {
+    model: 'flux-1-schnell', prompt: 'a cat', negativePrompt: 'bad', fitted: { omit: true, size: 'none' }
+  }, new Set()).body);
+  assert.deepEqual(Object.keys(body).sort(), ['model', 'n', 'negative_prompt', 'prompt']);
+  assert.equal(body.model, 'flux-1-schnell');
+  assert.equal(body.prompt, 'a cat');
+  assert.equal(body.negative_prompt, 'bad');
+  assert.equal(body.n, 1);
 });
 
 test('参考图模板的字段名来自协议的 editFields', () => {
@@ -203,20 +232,38 @@ test('协议不支持编辑时，预设不得声称有参考图字段', () => {
 
 /* -------------------------------------------------------- 模型字段规则 */
 
-test('模型字段规则：五个键齐全、match 是正则、模板能被 applyFields 接受', () => {
+test('模型字段规则：键名落在六个逻辑字段里、match 是正则、模板能被 applyFields 接受', () => {
   assert.ok(Array.isArray(FIELD_RULES) && FIELD_RULES.length > 0);
   for (const rule of FIELD_RULES) {
     assert.ok(rule.match instanceof RegExp, 'match 必须是正则');
     if (rule.host !== undefined) assert.equal(typeof rule.host, 'string');
     assert.ok(rule.fields && typeof rule.fields === 'object');
-    assert.deepEqual(
-      Object.keys(rule.fields).sort(),
-      LOGICAL_FIELDS.slice().sort(),
-      String(rule.match) + ' 的 fields 键必须是五个逻辑字段'
-    );
+    // 规则是「在预设之上收窄」，可以只写要改的字段（不带 host 的 gpt-image 条目就是这样
+    // 把 negative 留给预设的）；但不许出现六个逻辑字段以外的名字。
+    const unknown = Object.keys(rule.fields).filter((key) => !LOGICAL_FIELDS.includes(key));
+    assert.deepEqual(unknown, [], String(rule.match) + ' 出现了六个逻辑字段以外的键');
+    for (const [field, spec] of Object.entries(rule.fields)) {
+      assert.ok(
+        spec === null || (typeof spec === 'object' && !Array.isArray(spec)),
+        String(rule.match) + '.' + field + ' 只能是模板对象或 null'
+      );
+    }
     assert.doesNotThrow(
       () => applyFields({}, rule.fields, SAMPLE),
       String(rule.match) + ' 的模板不能一起写进空 body'
+    );
+  }
+});
+
+test('模型字段规则叠加预设之后，六个逻辑字段都有定论', () => {
+  // 规则可以省略字段（省略 = 跟随预设），合并以后必须齐全，缺的那个就是没人管的字段。
+  const preset = PROVIDER_PRESETS.find((item) => item.id === 'openai').fields;
+  for (const rule of FIELD_RULES) {
+    const merged = resolveFields({ rule: rule.fields, preset });
+    assert.deepEqual(
+      Object.keys(merged).sort(),
+      LOGICAL_FIELDS.slice().sort(),
+      String(rule.match) + ' 与 openai 预设合并不齐'
     );
   }
 });
@@ -234,15 +281,32 @@ test('字段规则没有兜底：认不出的模型返回 null，回落到预设
   assert.equal(detectFieldRule(''), null);
 });
 
-test('模型字段规则：OpenAI 自家的 GPT-Image / DALL·E 3 没有负面词字段', () => {
+test('模型字段规则：OpenAI 官方端点上的 GPT-Image / DALL·E 3 没有负面词字段', () => {
+  // 官方端点收未知参数会 400，所以只对官方主机把 negative 关掉；
+  // 中转站上的同名模型保留预设的 negative_prompt（见下一个用例）。
   for (const model of ['gpt-image-2.5-flare', 'gpt-image-1', 'dall-e-3']) {
-    const rule = detectFieldRule(model);
-    assert.ok(rule, model + ' 应该命中字段规则');
-    assert.equal(rule.fields.negative, null, model + ' 没有 negative prompt 这个参数');
-    assert.deepEqual(rule.fields.prompt, { path: 'prompt' });
-    assert.deepEqual(rule.fields.model, { path: 'model' });
-    assert.deepEqual(rule.fields.n, { path: 'n' });
-    assert.deepEqual(rule.fields.image, { multipart: 'image[]' });
+    for (const baseUrl of ['https://api.openai.com/v1', 'https://example-resource.openai.azure.com/openai/v1']) {
+      const rule = detectFieldRule(model, baseUrl);
+      assert.ok(rule, model + ' 应该命中字段规则');
+      assert.equal(rule.fields.negative, null, model + ' 在 ' + baseUrl + ' 不该发 negative_prompt');
+      assert.deepEqual(rule.fields.prompt, { path: 'prompt' });
+      assert.deepEqual(rule.fields.model, { path: 'model' });
+      assert.deepEqual(rule.fields.n, { path: 'n' });
+      assert.deepEqual(rule.fields.image, { multipart: 'image[]' });
+      // quality 不归规则管：openai-chat / openai-responses 这类没有预设的协议不能凭模型名
+      // 凭空多出质量档位，所以规则里不写 quality，交给预设的 fields.quality。
+      assert.equal('quality' in rule.fields, false, model + ' 的规则不该带 quality');
+    }
+  }
+});
+
+test('模型字段规则：中转站上的 GPT-Image / DALL·E 3 保留预设的 negative_prompt', () => {
+  for (const model of ['gpt-image-2.5-flare', 'dall-e-3']) {
+    const rule = detectFieldRule(model, 'https://relay.example.com/v1');
+    assert.ok(rule, model + ' 应该命中不带 host 的那条规则');
+    assert.equal(rule.host, undefined, '中转站靠的是不带 host 的那条');
+    assert.deepEqual(rule.fields.negative, { path: 'negative_prompt' }, model + ' 在中转站上要发负面词');
+    assert.equal(detectFieldRule(model), rule, '没有 baseUrl 时同样落到不带 host 的那条');
   }
 });
 
