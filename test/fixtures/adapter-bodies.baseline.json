@@ -1,0 +1,669 @@
+{
+  "_readme": [
+    "每条协议 prepareGenerate / prepareEdit 产出的请求体（搬迁到模型规则表之前的行为基线）。",
+    "键：model / quality 是固定输入；covers 说明该协议真实请求体的来源：",
+    "  prepare        = prepare* 产出的就是真实请求体",
+    "  prepare-async  = 走 prepareAsync()，但提交体同样来自 composeBody()，也是真实的",
+    "  execute        = 协议自己的 execute() 拼 body，这里只录了通用 composeBody 的产物",
+    "  async-build    = 异步描述符的 async.build() 拼提交体，这里只录了通用 composeBody 的产物",
+    "generate / edit：{ supported, path, body }；body 是 multipart 时记成 { $multipart: {…} }，文件项是 { $file, type, bytes }；",
+    "prepare* 抛错时记成 { supported, throws }。",
+    "人工维护的记录：test/adapter-body-regression.test.mjs（改这个文件请先读它的文件头）。"
+  ],
+  "adapters": {
+    "dall-e-3": {
+      "model": "dall-e-3",
+      "quality": "standard",
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "dall-e-3",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "quality": "standard",
+          "response_format": "b64_json",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "dall-e-3",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "quality": "standard",
+            "response_format": "b64_json",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "gpt-image": {
+      "model": "gpt-image-2.5-flare",
+      "quality": "high",
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "gpt-image-2.5-flare",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "quality": "high",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "gpt-image-2.5-flare",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "quality": "high",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "google-gemini": {
+      "model": "gemini-2.5-flash-image",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/models",
+        "body": {
+          "aspect_ratio": "1:1"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/models",
+        "body": {
+          "aspect_ratio": "1:1",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "xai-imagine": {
+      "model": "grok-imagine-image",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "aspect_ratio": "1:1"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "aspect_ratio": "1:1",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "recraft": {
+      "model": "recraftv4_1",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/imageToImage",
+        "body": {
+          "$multipart": {
+            "size": "1024x1024",
+            "strength": "0.5",
+            "image": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "ideogram": {
+      "model": "ideogram-4",
+      "quality": "default",
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/v2/image/generate/ideogram-4",
+        "body": {
+          "$multipart": {
+            "resolution": "1024x1024"
+          }
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "resolution": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "together": {
+      "model": "black-forest-labs/FLUX.1-schnell",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "black-forest-labs/FLUX.1-schnell",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "n": 1,
+          "response_format": "url",
+          "width": 1024,
+          "height": 1024
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "model": "black-forest-labs/FLUX.1-schnell",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "n": 1,
+          "response_format": "url",
+          "width": 1024,
+          "height": 1024,
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "siliconflow": {
+      "model": "Qwen/Qwen-Image",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "Qwen/Qwen-Image",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "image_size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "Qwen/Qwen-Image",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "image_size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "volcengine-ark": {
+      "model": "doubao-seedream-4-0-250828",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "doubao-seedream-4-0-250828",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "response_format": "url",
+          "watermark": false,
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "doubao-seedream-4-0-250828",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "response_format": "url",
+          "watermark": false,
+          "n": 1,
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "stability": {
+      "model": "core",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/v2beta/stable-image/generate/core",
+        "body": {
+          "$multipart": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text",
+            "output_format": "png",
+            "model": "core",
+            "aspect_ratio": "1:1"
+          }
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/v2beta/stable-image/generate/sd3",
+        "body": {
+          "$multipart": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text",
+            "output_format": "png",
+            "model": "core",
+            "aspect_ratio": "1:1",
+            "image": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "dashscope-qwen-image": {
+      "model": "qwen-image-3.0-pro",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/services/aigc/multimodal-generation/generation",
+        "body": {
+          "size": "1024*1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/services/aigc/multimodal-generation/generation",
+        "body": {
+          "size": "1024*1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "zhipu": {
+      "model": "cogview-4",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "dashscope-wanx": {
+      "model": "wan2.6-t2i",
+      "quality": null,
+      "covers": "prepare-async",
+      "generate": {
+        "supported": true,
+        "path": "/services/aigc/text2image/image-synthesis",
+        "body": {
+          "model": "wan2.6-t2i",
+          "input": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text"
+          },
+          "parameters": {
+            "size": "1024*1024",
+            "n": 1
+          }
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "model": "wan2.6-t2i",
+          "input": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text"
+          },
+          "parameters": {
+            "size": "1024*1024",
+            "n": 1
+          },
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "a1111": {
+      "model": "sd-cpp-local",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/sdapi/v1/txt2img",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/sdapi/v1/img2img",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "comfyui": {
+      "model": "flux2-dev.safetensors",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/prompt",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/prompt",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "swarmui": {
+      "model": "sdxl-base",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/API/GenerateText2Image",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "localai": {
+      "model": "localai-model",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "localai-model",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "model": "localai-model",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "n": 1,
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "bfl": {
+      "model": "flux-2-pro",
+      "quality": null,
+      "covers": "async-build",
+      "generate": {
+        "supported": true,
+        "path": "/v1",
+        "body": {
+          "width": 1024,
+          "height": 1024
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/v1",
+        "body": {
+          "width": 1024,
+          "height": 1024,
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "fal": {
+      "model": "fal-ai/flux-2-pro",
+      "quality": null,
+      "covers": "async-build",
+      "generate": {
+        "supported": true,
+        "path": "/",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "replicate": {
+      "model": "black-forest-labs/flux-2-pro",
+      "quality": null,
+      "covers": "async-build",
+      "generate": {
+        "supported": true,
+        "path": "/",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "modelscope": {
+      "model": "Qwen/Qwen-Image-2.1",
+      "quality": null,
+      "covers": "async-build",
+      "generate": {
+        "supported": true,
+        "path": "/v1/images/generations",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/v1/images/generations",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "openai-responses": {
+      "model": "gpt-image-2.5-flare",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/responses",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/responses",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "openrouter-images": {
+      "model": "google/gemini-3.1-flash-image",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/images",
+        "body": {
+          "aspect_ratio": "1:1"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images",
+        "body": {
+          "aspect_ratio": "1:1",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "azure-openai": {
+      "model": "gpt-image-2.5-flare",
+      "quality": "high",
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "gpt-image-2.5-flare",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "quality": "high",
+          "n": 1,
+          "output_format": "png",
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "gpt-image-2.5-flare",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "quality": "high",
+            "n": "1",
+            "output_format": "png",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "openai-chat": {
+      "model": "gpt-image-2.5-flare",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/chat/completions",
+        "body": {}
+      },
+      "edit": {
+        "supported": true,
+        "path": "/chat/completions",
+        "body": {
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "openai-images": {
+      "model": "flux-1-schnell",
+      "quality": null,
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "flux-1-schnell",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "flux-1-schnell",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    }
+  }
+}
