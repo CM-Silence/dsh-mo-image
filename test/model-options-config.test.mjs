@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeConfig, normalizeModelOptions } from '../lib/index.js';
+import { normalizeQuality } from '../lib/config-store.js';
 
 test('normalizeModelOptions keeps a workflow for models that exist', () => {
   const out = normalizeModelOptions(
@@ -70,6 +71,27 @@ test('normalizeConfig drops modelOptions for adapters that cannot run custom wor
     'only the ComfyUI adapter understands custom workflows');
 });
 
+test('normalizeConfig keeps size overrides for cloud adapters', () => {
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'cloud', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+      models: ['gpt-image-2.5-flare'],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          workflow: '{"1":{"class_type":"KSampler"}}',
+          size: { mode: 'wh-string', field: 'size', separator: 'x' }
+        }
+      }
+    }],
+    active: { providerId: 'p1', model: 'gpt-image-2.5-flare' }
+  });
+  const options = config.providers[0].modelOptions;
+  assert.ok(options, '云端模型的尺寸覆盖必须能存下来');
+  assert.equal(options['gpt-image-2.5-flare'].size.field, 'size');
+  assert.equal(options['gpt-image-2.5-flare'].workflow, undefined, '工作流只有 ComfyUI 认');
+});
+
 test('normalizeModelOptions keeps a valid mapping next to the workflow', () => {
   const out = normalizeModelOptions({
     'm1': { workflow: '{"1":{}}', mapping: { prompt: { node: '1', input: 'text' }, width: null } }
@@ -87,4 +109,12 @@ test('normalizeModelOptions accepts a workflow up to 2 MB', () => {
   const big = '{"1":"' + 'x'.repeat(1_500_000) + '"}';
   const out = normalizeModelOptions({ 'm1': { workflow: big } }, ['m1']);
   assert.ok(out.m1, 'a 1.5 MB workflow must survive');
+});
+
+test('normalizeQuality 保留用户自定义档位', () => {
+  assert.equal(normalizeQuality('ultra'), 'ultra');
+  assert.equal(normalizeQuality(' ULTRA '), 'ultra');
+  assert.equal(normalizeQuality(''), 'high');
+  assert.equal(normalizeQuality('x'.repeat(40)), 'high', '异常长的值仍然回退');
+  assert.equal(normalizeQuality('has space'), 'high');
 });

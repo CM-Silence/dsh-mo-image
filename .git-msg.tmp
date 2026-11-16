@@ -1,9 +1,8 @@
-feat(adapters): 百炼 Qwen-Image 支持图生图
+fix(config): 云端模型的尺寸与质量覆盖不再被丢弃
 
-编辑与生成是同一个原生多模态端点：把参考图作为 image 项放进 content，
-prompt 放在最后一项。编辑时不发 parameters.size（Qwen-Image-Edit 系列不收），
-没有参考图时报明确错误而不是"暂未支持"。
+- normalizeConfig 原本只在 comfyui/a1111 时保留 modelOptions，云端 provider 的尺寸覆盖保存后被整条删掉；
+  改成一律保留，只按适配器剥掉它不认的字段（工作流/映射只给 ComfyUI，参数开关只给 A1111）
+- normalizeQuality 不再锁死白名单：模型选项支持自定义档位，这里只做结构校验，
+  客户端 normalizeQuality 同步改成同一套口径
 
-端点的 edit 路由同步填上，设置页的协议面板会显示图生图地址。
-
-tests: node --test 689 passed
+tests: node --test 691 passed
