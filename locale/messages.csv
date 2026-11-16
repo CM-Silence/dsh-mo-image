@@ -215,7 +215,7 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.a1111ColType","类型","Type","種類","Tipo","Type","Typ","Тип","Tipo"
 seat.sizeAspect,"比例","Ratio","比率","Proporción","Ratio","Seitenverhältnis","Пропорции","Proporção"
 seat.sizeTier,"档位","Tier","解像度","Nivel","Palier","Stufe","Уровень","Nível"
-seat.sizePreset,"尺寸","Size","サイズ","Tamaño","Taille","Größe","Размер","Tamanho"
+seat.sizePreset,"预设","Preset","プリセット","Preajuste","Préréglage","Voreinstellung","Пресет","Predefinição"
 seat.sizeCustom,"自定义","Custom","カスタム","Personalizado","Personnalisé","Benutzerdefiniert","Свой","Personalizado"
 seat.sizeStrict,"严格","Strict","厳密","Estricto","Strict","Strikt","Строго","Estrito"
 seat.sizeStrictHint,"成品尺寸一定等于设置值；会话里没指定尺寸时不生效","The result is forced to the configured size; no effect when the request carries no size","出力サイズを設定値に揃えます。指定がない場合は無効です","El resultado se ajusta al tamaño configurado; sin tamaño no aplica","La taille finale est forcée; sans taille demandée cela ne s applique pas","Die Ausgabegröße wird erzwungen; ohne Größe im Request wirkungslos","Размер результата принудительно задаётся; без размера в запросе не действует","O resultado é forçado ao tamanho configurado; sem tamanho no pedido não se aplica"
