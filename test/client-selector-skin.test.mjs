@@ -733,6 +733,56 @@ test('the codex size rows open a menu page instead of a select', () => {
   assert.match(collectText(list).join(' '), /16:9/, 'the second level lists the ratios');
   assert.equal(collectType(list, 'select').length, 0);
 });
+test('the preset page labels the custom entry in both skins', () => {
+  const client = loadClient();
+  // 预设类模型的档位列表后面会追加一条「自定义」，它和档位值的类型不同；
+  // 这里锁住渲染结果：行上必须显示本地化文案，不能把对象拼成字符串。
+  client.__test.applyCatalog({
+    capabilities: [{
+      providerId: 'p1',
+      models: [{
+        model: 'doubao-seedream-4.5',
+        size: { control: 'preset', tiers: [{ value: '2K' }, { value: '4K' }], custom: true, wire: ['size'], stitch: false, hint: '' }
+      }]
+    }]
+  });
+  let saved = null;
+  const store = storeFixture({
+    providers: [{
+      id: 'p1', name: 'Ark', baseUrl: 'https://ark.test/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['doubao-seedream-4.5'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'doubao-seedream-4.5' },
+    defaults: { quality: 'high', auto: false, width: 1024, height: 1024, preset: '2K', promptOptimization: true }
+  });
+  const renderPage = (subProvider) => client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct, store: store, setStore(next) { saved = next; }, qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: subProvider })
+  );
+  const list = renderPage('__size-preset');
+  const text = collectText(list).join(' ');
+  assert.match(text, /2K/);
+  assert.match(text, /4K/);
+  assert.match(text, new RegExp(ct('seat.sizeCustom')), 'the custom entry keeps its localized label');
+  assert.doesNotMatch(text, /\[object Object\]/);
+  const customRow = collectType(list, 'button')
+    .find((node) => collectText(node).join(' ').includes(ct('seat.sizeCustom')));
+  assert.ok(customRow, 'the custom entry is a selectable row');
+  // 原生皮肤走的是另一套面板（OfficialImageSeat），同一条「自定义」也要有标签。
+  const native = client.render(
+    client.h(client.__test.OfficialImageSeat, { t: ct, store: store, setStore(next) { saved = next; } }),
+    new Map([[0, true], [1, 'size-preset']])
+  );
+  const nativeText = collectText(native).join(' ');
+  assert.match(nativeText, /4K/, 'the native panel lists the model tiers');
+  assert.match(nativeText, new RegExp(ct('seat.sizeCustom')), 'the native panel keeps the same label');
+  assert.doesNotMatch(nativeText, /\[object Object\]/);
+  customRow.props.onClick();
+  assert.equal(saved.defaults.preset, '__custom', 'picking the custom entry stores its sentinel');
+});
+
 test('other settings keeps only size controls', () => {
   const client = loadClient();
   const tree = client.render(
