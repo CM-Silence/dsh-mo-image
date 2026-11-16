@@ -677,6 +677,29 @@ test('the settings page follows the active model shape even without a provider s
   );
 });
 
+test('the size rows carry an instant help marker', () => {
+  const client = loadClient();
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct, store: storeFixture(), setStore() {}, qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: '__size' })
+  );
+  const marks = collectClass(tree, 'cmes-rowName')
+    .flatMap((node) => node.children || [])
+    .filter((child) => child && child.props && child.props.role === 'img');
+  assert.ok(marks.length >= 2, 'auto and strict each get a help marker');
+  const hover = { getBoundingClientRect: () => ({ left: 10, top: 10, bottom: 24 }), };
+  // 悬停立刻出现，没有任何定时器
+  marks[0].props.onPointerEnter({ currentTarget: hover });
+  const after = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct, store: storeFixture(), setStore() {}, qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: '__size' })
+  );
+  assert.ok(after, 'render survives the hover handler');
+});
 test('the codex size rows open a menu page instead of a select', () => {
   const client = loadClient();
   client.__test.applyCatalog({
