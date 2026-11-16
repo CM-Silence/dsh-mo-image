@@ -518,6 +518,7 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   assert.equal(popovers.length, 1);
   assert.match(popovers[0].props.className, /peak/);
   assert.equal(collectClass(tree, 'cmes-sp').length, 22);
+  assert.equal(collectClass(tree, 'cmes-sparks')[0].props.key, 'sparks-peak', 'entering Ultra restarts the sparkle flow');
 });
 
 test('the highest stop animates even when its id is not a quota peak', () => {
