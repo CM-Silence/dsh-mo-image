@@ -91,8 +91,18 @@ test('the config sanitiser keeps a size-only model option', () => {
   }, ['gemini-nano-banana-2.1'], '');
   assert.deepEqual(out['gemini-nano-banana-2.1'], { size: { mode: 'aspect', field: 'aspect_ratio' } });
 
+  // 分隔符可以手填，常见于 | 或 , 风格的中转；空白和超长会被清掉。
+  const custom = normalizeModelOptions({
+    'm': { size: { mode: 'wh-string', separator: '|' } }
+  }, ['m'], '');
+  assert.equal(custom.m.size.separator, '|');
+  const messy = normalizeModelOptions({
+    'm': { size: { mode: 'wh-string', separator: ' a b ' } }
+  }, ['m'], '');
+  assert.equal(messy.m.size.separator, 'ab');
+
   const broken = normalizeModelOptions({
-    'gemini-nano-banana-2.1': { size: { mode: 'nonsense', field: 42, separator: '?' } }
+    'gemini-nano-banana-2.1': { size: { mode: 'nonsense', field: 42, separator: '   ' } }
   }, ['gemini-nano-banana-2.1'], '');
   assert.equal(broken['gemini-nano-banana-2.1'], undefined, 'nothing valid means no entry at all');
 });
