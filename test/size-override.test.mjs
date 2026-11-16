@@ -131,3 +131,30 @@ test('a second field can carry the ratio or the tier', () => {
   assert.equal(body.aspect_ratio, '16:9');
   assert.equal(body.imageSize, fitted.tier, 'the tier goes to the second field');
 });
+
+/** 向量模型：规则说「面板给比例、线上发像素」，一键配置把规则抄成覆盖后不能退化成宽高。 */
+const VECTOR = 'recraftv3_vector';
+
+test('an override can pin the panel control without changing the wire form', () => {
+  const provider = {
+    id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '',
+    modelOptions: { [VECTOR]: { size: { mode: 'wh-string', field: 'size', control: 'aspect' } } }
+  };
+  const adapter = resolveAdapter(provider, VECTOR);
+  const spec = sizeSpecFor(provider, VECTOR, adapter);
+  assert.equal(spec.control, 'aspect', 'control 跟着覆盖走，面板才不会从比例变成宽高');
+  assert.equal(spec.field, 'size');
+
+  // control 只影响面板，线上仍然发像素串。
+  const fitted = fitSize(provider, { kind: 'size', text: '1024x1024' }, VECTOR);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: VECTOR, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.match(String(body.size), /^\d+x\d+$/);
+  assert.equal(body.aspect_ratio, undefined);
+});
+
+test('an override without control keeps the old behaviour', () => {
+  const provider = relay({ mode: 'wh-string', field: 'image_size' });
+  const adapter = resolveAdapter(provider, MODEL);
+  assert.equal(sizeSpecFor(provider, MODEL, adapter).control, 'wh',
+    '用户只说怎么发、没说控件时，面板还是宽高');
+});

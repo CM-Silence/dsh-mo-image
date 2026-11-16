@@ -401,6 +401,85 @@ test('detect-model-rule 缺参数时回 4xx 与结构化的错误体', async (t)
   assert.match(noModelBody.error, /模型/);
 });
 
+test('detect-model-rule 支持一次传多个模型，rules 仍是 { size, quality }', async (t) => {
+  const routes = await bootRuleRoutes(t, 5);
+  const route = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  assert.ok(route, '缺少 /api/mo-image/detect-model-rule 路由');
+
+  const res = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    adapter: 'custom',
+    customEndpoints: { generate: 'https://api.siliconflow.cn/v1/images/generations' },
+    models: ['Qwen/Qwen-Image', 'flux-1-dev', 'Qwen/Qwen-Image']
+  })), res);
+  assert.equal(res.status, 200, res.body);
+  const body = JSON.parse(res.body);
+  assert.equal(body.ok, true);
+  // 重复的模型只算一次，顺序按请求来。
+  assert.deepEqual(Object.keys(body.rules), ['Qwen/Qwen-Image', 'flux-1-dev']);
+  assert.equal(body.rules['Qwen/Qwen-Image'].size.mode, 'wh-string');
+  assert.equal(body.rules['Qwen/Qwen-Image'].size.field, 'image_size');
+  assert.equal(body.rules['Qwen/Qwen-Image'].quality, null);
+  // 批量模式下「每条规则」的形状与单模型响应里的 size / quality 完全一致。
+  assert.deepEqual(Object.keys(body.rules['Qwen/Qwen-Image']).sort(), ['quality', 'size']);
+  // 字段模板与「有没有命中规则」另放两张表：一键配置要用它们决定写哪些键。
+  assert.deepEqual(body.fields['Qwen/Qwen-Image'].prompt, { path: 'prompt' });
+  assert.deepEqual(body.fields['Qwen/Qwen-Image'].image, { path: 'image', as: 'dataUrl' });
+  assert.equal(body.matched['Qwen/Qwen-Image'], true);
+  // 硅基流动的分支按主机命中所有模型，所以认不出的模型名也算命中。
+  assert.equal(body.matched['flux-1-dev'], true);
+});
+
+test('detect-model-rule 批量模式：认不出的网关仍发兜底尺寸，但标记为未命中', async (t) => {
+  const routes = await bootRuleRoutes(t, 6);
+  const route = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  assert.ok(route);
+
+  const res = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://gateway.example/v1', models: ['flux-1-dev']
+  })), res);
+  assert.equal(res.status, 200, res.body);
+  const body = JSON.parse(res.body);
+  // 兜底规则让尺寸永远有值：面板据此知道「按 OpenAI 兼容发 size」。
+  assert.equal(body.rules['flux-1-dev'].size.mode, 'wh-string');
+  assert.equal(body.rules['flux-1-dev'].size.field, 'size');
+  assert.equal(body.rules['flux-1-dev'].quality, null);
+  assert.equal(body.matched['flux-1-dev'], false);
+
+  // 模型列表空了就是请求本身有问题，和单模型模式的「没填模型」同一档。
+  const empty = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://gateway.example/v1', models: ['  ']
+  })), empty);
+  assert.equal(empty.status, 400);
+  assert.equal(JSON.parse(empty.body).ok, false);
+  assert.match(JSON.parse(empty.body).error, /模型/);
+});
+
+test('detect-model-rule 单模型响应只加字段与命中标记，不改老字段', async (t) => {
+  const routes = await bootRuleRoutes(t, 7);
+  const route = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  assert.ok(route);
+
+  const res = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', model: 'gpt-image-2.5-flare'
+  })), res);
+  assert.equal(res.status, 200, res.body);
+  const body = JSON.parse(res.body);
+  assert.equal(body.ok, true);
+  assert.equal(body.model, 'gpt-image-2.5-flare');
+  assert.equal(body.size.field, 'size');
+  assert.ok(Array.isArray(body.quality.options));
+  assert.equal(body.quality.field, 'quality');
+  // 官方端点没有负面词：字段模板如实写 null。
+  assert.equal(body.fields.negative, null);
+  assert.deepEqual(body.fields.image, { multipart: 'image[]' });
+  assert.equal(body.matched, true);
+});
+
 test('models 路由只给本次新增的模型附 detected', async (t) => {
   const routes = await bootRuleRoutes(t, 3);
   const route = routes.find((item) => item.path === '/api/mo-image/models');
