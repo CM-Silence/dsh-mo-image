@@ -517,12 +517,11 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   const popovers = collectClass(tree, 'cmes-popover');
   assert.equal(popovers.length, 1);
   assert.match(popovers[0].props.className, /peak/);
-  assert.equal(collectClass(tree, 'cmes-sp').length, 44, 'float and run layers each carry 22 sparkles');
+  assert.equal(collectClass(tree, 'cmes-sp').length, 66, 'float, exit and run layers each carry 22 sparkles');
   assert.equal(collectClass(tree, 'cmes-sp-float').length, 22);
+  assert.equal(collectClass(tree, 'cmes-sp-exit').length, 22);
   assert.equal(collectClass(tree, 'cmes-sp-run').length, 22);
   assert.match(collectClass(tree, 'cmes-sp-float')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
-  assert.equal(collectClass(tree, 'cmes-sparks-float')[0].props.key, 'sparks-float-peak', 'entering Ultra restarts the float layer');
-  assert.equal(collectClass(tree, 'cmes-sparks-run')[0].props.key, 'sparks-run-on', 'Fast remounts the run layer from the right');
 });
 
 test('the highest stop animates even when its id is not a quota peak', () => {
@@ -969,6 +968,13 @@ test('the codex rail slides to the released stop instead of teleporting', () => 
   assert.match(source, /const settleTo = \(index\) =>[\s\S]{0,600}classList\.remove\('dragging'\)[\s\S]{0,300}requestAnimationFrame\(write\)/,
     'the deferred snap runs after the dragging class is gone');
   assert.match(source, /settleTo\(index\)/, 'the release path uses it');
+  assert.match(source, /dragRef\.current = \{ pointerId: pointerId, startX: event \? event\.clientX : 0, moved: false \}/,
+    'a press starts in click mode');
+  const down = source.match(/const pointerDown = \(event\) => \{([\s\S]*?)\n      \};/);
+  assert.ok(down, 'pointerDown found');
+  assert.doesNotMatch(down[1], /move\(event\)/, 'pointerdown does not paint the knob immediately');
+  assert.match(source, /animation\.playbackRate = 0\.15/, 'entering Fast ramps the run layer up');
+  assert.match(source, /from\[index\] \* \(1 - t\)/, 'leaving Fast ramps the run layer down');
 });
 
 test('the seat size value follows the control the model accepts', () => {
