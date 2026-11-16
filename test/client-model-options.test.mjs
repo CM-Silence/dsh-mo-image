@@ -235,12 +235,23 @@ test('the model options toggle is enabled for the local ComfyUI deployment', asy
   assert.notEqual(toggle.props.disabled, true, 'local ComfyUI must allow model options');
 });
 
-test('the model options toggle is disabled for a cloud provider', async () => {
-  const { tree } = await openEditor(CLOUD_CONFIG);
+test('the model options toggle opens the size panel for a cloud provider', async () => {
+  const { harness, tree } = await openEditor(CLOUD_CONFIG);
   const toggle = optionsToggle(tree);
-  assert.ok(toggle, 'chevron stays rendered so the row layout is stable');
-  assert.equal(toggle.props.disabled, true, 'cloud providers must not open model options');
-  assert.match(String(toggle.props.title), /ComfyUI/i, 'the tooltip should explain why it is disabled');
+  assert.ok(toggle, 'chevron stays rendered for every model');
+  assert.notEqual(toggle.props.disabled, true, 'cloud providers can override how the size is sent');
+  toggle.props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  assert.ok(panel, 'the panel opens');
+  assert.equal(findAll(panel, (node) => node.type === 'textarea').length, 0,
+    'a cloud provider has no workflow to edit');
+  const select = findAll(panel, (node) => node.type === 'select')[0];
+  assert.ok(select, 'the encoding select is there');
+  assert.deepEqual(findAll(select, (node) => node.type === 'option').map((node) => String(node.props.value)),
+    ['', 'wh-string', 'wh-fields', 'aspect', 'tier', 'prompt']);
+  const input = findAll(panel, (node) => node.type === 'input' && node.props.type === 'text')[0];
+  assert.ok(input, 'the parameter name is editable');
 });
 
 test('the workflow textarea is compact but still usable', async () => {
@@ -253,8 +264,8 @@ test('the workflow textarea is compact but still usable', async () => {
   assert.ok(Number(textarea.props.style.minHeight) >= 160, 'textarea should keep a usable minimum height');
 });
 
-test('the model options toggle is disabled for a local provider with no parameter model', async () => {
-  const { tree } = await openEditor({
+test('a local provider without a parameter table still opens the size panel', async () => {
+  const { harness, tree } = await openEditor({
     providers: [{
       id: 'p5', name: 'Local SwarmUI', baseUrl: 'http://127.0.0.1:7801',
       key: '', hasKey: false, adapter: 'swarmui', protocol: 'openai-images', optionalKey: true,
@@ -265,16 +276,21 @@ test('the model options toggle is disabled for a local provider with no paramete
   });
   const toggle = optionsToggle(tree);
   assert.ok(toggle, 'chevron stays rendered so the row layout is stable');
-  assert.equal(toggle.props.disabled, true, 'SwarmUI has no parameter table to configure');
+  assert.notEqual(toggle.props.disabled, true, 'SwarmUI can still override its size parameter');
+  toggle.props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  assert.ok(panel, 'the size panel opens');
+  assert.ok(findAll(panel, (node) => node.type === 'select').length >= 1);
 });
 
-test('a disabled toggle never expands the workflow panel', async () => {
+test('clicking the toggle again closes the panel', async () => {
   const { harness, tree } = await openEditor(CLOUD_CONFIG);
   const toggle = optionsToggle(tree);
-  if (typeof toggle.props.onClick === 'function') toggle.props.onClick(fakeEvent());
-  const after = harness.renderRoot();
-  assert.equal(findAll(after, (node) => hasClass(node, 'modelAdvanced')).length, 0,
-    'disabled control must not open the panel');
+  toggle.props.onClick(fakeEvent());
+  assert.equal(findAll(harness.renderRoot(), (node) => hasClass(node, 'modelAdvanced')).length, 1);
+  optionsToggle(harness.renderRoot()).props.onClick(fakeEvent());
+  assert.equal(findAll(harness.renderRoot(), (node) => hasClass(node, 'modelAdvanced')).length, 0);
 });
 
 test('the model row exposes model options as a chevron icon button, not a text button', async () => {

@@ -1,0 +1,98 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { resolveAdapter, sizeSpecFor, fitSize, prepareGenerate } from '../lib/adapters.js';
+import { normalizeModelOptions } from '../lib/config-store.js';
+
+/* 模型选项里那份「尺寸参数」覆盖：用户手填的形态/参数名/分隔符要压过适配器默认。 */
+
+function relay(size) {
+  return {
+    id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k',
+    modelOptions: { 'gemini-nano-banana-2.1': { size: size } }
+  };
+}
+
+const MODEL = 'gemini-nano-banana-2.1';
+
+test('an override can rename the size parameter and change the separator', () => {
+  const provider = relay({ mode: 'wh-string', field: 'image_size', separator: '*' });
+  const adapter = resolveAdapter(provider, MODEL);
+  const spec = sizeSpecFor(adapter, MODEL);
+  assert.equal(spec.control, 'wh');
+  assert.equal(spec.field, 'image_size');
+
+  const fitted = fitSize(adapter, { kind: 'size', text: '1024x1024' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.image_size, '1024*1024');
+  assert.equal(body.size, undefined, 'the old field name must not leak through');
+});
+
+test('an override can switch to two numeric fields', () => {
+  const provider = relay({ mode: 'wh-fields' });
+  const adapter = resolveAdapter(provider, MODEL);
+  const fitted = fitSize(adapter, { kind: 'size', text: '1368x768' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.width, 1368);
+  assert.equal(body.height, 768);
+  assert.equal(body.size, undefined);
+});
+
+test('an override can switch to a ratio even on a plain images gateway', () => {
+  const provider = relay({ mode: 'aspect' });
+  const adapter = resolveAdapter(provider, MODEL);
+  const spec = sizeSpecFor(adapter, MODEL);
+  assert.equal(spec.control, 'aspect');
+  assert.ok(spec.aspects.includes('16:9'), 'a default ratio list keeps the dropdown usable');
+  assert.equal(spec.field, 'aspect_ratio');
+
+  const fitted = fitSize(adapter, { kind: 'aspect', text: '1024x1024' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.aspect_ratio, '1:1');
+});
+
+test('an override can send a tier label', () => {
+  const provider = relay({ mode: 'tier', field: 'resolution' });
+  const adapter = resolveAdapter(provider, MODEL);
+  const spec = sizeSpecFor(adapter, MODEL);
+  assert.equal(spec.control, 'preset');
+  assert.deepEqual(spec.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
+
+  const fitted = fitSize(adapter, { kind: 'preset', text: '2K' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.resolution, '2K');
+});
+
+test('a dotted parameter name builds a nested object', () => {
+  const provider = relay({ mode: 'wh-string', field: 'generationConfig.imageConfig.imageSize' });
+  const adapter = resolveAdapter(provider, MODEL);
+  const fitted = fitSize(adapter, { kind: 'size', text: '1024x1536' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.deepEqual(body.generationConfig, { imageConfig: { imageSize: '1024x1536' } });
+});
+
+test('the user override beats the built-in model family table', () => {
+  // 官方家族表认为 nano-banana 收比例，用户说这个中转只认 width/height。
+  const provider = relay({ mode: 'wh-fields' });
+  const spec = sizeSpecFor(resolveAdapter(provider, MODEL), MODEL);
+  assert.equal(spec.control, 'wh');
+});
+
+test('no override leaves the adapter defaults untouched', () => {
+  const plain = { id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k' };
+  const adapter = resolveAdapter(plain, MODEL);
+  assert.equal(adapter.sizeOverride, undefined);
+  assert.equal(sizeSpecFor(adapter, MODEL).control, 'aspect', 'the family table still applies');
+});
+
+test('the config sanitiser keeps a size-only model option', () => {
+  const out = normalizeModelOptions({
+    'gemini-nano-banana-2.1': { size: { mode: 'aspect', field: 'aspect_ratio', separator: '' } }
+  }, ['gemini-nano-banana-2.1'], '');
+  assert.deepEqual(out['gemini-nano-banana-2.1'], { size: { mode: 'aspect', field: 'aspect_ratio' } });
+
+  const broken = normalizeModelOptions({
+    'gemini-nano-banana-2.1': { size: { mode: 'nonsense', field: 42, separator: '?' } }
+  }, ['gemini-nano-banana-2.1'], '');
+  assert.equal(broken['gemini-nano-banana-2.1'], undefined, 'nothing valid means no entry at all');
+});
