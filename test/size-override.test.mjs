@@ -82,7 +82,7 @@ test('no override leaves the adapter defaults untouched', () => {
   const plain = { id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k' };
   const adapter = resolveAdapter(plain, MODEL);
   assert.equal(adapter.sizeOverride, undefined);
-  assert.equal(sizeSpecFor(adapter, MODEL).control, 'aspect', 'the family table still applies');
+  assert.equal(sizeSpecFor(adapter, MODEL).control, 'wh', 'a relay stays width/height until the user says otherwise');
 });
 
 test('the config sanitiser keeps a size-only model option', () => {
@@ -101,8 +101,29 @@ test('the config sanitiser keeps a size-only model option', () => {
   }, ['m'], '');
   assert.equal(messy.m.size.separator, 'ab');
 
+  // 第二个字段也要能落盘：比例写 aspectRatio、档位写 imageSize。
+  const multi = normalizeModelOptions({
+    'm': { size: { mode: 'aspect', field: 'aspectRatio', second: { from: 'tier', field: 'imageSize' } } }
+  }, ['m'], '');
+  assert.deepEqual(multi.m.size, { mode: 'aspect', field: 'aspectRatio', second: { from: 'tier', field: 'imageSize' } });
+
   const broken = normalizeModelOptions({
     'gemini-nano-banana-2.1': { size: { mode: 'nonsense', field: 42, separator: '   ' } }
   }, ['gemini-nano-banana-2.1'], '');
   assert.equal(broken['gemini-nano-banana-2.1'], undefined, 'nothing valid means no entry at all');
+});
+test('a second field can carry the ratio or the tier', () => {
+  const provider = {
+    id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k',
+    modelOptions: {
+      'gemini-nano-banana-2.1': {
+        size: { mode: 'aspect', field: 'aspect_ratio', second: { from: 'tier', field: 'imageSize' } }
+      }
+    }
+  };
+  const adapter = resolveAdapter(provider, MODEL);
+  const fitted = fitSize(adapter, { kind: 'aspect', text: '1368x768' }, MODEL);
+  const body = JSON.parse(prepareGenerate(adapter, provider, { model: MODEL, prompt: 'p', fitted: fitted }, new Set()).body);
+  assert.equal(body.aspect_ratio, '16:9');
+  assert.equal(body.imageSize, fitted.tier, 'the tier goes to the second field');
 });

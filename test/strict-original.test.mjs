@@ -94,3 +94,18 @@ test('without strict mode nothing extra is written', async (t) => {
   assert.equal(result.original, undefined);
   assert.equal(result.generated, '256x256');
 });
+test('strict mode resizes a prompt-only model to the selector size', async (t) => {
+  // 模型不收 size（尺寸写进提示词）时，严格模式仍然按选择器的宽高锁分辨率。
+  const { work, exec, settings, generate } = await harness(t, { strict: true, width: 128, height: 128 });
+  const state = path.join(process.env.DSH_HOME, 'mo-image', 'config.json');
+  const config = JSON.parse(readFileSync(state, 'utf8'));
+  config.providers[0].modelOptions = { 'some-image-model': { size: { mode: 'prompt' } } };
+  writeFileSync(state, JSON.stringify(config), 'utf8');
+  await settings.execute({}, exec);
+  const result = await generate.execute({ prompt: '一只猫' }, exec);
+
+  assert.equal(result.size, '128x128');
+  assert.equal(result.generated, '256x256');
+  const files = imagesIn(work);
+  assert.equal(files.length, 2, 'resized image plus the kept original');
+});
