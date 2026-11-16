@@ -38,6 +38,27 @@ test('an override can switch to two numeric fields', () => {
   assert.equal(body.size, undefined);
 });
 
+test('width + height take their key names from field and second.field', () => {
+  // 缺省：还是 width / height，body 与迁移前一模一样。
+  const plain = relay({ mode: 'wh-fields' });
+  const plainAdapter = resolveAdapter(plain, MODEL);
+  const plainFitted = fitSize(plain, { kind: 'size', text: '1368x768' }, MODEL);
+  const plainBody = JSON.parse(prepareGenerate(plainAdapter, plain, { model: MODEL, prompt: 'p', fitted: plainFitted }, new Set()).body);
+  assert.equal(plainBody.width, 1368);
+  assert.equal(plainBody.height, 768);
+  assert.equal(plainBody.size, undefined);
+
+  // 改名：field 是「宽」的键名，second.field 是「高」的键名；键名反过来也照用。
+  const renamed = relay({ mode: 'wh-fields', field: 'w', second: { from: 'aspect', field: 'h' } });
+  const renamedAdapter = resolveAdapter(renamed, MODEL);
+  const renamedFitted = fitSize(renamed, { kind: 'size', text: '1368x768' }, MODEL);
+  const renamedBody = JSON.parse(prepareGenerate(renamedAdapter, renamed, { model: MODEL, prompt: 'p', fitted: renamedFitted }, new Set()).body);
+  assert.equal(renamedBody.w, 1368);
+  assert.equal(renamedBody.h, 768);
+  assert.equal(renamedBody.width, undefined, '改名后旧键名不许再出现');
+  assert.equal(renamedBody.height, undefined);
+});
+
 test('an override can switch to a ratio even on a plain images gateway', () => {
   const provider = relay({ mode: 'aspect' });
   const adapter = resolveAdapter(provider, MODEL);

@@ -1074,21 +1074,41 @@ test('说明文字改成 title：悬停才显示，不占一行', async () => {
   assert.match(String(nameInput.props.title || ''), /dotted paths/i, '参数名的说明挂在输入框上');
 });
 
-test('宽+高 编码方式下有两个参数名输入：宽 / 高', async () => {
+test('宽+高 编码方式下有两个参数名输入：宽 / 高，且都能改', async () => {
   const { harness } = await openEditor(sizedConfig('wh-fields'));
-  const opened = openModelPanel(harness);
-  const box = paramBox(opened, 'size');
+  let opened = openModelPanel(harness);
+  let box = paramBox(opened, 'size');
   assert.ok(box);
   const width = paramRow(box, 'size:width');
   const height = paramRow(box, 'size:height');
   assert.ok(width, '「参数名：宽」这一行在');
   assert.ok(height, '「参数名：高」这一行在');
-  assert.equal(textOf(width).join(''), 'Parameter name: width');
-  assert.equal(textOf(height).join(''), 'Parameter name: height');
-  assert.equal(width.children[1].props.value, 'width');
-  assert.equal(height.children[1].props.value, 'height');
+  assert.equal(textOf(width.children[0]).join(''), 'Parameter name: width');
+  assert.equal(textOf(height.children[0]).join(''), 'Parameter name: height');
+  const widthInput = width.children[1];
+  const heightInput = height.children[1];
+  // 默认就显示 body 里真正会用的两个键名；它们可编辑，不是只读展示。
+  assert.equal(widthInput.props.value, 'width');
+  assert.equal(heightInput.props.value, 'height');
+  assert.equal(widthInput.props.readOnly, undefined, '宽的键名要能改');
+  assert.equal(heightInput.props.readOnly, undefined, '高的键名要能改');
+  assert.notEqual(widthInput.props.disabled, true, '没上锁就能改');
+  assert.equal(widthInput.props['data-param-key'], 'size');
+  assert.equal(heightInput.props['data-param-key'], 'size');
   assert.equal(paramRow(box, 'size:field'), null, '宽+高 不再有单个通用参数名');
   assert.equal(paramRow(box, 'size:second'), null, '宽+高 的第二个参数名就是「高」');
+
+  // 改两个键名 → 落盘成 size.field / size.second.field（请求层按这两个名字发）。
+  widthInput.props.onChange({ target: { value: 'w' } });
+  heightInput.props.onChange({ target: { value: 'h' } });
+  opened = harness.renderRoot();
+  box = paramBox(opened, 'size');
+  assert.equal(paramRow(box, 'size:width').children[1].props.value, 'w');
+  assert.equal(paramRow(box, 'size:height').children[1].props.value, 'h');
+  const config = await saveAndPosted(harness);
+  assert.deepEqual(config.providers[0].modelOptions.m1.size, {
+    mode: 'wh-fields', field: 'w', second: { field: 'h' }
+  });
 });
 
 test('比例+分辨率 编码方式下有两个参数名输入：比例 / 分辨率', async () => {
@@ -1120,6 +1140,16 @@ test('其它编码方式只有一个参数名输入', async () => {
     const nameInputs = findAll(box, (node) => node.type === 'input' && node.props['data-param-key'] === 'size');
     assert.equal(nameInputs.length, 1, mode + ' 只有一个参数名输入');
   }
+});
+
+test('prompt 编码方式下没有参数名可填：那一行不出现', async () => {
+  const { harness } = await openEditor(sizedConfig('prompt'));
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'size');
+  assert.ok(paramBox(opened, 'size'), '尺寸还是个方框');
+  assert.ok(paramRow(box, 'size:mode'), '编码方式还在');
+  assert.equal(paramRow(box, 'size:field'), null, '该形态不发字段名，别摆一个死键输入');
+  assert.equal(findAll(box, (node) => node.type === 'input' && node.props['data-param-key'] === 'size').length, 0);
 });
 
 test('上锁时框里的输入全部禁用', async () => {
