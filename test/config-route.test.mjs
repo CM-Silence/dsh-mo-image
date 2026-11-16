@@ -330,3 +330,137 @@ test('config route migrates keys to the credentials store and never returns them
     if (savedOverride === undefined) delete process.env.MO_IMAGE_PROXY; else process.env.MO_IMAGE_PROXY = savedOverride;
   }
 });
+
+/* ------------------------- 模型规则检测路由（尺寸 / 质量规则下发） ------------------------- */
+
+/** 每个用例一份独立的 DSH_HOME 与模块实例，路由从 webServer.register 里捡。 */
+async function bootRuleRoutes(t, seq, config) {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'mo-image-rules-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const state = path.join(home, 'mo-image');
+  mkdirSync(state, { recursive: true });
+  if (config) writeFileSync(path.join(state, 'config.json'), JSON.stringify(config, null, 2), 'utf8');
+  process.env.DSH_HOME = home;
+  const routes = [];
+  const fake = {
+    effect(fn) { const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {}; },
+    inject(_deps, callback) { callback(fake); },
+    tools: { register() { return () => {}; } },
+    webServer: {
+      register(route) { routes.push(route); return () => {}; },
+      getOrigin() { return 'http://127.0.0.1:1'; }
+    },
+    get() { return undefined; }
+  };
+  const mod = await import('../lib/index.js?config-route-rules-' + seq);
+  mod.apply(fake);
+  return routes;
+}
+
+test('detect-model-rule 下发命中模型的尺寸规则，质量没有规则时返回 null', async (t) => {
+  const routes = await bootRuleRoutes(t, 1);
+  const route = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  assert.ok(route, '缺少 /api/mo-image/detect-model-rule 路由');
+
+  const res = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen-Image'
+  })), res);
+  assert.equal(res.status, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.ok, true);
+  assert.equal(body.model, 'Qwen/Qwen-Image');
+  assert.equal(body.size.mode, 'wh-string');
+  assert.equal(body.size.field, 'image_size');
+  assert.equal(body.size.separator, 'x');
+  assert.ok(body.size.domain.allowed.includes('1328x1328'));
+  // 质量目前没有兜底规则：这个模型不该凭空得到一套档位。
+  assert.equal(body.quality, null);
+});
+
+test('detect-model-rule 缺参数时回 4xx 与结构化的错误体', async (t) => {
+  const routes = await bootRuleRoutes(t, 2);
+  const route = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  assert.ok(route, '缺少 /api/mo-image/detect-model-rule 路由');
+
+  const noBaseUrl = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({ baseUrl: '' })), noBaseUrl);
+  assert.equal(noBaseUrl.status, 400);
+  const noBaseUrlBody = JSON.parse(noBaseUrl.body);
+  assert.equal(noBaseUrlBody.ok, false);
+  assert.equal(noBaseUrlBody.code, 'provider.missingBaseUrl');
+  assert.equal(noBaseUrlBody.error, '请先填写 API 地址');
+
+  const noModel = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://api.siliconflow.cn/v1', model: '   '
+  })), noModel);
+  assert.equal(noModel.status, 400);
+  const noModelBody = JSON.parse(noModel.body);
+  assert.equal(noModelBody.ok, false);
+  assert.match(noModelBody.error, /模型/);
+});
+
+test('models 路由只给本次新增的模型附 detected', async (t) => {
+  const routes = await bootRuleRoutes(t, 3);
+  const route = routes.find((item) => item.path === '/api/mo-image/models');
+  assert.ok(route);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [{ id: 'flux-local-a' }, { id: 'Qwen/Qwen-Image' }, { id: 'chat-model-9' }]
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const res = makeRes();
+    await route.handler(jsonReq('POST', JSON.stringify({
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      adapter: 'openai-images',
+      optionalKey: true,
+      // 表单里已经有的模型：不该再算规则，也不该出现在 detected 里。
+      known: ['flux-local-a']
+    })), res);
+    assert.equal(res.status, 200, res.body);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.models, ['flux-local-a', 'Qwen/Qwen-Image']);
+    assert.equal(body.knownSource, 'request');
+    assert.deepEqual(body.detectedModels, ['Qwen/Qwen-Image']);
+    assert.deepEqual(Object.keys(body.detected), ['Qwen/Qwen-Image']);
+    assert.equal(body.detected['Qwen/Qwen-Image'].size.field, 'image_size');
+    assert.equal(body.detected['Qwen/Qwen-Image'].quality, null);
+    assert.equal(body.detected['flux-local-a'], undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('models 路由没传 known 时按已保存的模型列表判断新增', async (t) => {
+  const routes = await bootRuleRoutes(t, 4, {
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1', key: '',
+      protocol: 'openai-images', adapter: '', models: ['gpt-image-2.5'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'gpt-image-2.5' },
+    defaults: {}
+  });
+  const route = routes.find((item) => item.path === '/api/mo-image/models');
+  assert.ok(route);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [{ id: 'gpt-image-2.5' }, { id: 'flux-1-dev' }]
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const res = makeRes();
+    await route.handler(jsonReq('POST', JSON.stringify({
+      providerId: 'p1', adapter: 'openai-images', optionalKey: true
+    })), res);
+    assert.equal(res.status, 200, res.body);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.models, ['gpt-image-2.5', 'flux-1-dev']);
+    assert.equal(body.knownSource, 'provider');
+    assert.deepEqual(body.detectedModels, ['flux-1-dev']);
+    assert.equal(body.detected['gpt-image-2.5'], undefined);
+    assert.equal(body.detected['flux-1-dev'].size.field, 'size');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
