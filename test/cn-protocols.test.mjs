@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, prepareGenerate, prepareEdit, fitSize } from '../lib/adapters.js';
+import { resolveAdapter, prepareGenerate, prepareEdit, fitSize, adapterSupportsKind } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -120,4 +120,49 @@ test('ideogram builds the endpoint from the model id', () => {
   const adapter = resolveAdapter(provider, 'ideogram-4');
   const built = prepareGenerate(adapter, provider, { model: 'ideogram-4', prompt: 'x', fitted }, new Set());
   assert.equal(built.path, '/v2/image/generate/ideogram-4');
+});
+
+test('dashscope qwen-image 的图生图把参考图放进 content，不再报不支持', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let captured = null;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target.includes('multimodal-generation')) {
+      captured = { url: target, init };
+      return jsonResponse({ output: { choices: [{ message: { content: [{ image: 'https://cdn.test/qwen-edit.png' }] } }] } });
+    }
+    if (target === 'https://cdn.test/qwen-edit.png') return pngResponse();
+    throw new Error('unexpected url ' + target);
+  };
+
+  const provider = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-qwen-image', key: 'k' };
+  const adapter = resolveAdapter(provider, 'qwen-image-3.0-pro');
+  assert.equal(adapterSupportsKind(adapter, 'edit'), true);
+
+  const result = await adapter.execute('edit', provider, {
+    model: 'qwen-image-3.0-pro',
+    prompt: '换成夜景',
+    fitted: fitted,
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'ref.png' }]
+  }, new AbortController().signal);
+
+  assert.ok(result.bytes.length > 0);
+  const body = JSON.parse(captured.init.body);
+  const content = body.input.messages[0].content;
+  const image = content.find((item) => typeof item.image === 'string');
+  assert.ok(image, '参考图要作为 image 项放进 content');
+  assert.ok(image.image.startsWith('data:image/png;base64,'), '参考图按 data URL 传');
+  assert.equal(content[content.length - 1].text, '换成夜景');
+  // 编辑接口不收尺寸：Qwen-Image-Edit 系列官方明确不发这个字段。
+  assert.equal(body.parameters.size, undefined);
+});
+
+test('dashscope qwen-image 图生图没有参考图时明确报错', async () => {
+  const provider = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-qwen-image', key: 'k' };
+  const adapter = resolveAdapter(provider, 'qwen-image-3.0-pro');
+  await assert.rejects(
+    () => adapter.execute('edit', provider, { model: 'qwen-image-3.0-pro', prompt: 'x', fitted: fitted, images: [] }, new AbortController().signal),
+    /需要一张参考图/
+  );
 });

@@ -1,0 +1,9 @@
+feat(adapters): 百炼 Qwen-Image 支持图生图
+
+编辑与生成是同一个原生多模态端点：把参考图作为 image 项放进 content，
+prompt 放在最后一项。编辑时不发 parameters.size（Qwen-Image-Edit 系列不收），
+没有参考图时报明确错误而不是"暂未支持"。
+
+端点的 edit 路由同步填上，设置页的协议面板会显示图生图地址。
+
+tests: node --test 689 passed
