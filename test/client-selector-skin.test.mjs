@@ -518,6 +518,7 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   assert.equal(popovers.length, 1);
   assert.match(popovers[0].props.className, /peak/);
   assert.equal(collectClass(tree, 'cmes-sp').length, 22);
+  assert.match(collectClass(tree, 'cmes-sp')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
   assert.equal(collectClass(tree, 'cmes-sparks')[0].props.key, 'sparks-peak', 'entering Ultra restarts the sparkle flow');
 });
 
