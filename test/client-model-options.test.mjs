@@ -905,7 +905,54 @@ test('一键配置补上质量模板（否则质量永远是死的）', async ()
   const config = await saveAndPosted(harness);
   const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
   assert.deepEqual(entry.fields.quality, { path: 'quality' });
-  assert.ok(entry.quality, '质量覆盖要一起写');
+  // 抄进来的是「质量」方框的新形状：勾上 + 档位表 + 规则那个默认档的标记。
+  assert.deepEqual(entry.quality, {
+    supported: true,
+    field: 'quality',
+    options: [
+      { label: '', value: 'low', default: false },
+      { label: '', value: 'high', default: true }
+    ],
+    default: 'high'
+  }, '质量覆盖要一起写，而且写成方框认的形状');
+});
+
+test('一键配置不会撤销「这个模型不发质量」：用户关掉过的保持关掉', async () => {
+  // 中转站没有 presetId（锁默认全开），所以「上锁即保护」在这里不成立：
+  // 用户明确取消勾选过的质量要像上锁一样挡住规则写入。
+  const declined = {
+    providers: [{
+      id: 'p9', name: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1',
+      key: '', hasKey: true, adapter: 'custom', protocol: 'openai-images', optionalKey: false,
+      customEndpoints: {
+        generate: 'https://api.siliconflow.cn/v1/images/generations',
+        edit: '',
+        models: 'https://api.siliconflow.cn/v1/models'
+      },
+      models: ['Qwen/Qwen-Image'], names: {},
+      modelOptions: { 'Qwen/Qwen-Image': { quality: { supported: false } } }
+    }],
+    active: { providerId: 'p9', model: 'Qwen/Qwen-Image' },
+    defaults: {}
+  };
+  const detect = {
+    ok: true,
+    models: ['Qwen/Qwen-Image'],
+    rules: {
+      'Qwen/Qwen-Image': {
+        size: { mode: 'wh-string', field: 'image_size', separator: 'x', second: null, domain: {} },
+        quality: { field: 'quality', options: ['low', 'high'], default: 'high', map: null }
+      }
+    },
+    fields: { 'Qwen/Qwen-Image': { prompt: { path: 'prompt' } } },
+    matched: { 'Qwen/Qwen-Image': true }
+  };
+  const { harness } = await openEditor(declined, { detect: detect });
+  await configureAll(harness);
+  const config = await saveAndPosted(harness);
+  const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
+  assert.deepEqual(entry.quality, { supported: false }, '规则说收也不算：用户关掉过');
+  assert.deepEqual(entry.size, { mode: 'wh-string', field: 'image_size', separator: 'x' }, '别的键照旧抄');
 });
 
 test('一键配置抄规则时带上面板控件 control，mode none 不写', () => {
@@ -981,7 +1028,8 @@ function sizedConfig(mode, extra = {}) {
 test('单输入的参数渲染成一行：label 左、输入框中间、锁在行尾', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
-  for (const key of ['quality', 'prompt', 'negative', 'model', 'n']) {
+  // 质量不在这批里：它有自己的方框（勾选 + 参数名 + 挡位表），见「质量方框」那一组用例。
+  for (const key of ['prompt', 'negative', 'model', 'n']) {
     const row = paramRow(opened, key);
     assert.ok(row, key + ' 应该是一行');
     assert.equal(row.children[0].type, 'span', key + ' 的 label 在行首');
@@ -1126,8 +1174,8 @@ test('被截断的 label 悬停立刻显示完整文案；没截断的不弹', a
   // 没截断（88px 放得下）：完整文案就在眼前，不弹。
   const short = await openEditor(CLOUD_CONFIG);
   let panel = openModelPanel(short.harness);
-  const quality = paramRow(panel, 'quality').children[0];
-  assert.equal(textOf(quality).join(''), 'Quality');
+  const quality = paramRow(panel, 'quality:supported').children[0];
+  assert.equal(textOf(quality).join(''), 'Supports quality');
   quality.props.ref.current = tipTarget({ scrollWidth: 60, clientWidth: LABEL_W });
   quality.props.onPointerEnter();
   panel = short.harness.renderRoot();
@@ -1316,16 +1364,16 @@ test('参考图有两个输入，也用方框框起来：字段名 / 传法', as
   assert.equal(paramRow(opened, 'image'), null, '参考图不再挤成一整行');
 });
 
-test('五个单输入参数收进一个「常规」方框：质量 / 提示词 / 负面词 / 模型 / 张数', async () => {
+test('四个单输入参数收进一个「常规」方框：提示词 / 负面词 / 模型 / 张数', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
   const box = paramBox(opened, 'common');
   assert.ok(box, '「常规」方框存在');
   assert.equal(textOf(box.children[0].children[0]).join(''), 'General', '第一行是标题「常规」');
   assert.equal(findAll(box.children[0], (node) => node.type === 'button').length, 0,
-    '标题行不放锁：这五个键各有各的锁');
+    '标题行不放锁：这四个键各有各的锁');
 
-  const keys = ['quality', 'prompt', 'negative', 'model', 'n'];
+  const keys = ['prompt', 'negative', 'model', 'n'];
   for (const key of keys) {
     const row = paramRow(box, key);
     assert.ok(row, key + ' 在「常规」方框里');
@@ -1339,8 +1387,10 @@ test('五个单输入参数收进一个「常规」方框：质量 / 提示词 /
     .map((row) => row.props['data-param-row']);
   assert.deepEqual(order, keys);
 
-  // 三个方框各管一摊：尺寸 / 参考图不在「常规」里。
+  // 四个方框各管一摊：尺寸 / 质量 / 参考图都不在「常规」里。
   assert.equal(paramRow(box, 'size:mode'), null, '尺寸不进「常规」');
+  assert.equal(paramRow(box, 'quality:field'), null, '质量不进「常规」：它有自己的方框');
+  assert.equal(paramRow(box, 'quality:supported'), null, '质量的勾选框也不在「常规」里');
   assert.equal(paramRow(box, 'image:field'), null, '参考图不进「常规」');
 });
 
@@ -1549,3 +1599,246 @@ test('「一键配置」不出现在只认工作流参数的协议上，OpenAI �
     assert.ok(hasBulk(tree), (adapter || '(空 adapter)') + ' 必须保留一键配置');
   }
 });
+
+/* ───────────────────── 「质量」方框：勾选 + 参数名 + 挡位表 ───────────────────── */
+
+/** 带质量覆盖的云端配置（p2 / gpt-image-2.5-flare）。 */
+function qualityConfig(quality, extra = {}) {
+  return {
+    providers: [{
+      id: 'p2', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images', optionalKey: false,
+      models: ['gpt-image-2.5-flare'], names: {},
+      modelOptions: { 'gpt-image-2.5-flare': Object.assign({ quality: quality }, extra) }
+    }],
+    active: { providerId: 'p2', model: 'gpt-image-2.5-flare' },
+    defaults: {}
+  };
+}
+
+/** 质量方框里的一行参数（勾选框 / 参数名）。 */
+const qualityRow = (tree, key) => paramRow(tree, 'quality:' + key);
+/** 挡位表的表头行。 */
+const qualityHead = (tree) => findAll(tree, (node) => node.props && node.props['data-param-grid'] === 'quality:head')[0] || null;
+/** 挡位表的表体行，按显示顺序。 */
+const qualityOptions = (tree) => findAll(tree, (node) => node.props && node.props['data-param-grid'] === 'quality:option');
+/** 质量方框里的勾选框（面板别处可能还有复选框，所以按方框限定）。 */
+function qualityCheckbox(tree) {
+  const box = paramBox(tree, 'quality');
+  return box && findAll(box, (node) => node.type === 'input' && node.props.type === 'checkbox')[0] || null;
+}
+/** 质量方框里的某个控件：key 是 data-param-key，index 是挡位行号（不传 = 不限行）。 */
+function qualityControl(tree, key, index) {
+  const scope = index === undefined ? paramBox(tree, 'quality') : qualityOptions(tree)[index];
+  if (!scope) return null;
+  return findAll(scope, (node) => node.props && node.props['data-param-key'] === key)[0] || null;
+}
+/** 「+ 添加挡位」。 */
+const qualityAddButton = (tree) => findButton(paramBox(tree, 'quality'), (node) => /Add level/i.test(textOf(node).join('')));
+/** 每个挡位行上的三个控件按列取值，方便整表比对。 */
+const qualityTable = (tree) => qualityOptions(tree).map((_row, index) => ({
+  label: qualityControl(tree, 'quality.option.label', index).props.value,
+  value: qualityControl(tree, 'quality.option.value', index).props.value,
+  default: qualityControl(tree, 'quality.option.default', index).props.checked
+}));
+
+test('质量是一个独立方框：和尺寸同级、标题行带锁、占满面板宽度', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'quality');
+  assert.ok(box, '质量方框存在');
+  assert.equal(textOf(box.children[0].children[0]).join(''), 'Quality', '标题是「质量」');
+  assert.equal(box.props.style.width, '100%');
+  assert.equal(box.props.style.boxSizing, 'border-box');
+  assert.equal(box.props.style.gridColumn, '1 / -1');
+  // 锁复用现有的锁图标与 data-lock-key 语义，位置在标题行。
+  const head = box.children[0];
+  const last = head.children[head.children.length - 1];
+  assert.equal(last.type, 'button');
+  assert.equal(last.props['data-lock-key'], 'quality');
+  assert.equal(last.props['aria-pressed'], 'false', '自配的网关默认不上锁');
+
+  // 方框顺序：常规 → 尺寸 → 质量 → 参考图（尺寸和质量挨着，都是「参数形状」这一类）。
+  const body = findAll(opened, (node) => hasClass(node, 'customizedBody'))[0];
+  const order = findAll(body, (node) => node.props && node.props['data-param-box']).map((node) => node.props['data-param-box']);
+  assert.deepEqual(order, ['common', 'size', 'quality', 'image']);
+});
+
+test('没配过质量的模型：复选框不勾，参数名与挡位表整块不渲染', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  // 宿主下发的能力里没有质量（这个模型的规则/预设都不收），所以默认不勾。
+  assert.equal(qualityCheckbox(opened).props.checked, false);
+  assert.equal(qualityRow(opened, 'field'), null, '不勾时没有参数名');
+  assert.equal(qualityHead(opened), null, '不勾时没有表头');
+  assert.equal(qualityOptions(opened).length, 0, '不勾时没有挡位行');
+  assert.equal(qualityAddButton(opened), null, '不勾时连「添加挡位」也不摆');
+});
+
+test('勾选后出现参数名与挡位表，并把字段模板这条闸门补上', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  let panel = openModelPanel(harness);
+  qualityCheckbox(panel).props.onChange({ target: { checked: true } });
+  panel = harness.renderRoot();
+  assert.equal(qualityCheckbox(panel).props.checked, true);
+  assert.ok(qualityRow(panel, 'field'), '勾上以后有参数名');
+  assert.ok(qualityHead(panel), '勾上以后有表头');
+  assert.equal(textOf(qualityHead(panel)).join(''), 'Level nameValueDefault', '三列表头：挡位名 / 值 / 是否默认');
+  assert.ok(qualityAddButton(panel), '勾上以后有「添加挡位」');
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.quality.supported, true);
+  assert.deepEqual(entry.fields.quality, { path: 'quality' },
+    '勾选时顺手补模板：没有它的话质量参数照样发不出去');
+});
+
+test('取消勾选后参数名与挡位表消失，配置里留下 supported:false 而档位表不丢', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [
+      { label: 'Low', value: 'low', default: false },
+      { label: 'High', value: 'high', default: true }
+    ]
+  }));
+  let panel = openModelPanel(harness);
+  assert.equal(qualityOptions(panel).length, 2, '一开始是勾着的，档位表在');
+  qualityCheckbox(panel).props.onChange({ target: { checked: false } });
+  panel = harness.renderRoot();
+  assert.equal(qualityRow(panel, 'field'), null, '取消勾选后参数名不渲染');
+  assert.equal(qualityOptions(panel).length, 0, '取消勾选后挡位表不渲染');
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.quality.supported, false, '取消勾选要落盘成 supported:false');
+  assert.deepEqual(entry.quality.options.map((item) => item.value), ['low', 'high'],
+    '取消勾选只关掉「收不收」，别把用户填好的档位表删了');
+});
+
+test('参数名改了以后 quality.field 与字段模板一起写：质量发到新字段', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [{ label: 'High', value: 'high', default: true }]
+  }));
+  const panel = openModelPanel(harness);
+  const input = qualityRow(panel, 'field').children[1];
+  assert.equal(input.props.value, 'quality');
+  input.props.onChange({ target: { value: 'parameters.quality' } });
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.quality.field, 'parameters.quality', '覆盖层记下参数名');
+  assert.deepEqual(entry.fields.quality, { path: 'parameters.quality' }, '字段模板才是真正决定落点的那一处');
+});
+
+test('参数名清空 = 删掉模板覆盖，回落到规则/预设', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [{ label: 'High', value: 'high', default: true }]
+  }, { fields: { quality: { path: 'quality' } } }));
+  const panel = openModelPanel(harness);
+  qualityRow(panel, 'field').children[1].props.onChange({ target: { value: '' } });
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.quality.field, undefined);
+  assert.equal(entry.fields, undefined, '清空后不该留下一条空模板');
+});
+
+test('挡位表：加行 / 改挡位名与值 / 单选默认', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [
+      { label: 'Low', value: 'low', default: false },
+      { label: 'High', value: 'high', default: true }
+    ]
+  }));
+  let panel = openModelPanel(harness);
+  assert.deepEqual(qualityTable(panel), [
+    { label: 'Low', value: 'low', default: false },
+    { label: 'High', value: 'high', default: true }
+  ], '行序就是配置里的顺序，单选只有一条');
+
+  // 改挡位名与值（值才是发出去的那个）。
+  qualityControl(panel, 'quality.option.label', 0).props.onChange({ target: { value: '好省' } });
+  panel = harness.renderRoot();
+  qualityControl(panel, 'quality.option.value', 0).props.onChange({ target: { value: 'cheap' } });
+  panel = harness.renderRoot();
+
+  // 加一条新挡位，填好并设为默认。
+  qualityAddButton(panel).props.onClick();
+  panel = harness.renderRoot();
+  assert.equal(qualityOptions(panel).length, 3, '新增一行空白挡位');
+  qualityControl(panel, 'quality.option.label', 2).props.onChange({ target: { value: 'Ultra' } });
+  panel = harness.renderRoot();
+  qualityControl(panel, 'quality.option.value', 2).props.onChange({ target: { value: 'ultra' } });
+  panel = harness.renderRoot();
+  qualityControl(panel, 'quality.option.default', 2).props.onChange();
+  panel = harness.renderRoot();
+  assert.deepEqual(qualityTable(panel), [
+    { label: '好省', value: 'cheap', default: false },
+    { label: 'High', value: 'high', default: false },
+    { label: 'Ultra', value: 'ultra', default: true }
+  ], '单选是唯一的表达：选了新的，旧的自动让位');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.quality.options, [
+    { label: '好省', value: 'cheap', default: false },
+    { label: 'High', value: 'high', default: false },
+    { label: 'Ultra', value: 'ultra', default: true }
+  ], '显示名 / 值 / 默认标记都按编辑结果落盘');
+  assert.equal(entry.quality.default, 'ultra', '默认档跟着单选走');
+});
+
+test('挡位表：删除一行', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [
+      { label: 'Low', value: 'low', default: false },
+      { label: 'High', value: 'high', default: true },
+      { label: 'Ultra', value: 'ultra', default: false }
+    ]
+  }));
+  const panel = openModelPanel(harness);
+  assert.equal(qualityControl(panel, 'quality.option.remove', 1).props['aria-label'], 'Remove level 2');
+  qualityControl(panel, 'quality.option.remove', 1).props.onClick();
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.quality.options.map((item) => item.value), ['low', 'ultra']);
+  assert.equal(entry.quality.default, undefined, '删掉的正好是默认档：默认随之清空，退回规则');
+});
+
+test('上锁时质量方框里的控件全部禁用', async () => {
+  const config = qualityConfig({
+    supported: true,
+    field: 'quality',
+    options: [{ label: 'High', value: 'high', default: true }]
+  });
+  config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+  const { harness } = await openEditor(config);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'quality');
+  assert.equal(paramLock(opened, 'quality').props['aria-pressed'], 'true', '这个键是上锁的');
+  const controls = findAll(box, (node) => node.type === 'input' || node.type === 'button');
+  assert.ok(controls.length >= 5, '勾选框 + 参数名 + 每行三个控件 + 添加');
+  for (const control of controls) {
+    // 标题行上的锁自己永远可点，它不是「框内的输入」。
+    if (control.props['data-lock-key'] === 'quality') continue;
+    assert.equal(control.props.disabled, true, '上锁后框里每个控件都该禁用');
+  }
+});
+
+test('老形状的质量覆盖（字符串挡位 + 顶层 default）在面板里读得动', async () => {
+  const { harness } = await openEditor(qualityConfig({
+    field: 'rendering_speed', options: ['turbo', 'quality'], default: 'quality'
+  }));
+  const panel = openModelPanel(harness);
+  assert.equal(qualityCheckbox(panel).props.checked, true, '老配置按「收质量」处理');
+  assert.equal(qualityRow(panel, 'field').children[1].props.value, 'rendering_speed');
+  assert.deepEqual(qualityTable(panel), [
+    { label: '', value: 'turbo', default: false },
+    { label: '', value: 'quality', default: true }
+  ], '顶层 default 折成那一条上的单选');
+});
+

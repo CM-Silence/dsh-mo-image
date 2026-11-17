@@ -179,7 +179,16 @@ test('normalizeConfig 把质量覆盖与锁一起存下来', () => {
       models: ['gpt-image-2.5-flare'],
       modelOptions: {
         'gpt-image-2.5-flare': {
-          quality: { field: 'rendering_speed', options: ['TURBO', 'Quality', 'OFF'], default: 'QUALITY' },
+          quality: {
+            supported: true,
+            field: 'rendering_speed',
+            options: [
+              { label: 'Turbo', value: 'TURBO' },
+              { label: 'Quality', value: 'Quality', default: true },
+              { label: 'Off', value: 'OFF' }
+            ],
+            default: 'QUALITY'
+          },
           locked: { quality: true, size: true }
         }
       }
@@ -189,9 +198,12 @@ test('normalizeConfig 把质量覆盖与锁一起存下来', () => {
   const options = config.providers[0].modelOptions;
   assert.ok(options, '质量覆盖与锁必须能落盘');
   assert.deepEqual(options['gpt-image-2.5-flare'].locked, { quality: true, size: true });
+  assert.equal(options['gpt-image-2.5-flare'].quality.supported, true);
   assert.equal(options['gpt-image-2.5-flare'].quality.field, 'rendering_speed');
-  assert.deepEqual(options['gpt-image-2.5-flare'].quality.options, ['turbo', 'quality'],
-    '档位小写化，off 是全局固定档不落盘');
+  assert.deepEqual(options['gpt-image-2.5-flare'].quality.options, [
+    { label: 'Turbo', value: 'turbo', default: false },
+    { label: 'Quality', value: 'quality', default: true }
+  ], '档位小写化、off 是全局固定档不落盘，显示名与默认标记跟着走');
   assert.equal(options['gpt-image-2.5-flare'].quality.default, 'quality');
 });
 

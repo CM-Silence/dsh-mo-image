@@ -111,10 +111,18 @@ test('映射是幂等的：已经是新值的配置再跑一遍什么都不变',
 });
 
 test('映射保留 presetId 与 modelOptions（锁与覆盖不能丢）', () => {
+  // 覆盖值写成规范化之后的样子：迁移只该换协议 id，不该碰 modelOptions 一个字节。
   const modelOptions = {
     'dall-e-3': {
       size: { field: 'size', mode: 'wh-string' },
-      quality: { field: 'quality', options: ['standard', 'hd'] },
+      quality: {
+        supported: true,
+        field: 'quality',
+        options: [
+          { label: '', value: 'standard', default: false },
+          { label: 'HD', value: 'hd', default: false }
+        ]
+      },
       locked: { size: true, quality: false }
     }
   };
