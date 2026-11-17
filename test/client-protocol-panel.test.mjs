@@ -138,10 +138,10 @@ function renderForm(client, provider, isNew = false) {
   }));
 }
 
-/** 协议 label 右侧的问号：三条地址只在它的 title 里。 */
+/** 协议 label 右侧的问号：三条地址在它的即时气泡里（aria-description 也给出全文）。 */
 const routeHelpOf = (node) => collect(node, (item) => item.props && item.props['data-route-help'] !== undefined)[0];
 
-test('三条地址收进协议 label 右侧的问号：悬停看，一行一条，不再占版面', () => {
+test('三条地址收进协议 label 右侧的问号：悬停立刻看，一行一条，不再占版面', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -150,7 +150,10 @@ test('三条地址收进协议 label 右侧的问号：悬停看，一行一条�
   const help = routeHelpOf(node);
   assert.ok(help, '协议 label 右侧要有问号');
   assert.equal(help.props['aria-label'], '协议地址', '问号要有可读的名字');
-  assert.equal(help.props.title,
+  // 原生 title 有约 1 秒延迟：这里不再用它，改成悬停立刻出现的自绘气泡。
+  assert.equal(help.props.title, undefined, '不能用有延迟的原生 title');
+  assert.equal(typeof help.props.onPointerEnter, 'function', '悬停立刻展开');
+  assert.equal(help.props['aria-description'],
     '文生图：http://127.0.0.1:8188/prompt\n'
     + '图生图：http://127.0.0.1:8188/prompt\n'
     + '获取模型列表：http://127.0.0.1:8188/object_info');
@@ -168,9 +171,9 @@ test('问号里不支持的项写成占位符，而不是整行消失', () => {
   });
   const help = routeHelpOf(node);
   assert.ok(help);
-  assert.match(help.props.title, /文生图：https:\/\/api\.together\.xyz\/v1\/images\/generations/);
-  assert.match(help.props.title, /图生图：不支持/);
-  assert.match(help.props.title, /获取模型列表：https:\/\/api\.together\.xyz\/v1\/models/);
+  assert.match(help.props['aria-description'], /文生图：https:\/\/api\.together\.xyz\/v1\/images\/generations/);
+  assert.match(help.props['aria-description'], /图生图：不支持/);
+  assert.match(help.props['aria-description'], /获取模型列表：https:\/\/api\.together\.xyz\/v1\/models/);
 });
 
 test('选中自定义时给出三个输入框', () => {
@@ -190,9 +193,9 @@ test('选中自定义时给出三个输入框', () => {
   // 自定义协议的地址是自己填的：问号里显示的就是填了什么，空着的说「不支持」。
   const help = routeHelpOf(node);
   assert.ok(help);
-  assert.match(help.props.title, /文生图：https:\/\/g\.example\/v1\/images\/generations/);
-  assert.match(help.props.title, /图生图：不支持/);
-  assert.match(help.props.title, /获取模型列表：不支持/);
+  assert.match(help.props['aria-description'], /文生图：https:\/\/g\.example\/v1\/images\/generations/);
+  assert.match(help.props['aria-description'], /图生图：不支持/);
+  assert.match(help.props['aria-description'], /获取模型列表：不支持/);
 });
 
 function fetchButton(node) {

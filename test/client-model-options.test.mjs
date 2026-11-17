@@ -135,7 +135,7 @@ function createHarness({ config, primitives = null, analyze = null, detect = nul
     throw new Error('render did not settle');
   }
 
-  return { fetchCalls, renderRoot, api };
+  return { fetchCalls, renderRoot, api, locale };
 }
 
 function walk(node, visit) {
@@ -1006,6 +1006,172 @@ test('单行用 flex 排版：label 不伸缩，输入框吃满剩余宽度，�
   assert.equal(input.props.style.flex, '1 1 auto');
   assert.equal(input.props.style.minWidth, 0, 'min-width:0 才允许被长 label 挤窄');
   assert.equal(row.children[2].props.style.flex, 'none');
+});
+
+/* ───────────────────── 排版微调：标题字号 / 固定 label 宽度 / 即时气泡 ───────────────────── */
+
+/** 行 label 的固定宽度：所有行输入框的起点就靠它对齐。 */
+const LABEL_W = 88;
+
+/** 悬停用：给气泡定位与「是否截断」判断一个假的 DOM 度量。 */
+function tipTarget({ scrollWidth = 0, clientWidth = 0 } = {}) {
+  return {
+    scrollWidth: scrollWidth,
+    clientWidth: clientWidth,
+    getBoundingClientRect: () => ({ left: 24, top: 120, bottom: 140, right: 112, width: 88, height: 20 })
+  };
+}
+
+/** 渲染树里的自绘气泡（悬停才挂载，role=tooltip）。 */
+const tipNodes = (tree) => findAll(tree, (node) => node.props && node.props.role === 'tooltip');
+
+test('方框标题比正文大一号并加粗，锁仍在标题行原位', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const titles = { common: 'General', size: 'Size', image: 'Reference image' };
+  for (const key of Object.keys(titles)) {
+    const head = paramBox(opened, key).children[0];
+    const title = head.children[0];
+    assert.equal(textOf(title).join(''), titles[key], key + ' 的标题文案没变');
+    assert.equal(title.props.style.fontSize, 14, key + ' 的标题比正文大一号');
+    assert.equal(title.props.style.fontWeight, 600, key + ' 的标题加粗');
+  }
+  // 尺寸 / 参考图的锁没挪位置：仍是标题行里紧跟标题的那个按钮。
+  for (const key of ['size', 'image']) {
+    const head = paramBox(opened, key).children[0];
+    const last = head.children[head.children.length - 1];
+    assert.equal(last.type, 'button', key + ' 的锁还在标题行');
+    assert.equal(last.props['data-lock-key'], key);
+  }
+  assert.equal(findAll(paramBox(opened, 'common').children[0], (node) => node.type === 'button').length, 0,
+    '「常规」的标题行照旧不放锁');
+});
+
+test('参数行 label 固定 88px 并单行截断：长键名不再把输入框挤没', async () => {
+  const { harness } = await openEditor(sizedConfig('aspect', {
+    field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
+  }));
+  const opened = openModelPanel(harness);
+  const rows = findAll(opened, (node) => node.props && node.props['data-param-row']);
+  // 编码方式 / 比例 / 分辨率 / 常规五条 / 参考图两条。
+  assert.ok(rows.length >= 9, '三个方框里的行都在');
+  for (const row of rows) {
+    const label = row.children[0];
+    const key = row.props['data-param-row'];
+    assert.equal(label.type, 'span', key + ' 的行首仍是 label');
+    assert.equal(label.props.style.width, LABEL_W, key + ' 的 label 是固定宽度');
+    assert.equal(label.props.style.minWidth, LABEL_W, key + ' 的 label 不会被压窄');
+    assert.equal(label.props.style.flex, 'none', key + ' 的 label 不参与伸缩');
+    assert.equal(label.props.style.overflow, 'hidden', key + ' 的 label 裁掉超出的文字');
+    assert.equal(label.props.style.textOverflow, 'ellipsis', key + ' 的 label 超长显示省略号');
+    assert.equal(label.props.style.whiteSpace, 'nowrap', key + ' 的 label 不换行');
+    // 截断是视觉的：DOM 里仍是完整文案，悬停气泡才有全名可给。
+    assert.ok(textOf(label).join('').length > 0, key + ' 的 label 有文本');
+  }
+});
+
+test('所有行的输入框左边缘严格对齐：同一个 x', async () => {
+  const { harness } = await openEditor(sizedConfig('aspect', {
+    field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
+  }));
+  const opened = openModelPanel(harness);
+  const starts = new Set();
+  let rows = 0;
+  for (const key of ['common', 'size', 'image']) {
+    const box = paramBox(opened, key);
+    assert.ok(box, key + ' 方框在');
+    // '8px 10px' → 左边距 10。
+    const padLeft = Number(String(box.props.style.padding).split(/\s+/).pop().replace('px', ''));
+    const boxRows = findAll(box, (node) => node.props && node.props['data-param-row']);
+    for (const row of boxRows) {
+      rows += 1;
+      const label = row.children[0];
+      const control = row.children[1];
+      assert.ok(control, row.props['data-param-row'] + ' 的控件紧跟在 label 后面');
+      assert.equal(label.props.style.margin, 0, 'label 没有外边距把输入框推偏');
+      starts.add(padLeft + label.props.style.width + Number(row.props.style.gap));
+    }
+  }
+  assert.ok(rows >= 9);
+  // 每一行都是「内边距 10 + label 88 + 间距 6」：输入框的起点 x 完全一致。
+  assert.deepEqual([...starts], [104], '所有行的输入框起点必须是同一个 x');
+});
+
+test('德语 / 俄语的长参数名只截断 label，输入框照样吃满剩余宽度', async () => {
+  const cases = [
+    ['de', 'Parametername: Auflösung'],
+    ['ru', 'Имя параметра: разрешение']
+  ];
+  for (const [lang, expected] of cases) {
+    const { harness } = await openEditor(sizedConfig('aspect', {
+      field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
+    }));
+    // 面板打开后再切语言：设置页的 Edit 按钮文案跟着语言变，先按英文进面板。
+    harness.locale.active = lang;
+    const opened = openModelPanel(harness);
+    const resolution = paramRow(opened, 'size:second');
+    assert.equal(textOf(resolution.children[0]).join(''), expected, lang + ' 的长键名完整保留在 DOM 里');
+    // 截断的是 label，不是输入框：固定宽度、输入框仍吃满剩余宽度。
+    for (const key of ['size:mode', 'size:field', 'size:second']) {
+      const row = paramRow(opened, key);
+      assert.equal(row.children[0].props.style.width, LABEL_W, lang + ' 的 ' + key + ' label 仍是固定宽度');
+      assert.equal(row.children[1].props.style.flex, '1 1 auto', lang + ' 的 ' + key + ' 输入框仍吃满剩余宽度');
+      assert.equal(row.children[1].props.style.minWidth, 0, lang + ' 的 ' + key + ' 输入框不会被 label 顶出去');
+    }
+  }
+});
+
+test('被截断的 label 悬停立刻显示完整文案；没截断的不弹', async () => {
+  // 没截断（88px 放得下）：完整文案就在眼前，不弹。
+  const short = await openEditor(CLOUD_CONFIG);
+  let panel = openModelPanel(short.harness);
+  const quality = paramRow(panel, 'quality').children[0];
+  assert.equal(textOf(quality).join(''), 'Quality');
+  quality.props.ref.current = tipTarget({ scrollWidth: 60, clientWidth: LABEL_W });
+  quality.props.onPointerEnter();
+  panel = short.harness.renderRoot();
+  assert.equal(tipNodes(panel).length, 0, '没被截断的 label 不该弹气泡');
+
+  // 截断（德语/俄语那种长键名）：悬停立刻给全名，不经过原生 title 的 1 秒延迟。
+  const long = await openEditor(sizedConfig('aspect', {
+    field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
+  }));
+  panel = openModelPanel(long.harness);
+  const resolution = paramRow(panel, 'size:second').children[0];
+  assert.equal(textOf(resolution).join(''), 'Parameter name: resolution', 'DOM 里保留完整文案');
+  assert.equal(resolution.props.title, undefined, '不能用有延迟的原生 title');
+  resolution.props.ref.current = tipTarget({ scrollWidth: 220, clientWidth: LABEL_W });
+  resolution.props.onPointerEnter();
+  panel = long.harness.renderRoot();
+  const tip = findAll(paramRow(panel, 'size:second').children[0],
+    (node) => node.props && node.props.role === 'tooltip')[0];
+  assert.ok(tip, '悬停立刻出现气泡');
+  assert.equal(tip.props.style.position, 'fixed');
+  assert.equal(tip.props['data-instant-tip'], '', '自绘气泡结构在');
+  assert.equal(textOf(tip).join(''), 'Parameter name: resolution', '气泡里是完整文案');
+  // 移开就收起。
+  paramRow(panel, 'size:second').children[0].props.onPointerLeave();
+  panel = long.harness.renderRoot();
+  assert.equal(tipNodes(panel).length, 0, '移开鼠标就收起');
+});
+
+test('协议问号：悬停立刻弹出气泡，三条地址一行一条', async () => {
+  const { harness, tree } = await openEditor(CLOUD_CONFIG);
+  const help = findAll(tree, (node) => node.props && node.props['data-route-help'] !== undefined)[0];
+  assert.ok(help, '协议 label 右侧的问号在');
+  assert.equal(help.props.title, undefined, '不再用有延迟的原生 title');
+  assert.equal(typeof help.props.onPointerEnter, 'function', '悬停立刻展开');
+  help.props.ref.current = tipTarget();
+  help.props.onPointerEnter();
+  const opened = harness.renderRoot();
+  const tip = tipNodes(opened)[0];
+  assert.ok(tip, '悬停立刻出现气泡');
+  assert.equal(tip.props.style.position, 'fixed');
+  assert.equal(tip.props.style.whiteSpace, 'pre-line', '气泡按 \\n 分行');
+  const lines = String(tip.children[0]).split('\n');
+  assert.deepEqual(lines,
+    ['Text-to-image：Not supported', 'Image-to-image：Not supported', 'List models：Not supported'],
+    '三条地址各占一行（这里协议表为空，所以都是「不支持」）');
 });
 
 test('尺寸是多输入参数：一个方框，标题行带锁，框内每行一个输入', async () => {
