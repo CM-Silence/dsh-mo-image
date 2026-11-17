@@ -778,23 +778,17 @@ test('一键配置只对命中规则的模型写入，未命中的既不写也�
   assert.equal(options['mystery-model-9'], undefined, '规则没认出来就一个键都不写');
 });
 
-test('展开面板显示只读摘要：用了哪个规则、尺寸/质量/提示词/参考图各发到哪', async () => {
-  const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: DETECTED_QWEN });
-  await configureAll(harness);
-  const opened = openModelPanel(harness);
-  const summary = findAll(opened, (node) => node.props && node.props['data-rule-summary'] !== undefined)[0];
-  assert.ok(summary, '面板顶部要有只读摘要');
-  assert.equal(textOf(summary).join(''),
-    'By Qwen/Qwen-Image rule: size image_size / quality none / prompt prompt / image image');
-});
-
-test('规则没命中时的摘要直说按 OpenAI 兼容发送', async () => {
-  const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: DETECTED_UNKNOWN });
-  await configureAll(harness);
-  const opened = openModelPanel(harness);
-  const summary = findAll(opened, (node) => node.props && node.props['data-rule-summary'] !== undefined)[0];
-  assert.ok(summary);
-  assert.match(textOf(summary).join(''), /No matching rule/);
+test('展开面板不再渲染规则摘要：规则只活在检测里，面板上只剩锁与手填', async () => {
+  for (const detect of [DETECTED_QWEN, DETECTED_UNKNOWN]) {
+    const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect });
+    await configureAll(harness);
+    const opened = openModelPanel(harness);
+    assert.equal(findAll(opened, (node) => node.props && node.props['data-rule-summary'] !== undefined).length, 0,
+      '摘要节点不该再出现');
+    const body = textOf(opened).join(' ');
+    assert.doesNotMatch(body, /By .* rule/, '命中规则的摘要文案不再显示');
+    assert.doesNotMatch(body, /No matching rule/, '未命中的摘要文案也不再显示');
+  }
 });
 
 test('点锁图标解锁后输入框变回可编辑，再点又锁上', async () => {
@@ -891,37 +885,7 @@ test('选预设就记 presetId（来源），手改 API 地址就清掉', async 
   assert.equal(saved.baseUrl, 'https://relay.example.com/v1');
 });
 
-test('摘要里的质量只在真的会发质量时出现', async () => {
-  const { api } = createHarness({ config: PRESET_CONFIG });
-  // 摘要取值用一份最小的翻译表，直接把 key 当成模板。
-  const translate = (key, params) => {
-    const templates = {
-      'form.ruleSummary': 'size {size} / quality {quality} / prompt {prompt} / image {image}',
-      'form.ruleSummaryFallback': 'fallback',
-      'form.ruleNone': 'none'
-    };
-    const template = templates[key] || key;
-    if (!params) return template;
-    return template.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
-  };
-  const base = {
-    rule: {
-      size: { mode: 'wh-string', field: 'image_size' },
-      quality: { field: 'quality', options: ['low', 'high'], default: 'high' }
-    },
-    fields: { prompt: { path: 'prompt' }, image: { path: 'image', as: 'dataUrl' } },
-    matched: true
-  };
-  assert.equal(api.__test.ruleSummaryText(translate, 'm', base),
-    'size image_size / quality none / prompt prompt / image image',
-    '质量规则命中但字段模板里没有 quality：质量根本不会发，摘要必须说 none');
-  const withTemplate = JSON.parse(JSON.stringify(base));
-  withTemplate.fields.quality = { path: 'quality' };
-  assert.equal(api.__test.ruleSummaryText(translate, 'm', withTemplate),
-    'size image_size / quality quality / prompt prompt / image image');
-});
-
-test('一键配置补上质量模板后，摘要随之变成「会发质量」', async () => {
+test('一键配置补上质量模板（否则质量永远是死的）', async () => {
   // 质量规则命中、但字段模板里没有 quality（自定义协议常见）：这时质量压根发不出去。
   const qualityNoTemplate = {
     ok: true,
@@ -937,10 +901,6 @@ test('一键配置补上质量模板后，摘要随之变成「会发质量」',
   };
   const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: qualityNoTemplate });
   await configureAll(harness);
-  const opened = openModelPanel(harness);
-  const summary = findAll(opened, (node) => node.props && node.props['data-rule-summary'] !== undefined)[0];
-  assert.match(textOf(summary).join(''), /quality quality/,
-    '一键配置会把 fields.quality 补上（否则质量永远是死的），摘要要立刻跟上');
   const config = await saveAndPosted(harness);
   const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
   assert.deepEqual(entry.fields.quality, { path: 'quality' });
@@ -1187,4 +1147,84 @@ test('参考图有两个输入，也用方框框起来：字段名 / 传法', as
   assert.ok(findAll(box, (node) => node.type === 'button' && node.props['data-lock-key'] === 'image').length === 1,
     '参考图的锁在标题行');
   assert.equal(paramRow(opened, 'image'), null, '参考图不再挤成一整行');
+});
+
+test('五个单输入参数收进一个「常规」方框：质量 / 提示词 / 负面词 / 模型 / 张数', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'common');
+  assert.ok(box, '「常规」方框存在');
+  assert.equal(textOf(box.children[0].children[0]).join(''), 'General', '第一行是标题「常规」');
+  assert.equal(findAll(box.children[0], (node) => node.type === 'button').length, 0,
+    '标题行不放锁：这五个键各有各的锁');
+
+  const keys = ['quality', 'prompt', 'negative', 'model', 'n'];
+  for (const key of keys) {
+    const row = paramRow(box, key);
+    assert.ok(row, key + ' 在「常规」方框里');
+    assert.equal(row.children[0].type, 'span', key + ' 的 label 在行首');
+    assert.equal(row.children[1].props['data-param-key'], key, key + ' 的输入紧随其后');
+    assert.equal(row.children[2].props['data-lock-key'], key, key + ' 的锁在行尾');
+    assert.equal(findAll(row, (node) => node.type === 'input').length, 1, key + ' 一行只有一个输入');
+  }
+  // 行序就是需求里的顺序。
+  const order = findAll(box, (node) => node.props && keys.includes(node.props['data-param-row']))
+    .map((row) => row.props['data-param-row']);
+  assert.deepEqual(order, keys);
+
+  // 三个方框各管一摊：尺寸 / 参考图不在「常规」里。
+  assert.equal(paramRow(box, 'size:mode'), null, '尺寸不进「常规」');
+  assert.equal(paramRow(box, 'image:field'), null, '参考图不进「常规」');
+});
+
+test('方框一律占满面板宽度：不再半宽、也不按内容收缩', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  for (const key of ['common', 'size', 'image']) {
+    const box = paramBox(opened, key);
+    assert.ok(box, key + ' 方框在');
+    assert.equal(box.props.style.width, '100%', key + ' 占满宽度');
+    assert.equal(box.props.style.boxSizing, 'border-box', key + ' 的 padding 算在宽度里');
+    assert.equal(box.props.style.gridColumn, '1 / -1', key + ' 横跨整个面板网格');
+    assert.equal(box.props.style.justifySelf, 'stretch');
+  }
+  assert.equal(paramBox(opened, 'common').props.style.display, 'grid');
+
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const details = findAll(panel, (node) => node.type === 'details')[0];
+  assert.equal(details.props.style.gridColumn, '1 / -1', '「高级」整个折叠区横跨两列');
+  assert.equal(details.props.style.width, '100%');
+  const body = findAll(details, (node) => hasClass(node, 'customizedBody'))[0];
+  assert.equal(body.props.style.gridTemplateColumns, 'minmax(0, 1fr)', '框体是单列：每个方框都占满');
+});
+
+test('自动检测与全部解锁挪进「高级」这一行的右端', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const summary = findAll(panel, (node) => node.type === 'summary')[0];
+  assert.ok(summary, '「高级」的 summary 在');
+  assert.equal(summary.props.style.justifyContent, 'space-between', 'label 左、两个按钮右');
+
+  const detectButton = findAll(summary, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join('')))[0];
+  const unlockButton = findAll(summary, (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join('')))[0];
+  assert.ok(detectButton, '自动检测在 summary 里');
+  assert.ok(unlockButton, '全部解锁在 summary 里');
+  // 面板上各只剩这一个：没有另一处散落的按钮。
+  assert.equal(findAll(panel, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join(''))).length, 1);
+  assert.equal(findAll(panel, (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join(''))).length, 1);
+
+  // 点按钮不该把折叠区开合：preventDefault / stopPropagation 都要拦住。
+  const calls = { prevented: 0, stopped: 0 };
+  const event = () => ({
+    preventDefault() { calls.prevented += 1; },
+    stopPropagation() { calls.stopped += 1; }
+  });
+  unlockButton.props.onClick(event());
+  assert.deepEqual(calls, { prevented: 1, stopped: 1 });
+  detectButton.props.onClick(event());
+  assert.equal(harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length, 1,
+    '自动检测照旧发起请求');
+  assert.equal(calls.prevented, 2);
+  assert.equal(calls.stopped, 2);
 });

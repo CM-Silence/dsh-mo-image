@@ -8,6 +8,7 @@ const T = {
   'form.route.edit': '图生图',
   'form.route.models': '获取模型列表',
   'form.routeUnsupported': '不支持',
+  'form.protocolRoutes': '协议地址',
   'form.routeHint': '地址由上面的服务地址拼出',
   'form.customProtocol': '自定义（自己填地址）'
 };
@@ -137,27 +138,39 @@ function renderForm(client, provider, isNew = false) {
   }));
 }
 
-test('内置协议在面板里一行显示一个地址', () => {
+/** 协议 label 右侧的问号：三条地址只在它的 title 里。 */
+const routeHelpOf = (node) => collect(node, (item) => item.props && item.props['data-route-help'] !== undefined)[0];
+
+test('三条地址收进协议 label 右侧的问号：悬停看，一行一条，不再占版面', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Comfy', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', models: [], names: {}
   });
+  const help = routeHelpOf(node);
+  assert.ok(help, '协议 label 右侧要有问号');
+  assert.equal(help.props['aria-label'], '协议地址', '问号要有可读的名字');
+  assert.equal(help.props.title,
+    '文生图：http://127.0.0.1:8188/prompt\n'
+    + '图生图：http://127.0.0.1:8188/prompt\n'
+    + '获取模型列表：http://127.0.0.1:8188/object_info');
+  // 地址不再作为三行正文渲染。
   const body = text(node).join(' ');
-  assert.match(body, /文生图：http:\/\/127\.0\.0\.1:8188\/prompt/);
-  assert.match(body, /图生图：http:\/\/127\.0\.0\.1:8188\/prompt/);
-  assert.match(body, /获取模型列表：http:\/\/127\.0\.0\.1:8188\/object_info/);
+  assert.doesNotMatch(body, /文生图：/);
+  assert.doesNotMatch(body, /获取模型列表：/);
 });
 
-test('不支持的操作用占位符而不是整行消失', () => {
+test('问号里不支持的项写成占位符，而不是整行消失', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Together', baseUrl: 'https://api.together.xyz/v1', adapter: 'together', models: [], names: {}
   });
-  const body = text(node).join(' ');
-  assert.match(body, /https:\/\/api\.together\.xyz\/v1\/images\/generations/);
-  assert.match(body, /不支持/);
+  const help = routeHelpOf(node);
+  assert.ok(help);
+  assert.match(help.props.title, /文生图：https:\/\/api\.together\.xyz\/v1\/images\/generations/);
+  assert.match(help.props.title, /图生图：不支持/);
+  assert.match(help.props.title, /获取模型列表：https:\/\/api\.together\.xyz\/v1\/models/);
 });
 
 test('选中自定义时给出三个输入框', () => {
@@ -174,6 +187,12 @@ test('选中自定义时给出三个输入框', () => {
   assert.equal(byName('route-generate').props.value, 'https://g.example/v1/images/generations');
   assert.equal(byName('route-edit').props.value, '');
   assert.equal(byName('route-models').props.value, '');
+  // 自定义协议的地址是自己填的：问号里显示的就是填了什么，空着的说「不支持」。
+  const help = routeHelpOf(node);
+  assert.ok(help);
+  assert.match(help.props.title, /文生图：https:\/\/g\.example\/v1\/images\/generations/);
+  assert.match(help.props.title, /图生图：不支持/);
+  assert.match(help.props.title, /获取模型列表：不支持/);
 });
 
 function fetchButton(node) {
