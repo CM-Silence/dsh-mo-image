@@ -174,7 +174,7 @@ test('modelscope fits sizes inside the gateway per-side limits', () => {
 test('modelscope is a named adapter, preset and an editable model family', () => {
   const manifest = adapterManifest().find((item) => item.id === 'modelscope');
   assert.ok(manifest, 'adapter manifest is missing modelscope');
-  assert.equal(manifest.label, '魔搭 ModelScope');
+  assert.equal(manifest.label, 'protocol.modelscope');
 
   const preset = providerPresetManifest().find((item) => item.id === 'modelscope');
   assert.ok(preset, 'provider presets are missing modelscope');

@@ -10,6 +10,10 @@ const T = {
   'form.routeUnsupported': '不支持',
   'form.protocolRoutes': '协议地址',
   'form.routeHint': '地址由上面的服务地址拼出',
+  'form.protocolAuto': '自动',
+  'form.protocolMore': '更多协议…',
+  'protocol.comfyui': 'ComfyUI',
+  'protocol.openai-images': 'OpenAI Images',
   'form.customProtocol': '自定义（自己填地址）',
   'form.protocolOption.edit': '编辑端点',
   'form.protocolOption.edit.edits': '单独的 /images/edits',
@@ -23,12 +27,12 @@ const T = {
 };
 const t = (key) => T[key] || key;
 
-/** 协议清单的片段：带选项的那条（openai-images）与不带选项的那条（comfyui）各一。 */
+/** 协议清单的片段：带选项的那条（openai-images）与不带选项的那条（comfyui）各一。label 是 i18n key。 */
 const ADAPTERS = [
-  { id: 'comfyui', label: 'ComfyUI', local: true, supportsModels: true, routes: { generate: '/prompt', edit: '/prompt', models: '/object_info' } },
+  { id: 'comfyui', label: 'protocol.comfyui', local: true, supportsModels: true, routes: { generate: '/prompt', edit: '/prompt', models: '/object_info' } },
   {
     id: 'openai-images',
-    label: 'OpenAI Images 兼容',
+    label: 'protocol.openai-images',
     local: false,
     supportsModels: true,
     routes: { generate: '/images/generations', edit: '/images/edits', models: '/models' },

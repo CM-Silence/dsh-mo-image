@@ -467,24 +467,41 @@ test('with DSH primitives present, the fetch dialog is the DSH Modal with outlin
   assert.equal(candidateRows(tree).filter((candidate) => candidate.checked).length, 2);
 });
 
-test('the protocol select lists every adapter and reveals the responses host model', async () => {
+test('the protocol select keeps common adapters up front and expands the long tail', async () => {
   const adapters = [
-    { id: 'openai-responses', label: 'OpenAI Responses', local: false, supportsModels: false },
-    { id: 'bfl', label: 'Black Forest Labs (FLUX)', local: false, supportsModels: true }
+    { id: 'openai-responses', label: 'protocol.openai-responses', group: 'general', local: false, supportsModels: false },
+    { id: 'bfl', label: 'protocol.bfl', group: 'async', local: false, supportsModels: true }
   ];
   const { harness, tree: edited } = await openProviderEditor(baseConfig(), { adapters });
 
-  const protocolSelect = findAll(edited, (node) => node.type === 'select'
-    && findAll(node, (child) => child.type === 'option').some((option) => option.props.value === 'bfl'))[0];
+  const protocolSelectOf = (tree) => findAll(tree, (node) => node.type === 'select'
+    && node.props && node.props['data-mo-image-protocol'] !== undefined)[0];
+  const optionValues = (node) => findAll(node, (child) => child.type === 'option').map((option) => option.props.value);
+  const optionTexts = (node) => findAll(node, (child) => child.type === 'option').map((option) => textOf(option).join(''));
+
+  let protocolSelect = protocolSelectOf(edited);
   assert.ok(protocolSelect, 'expected a protocol select that lists the adapters');
   assert.equal(protocolSelect.props.disabled, undefined);
-  // 末尾永远是「自定义」：它不在 manifest 里，由客户端补上去。
-  assert.deepEqual(
-    findAll(protocolSelect, (child) => child.type === 'option').map((option) => option.props.value),
-    ['', 'openai-responses', 'bfl', 'custom']
-  );
+  // 常用协议在前；长尾（bfl）收进「更多协议…」，「自定义」永远在末尾（它不在 manifest 里，由客户端补上）。
+  assert.deepEqual(optionValues(protocolSelect), ['', 'openai-responses', 'custom', '__more__']);
+  assert.deepEqual(optionTexts(protocolSelect), ['Auto', 'OpenAI Responses', 'Custom (enter URLs)', 'More protocols…']);
   assert.equal(findAll(edited, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length, 0);
 
+  // 展开：分组列出全部协议，长尾的 bfl 也在；「更多协议…」不写进选择。
+  protocolSelect.props.onChange({ target: { value: '__more__' } });
+  protocolSelect = protocolSelectOf(harness.renderRoot());
+  assert.deepEqual(optionValues(protocolSelect), ['', 'openai-responses', 'bfl', 'custom']);
+  assert.deepEqual(findAll(protocolSelect, (node) => node.type === 'optgroup').map((group) => group.props.label),
+    ['General', 'Async']);
+  assert.equal(protocolSelect.props.value, '');
+
+  // 选中长尾协议：下拉回到收起态并显示它自己的名字。
+  protocolSelect.props.onChange({ target: { value: 'bfl' } });
+  protocolSelect = protocolSelectOf(harness.renderRoot());
+  assert.equal(protocolSelect.props.value, 'bfl');
+  assert.deepEqual(optionValues(protocolSelect), ['openai-responses', 'bfl', 'custom', '__more__']);
+
+  // Responses 协议还要露出「调度模型」。
   protocolSelect.props.onChange({ target: { value: 'openai-responses' } });
   const tree = harness.renderRoot();
   assert.ok(findAll(tree, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length > 0);

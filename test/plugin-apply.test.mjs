@@ -122,8 +122,8 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
     assert.ok(editingSkill.content.includes(word));
   }
   assert.match(generationSkill.description, /提示词/);
-  assert.equal(routes.length, 6);
+  assert.equal(routes.length, 7);
   assert.ok(routes.some((route) => route.path === '/api/mo-image/comfy/analyze'),
     'the settings page needs the analyze route to confirm a workflow mapping');
-  assert.deepEqual(routes.map((route) => route.path).sort(), ['/api/mo-image/comfy/analyze', '/api/mo-image/config', '/api/mo-image/detect-model-rule', '/api/mo-image/models', '/api/mo-image/preview', '/api/mo-image/update']);
+  assert.deepEqual(routes.map((route) => route.path).sort(), ['/api/mo-image/comfy/analyze', '/api/mo-image/config', '/api/mo-image/detect-model-rule', '/api/mo-image/detect-protocol', '/api/mo-image/models', '/api/mo-image/preview', '/api/mo-image/update']);
 });

@@ -88,6 +88,18 @@ test('dynamic protocol option keys exist in the CSV', () => {
   }
 });
 
+// 协议名与分组标题同样是客户端拼出来的键（protocol.<id> / protocolGroup.<id>），
+// 字面量扫描看不见；按宿主清单逐条核对，漏一条下拉里就会露出键名。
+test('dynamic protocol label and group keys exist in the CSV', () => {
+  const keys = new Set(parsed.keys);
+  const manifest = adapterManifest();
+  assert.ok(manifest.length > 0, '一条协议都没有：清单是不是退回旧样子了');
+  for (const adapter of manifest) {
+    assert.ok(keys.has('protocol.' + adapter.id), `missing protocol.${adapter.id}`);
+    assert.ok(keys.has('protocolGroup.' + adapter.group), `missing protocolGroup.${adapter.group}`);
+  }
+});
+
 test('every host server-error code has a translation', () => {
   const keys = new Set(parsed.keys);
   for (const code of SERVER_ERROR_CODES) {
