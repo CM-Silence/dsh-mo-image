@@ -53,7 +53,7 @@ const SAMPLE = {
 
 test('每条内置预设都带六个逻辑字段的模板键（模板对象或 null）', () => {
   const list = presets();
-  assert.equal(list.length, 27, '预设数量变了：新增的预设也要补 fields，否则面板里它没有只读摘要');
+  assert.equal(list.length, 31, '预设数量变了：新增的预设也要补 fields，否则面板里它没有只读摘要');
   for (const preset of list) {
     const label = preset.group + '/' + preset.id;
     assert.ok(
@@ -95,6 +95,8 @@ function gatewayFields(fields) {
  */
 const FIELD_FAMILIES = {
   'openai-compatible': ['fireworks', 'novita', 'openai', 'openai-gateway', 'sd-server'],
+  // MiniMax 四个域名是同一条接口（OpenAI Images 形状）的不同地址，字段一字不差。
+  'minimax': ['minimax', 'minimax-cn', 'minimaxi', 'minimax-chat'],
   'volcengine': ['volcengine', 'volcengine-plan'],
   'siliconflow': ['siliconflow'],
   'together': ['together'],
@@ -152,7 +154,7 @@ test('同一个网关家族的所有预设，fields 必须完全一致（防止�
   }
 });
 
-test('协议复用清单：合并后这 13 条预设落在同一条 openai-images 上', () => {
+test('协议复用清单：合并后这 17 条预设落在同一条 openai-images 上', () => {
   const byProtocol = new Map();
   for (const preset of presets()) {
     const id = protocolOf(preset).id;
@@ -161,7 +163,7 @@ test('协议复用清单：合并后这 13 条预设落在同一条 openai-image
   }
   assert.deepEqual(
     byProtocol.get('openai-images').sort(),
-    ['azure', 'bigmodel', 'fireworks', 'localai', 'novita', 'openai', 'openai-gateway', 'sd-server', 'siliconflow', 'together', 'volcengine', 'volcengine-plan', 'xai'].sort(),
+    ['azure', 'bigmodel', 'fireworks', 'localai', 'minimax', 'minimax-chat', 'minimax-cn', 'minimaxi', 'novita', 'openai', 'openai-gateway', 'sd-server', 'siliconflow', 'together', 'volcengine', 'volcengine-plan', 'xai'].sort(),
     'openai-images 的复用清单变了'
   );
   // 合并掉的协议 id 不能再出现在清单里。

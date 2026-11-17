@@ -175,6 +175,8 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 切换模型时，选择器会从目标模型的档位里选一个合法默认值；旧配置里的 `max`、`high` 等值会收敛到目标模型支持的最近档位（例如 GPT-Image 的 `max` → `High`），不会再由对话模型填 `Max`。
 
+模型选项的「质量」方框可以覆盖这张表的判断：勾上 / 取消「支持质量参数」、改参数名（支持 `a.b.c` 嵌套路径）或自定义档位表，都能让一个模型从「隐藏」变成可选，或反过来明确「这个模型不发质量参数」。一键配置不会重新打开你明确关掉的质量开关。
+
 依据：[OpenAI Images API](https://platform.openai.com/docs/api-reference/images/create)（GPT-Image 的 `low/medium/high/auto`、DALL·E 3 的 `standard/hd`）、[Ideogram 3 API](https://developer.ideogram.ai/v2/api-reference/images/generate/ideogram-3)（`rendering_speed`）。Gemini、xAI、Recraft、Stability、Together、本地后端没有统一的官方 quality 字段，所以隐藏质量行。
 
 ## 提示词优化
@@ -283,11 +285,14 @@ $DSH_HOME/.credentials.yaml
 | 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 异步入队任务；只有 wan2.7 认 `1K/2K/4K` 档位 |
 | 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
 | 智谱 BigModel | `openai-images`（`edit:'none'`） | `cogview-4`、`glm-image` | 生成；一次只回一张 |
+| **MiniMax**（国际站 `api.minimax.io`） | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | H3-Image 就是 OpenAI Images 形状（生成 + `/images/edits` 收 1–16 张参考图）；`aspect_ratio` + `area`（`1K/2K/4K`），不发 `size` |
+| MiniMax 中国 | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | 同一套接口，基础地址换成 `api.minimax.cn`（现行官方域名）；旧域名 `api.minimaxi.com` / `api.minimax.chat` 也各有一条预设，仍能用，但模型清单没有官方页面可核，默认留空等「获取可用模型」 |
 
 说明：
 
 - Google Gemini 使用 `x-goog-api-key` 头；`imageSize` 按模型分级（3.1-flash 支持 `512/1K/2K/4K`，2.5 不发），`aspectRatio` 新模型 14 档。
 - xAI 使用 `aspect_ratio` + `resolution`，不是 OpenAI 的 `size`。
+- MiniMax H3-Image 的 `size` 与 `aspect_ratio`/`area` 是互斥的（同时给会 400），插件只发后者，让服务端按档位算宽高；它没有 `negative_prompt`（负面词拼进提示词），也没有质量档位枚举（只有 `output_compression` 0–100 的压缩率）。旧模型 `image-01` / `image-01-live` 走的是另一条旧接口 `POST /v1/image_generation`（`aspect_ratio` + `base_resp` 响应），不是 OpenAI Images 形状，所以没有放进这四个预设。
 - Recraft / Ideogram / Together / Stability 的默认模型 ID 只是建议值，服务端模型更新后可以在「模型目录」里改，或用「获取可用模型」重新拉取。
 - 这些云端提供商的密钥仍只写入 DSH 凭据库，不写进 `config.json`。
 - 内置列表来自宿主 manifest，客户端不单独维护一份；新增提供商会同时影响设置页和模型列表能力判断。
@@ -319,22 +324,31 @@ $DSH_HOME/.credentials.yaml
 | stable-diffusion.cpp `sd-server` | `openai-images` | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成 + `/images/edits` |
 | LocalAI | `openai-images`（`edit:'none'`） | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成；没有 `/images/edits` |
 | AUTOMATIC1111 / Forge / SD.Next / Draw Things | `a1111` | `http://127.0.0.1:7860` | `/sdapi/v1/sd-models` | 生成 + `/sdapi/v1/img2img` |
-| ComfyUI | `comfyui` | `http://127.0.0.1:8188` | `/object_info`（CheckpointLoaderSimple） | 生成；原生编辑暂不支持 |
+| ComfyUI | `comfyui` | `http://127.0.0.1:8188` | `/object_info`（CheckpointLoaderSimple + UNETLoader） | 生成 + 编辑；内置工作流按模型自动选，也可粘自定义工作流 |
 | SwarmUI | `swarmui` | `http://127.0.0.1:7801` | `/API/ListModels` | 生成；原生编辑暂不支持 |
 | 其他 OpenAI 兼容网关 | `openai-images` | `http://127.0.0.1:3000/v1` | `/v1/models` | 取决于网关；异步任务自动轮询 |
 
 说明：
 
 - 本地服务没有鉴权时，**API 密钥可以留空**；`optionalKey` 会让宿主不发送 `Authorization`。需要 Bearer token 的服务再填密钥。
-- 「模型目录」右侧的 **获取可用模型** 对第三方提供商、自定义模型 API 和本地部署器都可用：点击后先向端点探测模型，再弹出可搜索、可全选/取消全选的候选列表，只有点「添加所选」才写入当前表单。OpenAI 兼容接口返回的结果会先筛掉可能不是用于生图的模型，也可以勾选「显示全部模型」；没有模型列表 API 的适配器不显示这个按钮。ComfyUI 列出的是 checkpoint 名称，A1111 列出的是 `sd-models` 的 title。
+- 「模型目录」右侧的 **获取可用模型** 对第三方提供商、自定义模型 API 和本地部署器都可用：点击后先向端点探测模型，再弹出可搜索、可全选/取消全选的候选列表，只有点「添加所选」才写入当前表单。OpenAI 兼容接口返回的结果会先筛掉可能不是用于生图的模型，也可以勾选「显示全部模型」；没有模型列表 API 的适配器不显示这个按钮。ComfyUI 列出的是 checkpoint 与 `UNETLoader` 里的 diffusion 模型名，A1111 列出的是 `sd-models` 的 title。
 - 选择第三方提供商后，「提供商」标签右侧会出现 **前往提供商官网**，按当前选择打开官方 API Key / 控制台页面；本地和自定义模式不显示这个链接。
 - A1111 / Forge / SD.Next 启动时需要加 `--api`。A1111 的 Basic Auth 目前不走密钥输入框，建议仅在可信网络中使用，或加一层访问控制。A1111 的 img2img 只带第一张参考图。
-- ComfyUI 的默认工作流是 **CheckpointLoaderSimple + KSampler**，适合 SD1.5/SDXL checkpoint；Flux、Qwen-Image、任意自定义工作流请用 OpenAI 兼容网关（或改用 sd-server/LocalAI 的后端）。
+- ComfyUI 的**内置工作流按模型自动选**：模型在 `UNETLoader` 列表里就按 diffusion 模型走（FLUX.2 用 `UNETLoader` + `CLIPLoader` + `VAELoader` + `SamplerCustomAdvanced`，MOSS-Image 用 MOSS 的编码器与编辑 LoRA），否则按 checkpoint 用 `CheckpointLoaderSimple + KSampler`（SD1.5/SDXL）。编辑也有内置路径：checkpoint 走 `VAEEncode` + img2img（`denoise 0.6`），FLUX.2 走 `ReferenceLatent`，MOSS 走 `TextEncodeMOSSImageEdit`。
+- 想换工作流就把 ComfyUI「导出（API）」的 JSON 粘进模型选项；UI 格式的 JSON 也认（插件用 `/object_info` 转成 API 格式，缺节点会点名报错）。工作流与参数表的配合见下面的「ComfyUI 工作流与参数表」。
 - SwarmUI 使用 `/API/GetNewSession` + `/API/GenerateText2Image`，原生编辑暂未实现。
 - InvokeAI、Fooocus、复杂 ComfyUI 工作流：先套一层 OpenAI Images 网关，再选「其他 OpenAI 兼容网关」。
 - 本地服务通常要自己启动、管理显存和模型；插件不负责下载/加载模型。工具超时是 360 秒，CPU 跑 1024×1024 可能超时。
 - 参考图限制：multipart 编辑总大小 48MB、单张 15MB；JSON `image` 编辑为了控制 base64 峰值，总大小限制 10MB。生成图响应上限 32MB，超大图请降低尺寸。
 - 参考图编辑优先用本地文件路径；参考图 URL 指向 `127.0.0.1` 会被 SSRF 防护拦住，需要 `MO_IMAGE_ALLOW_PRIVATE_REFS=1`。
+
+**ComfyUI 工作流与参数表**
+
+- 工作流优先级：模型选项里的自定义工作流 > 内置模板（按模型自动选，见上）。自定义工作流支持 `{{prompt}}` / `{{negative_prompt}}` / `{{width}}` / `{{height}}` / `{{seed}}` / `{{model}}` / `{{image}}` 七个占位符，占位符之外的部分原样发送。
+- 不写占位符也能用：「解析工作流」会从图里找出采样器、正/负 `CLIPTextEncode`、尺寸、seed、模型、参考图的落点并自动填好映射；映射面板只把手动可能要改的**宽 / 高 / 参考图**列出来（提示词与负面词由工具参数直接写入，seed 与模型是参数表里的普通行）。
+- 「解析参数」把工作流里所有原始值输入（例如 `steps`、`cfg`、`sampler_name`、`denoise`）列成候选，勾中即写入「常规」参数表：默认值取当前值、类型按值推断、参数名只是给对话模型看的键。
+- 参数表才是运行时真正写工作流的东西：默认值非空的行随请求写入；清空默认值 = 不碰工作流里的原值；勾了「暴露」的行才出现在给对话模型的参数清单里。行级锁只挡一键配置与自动检测，不挡手改。
+- 提示词与负面词不在参数表里；要手控落点就在工作流里写 `{{prompt}}` / `{{negative_prompt}}` 占位符。
 
 文档：
 
@@ -408,9 +422,50 @@ $DSH_HOME/.credentials.yaml
 | `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置适配器：`openai-images`（通用兜底，自动同步/异步；`edit` / `auth` 两个协议级选项，Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 都落在它上面）、`openai-responses`、`openrouter-images`、`openai-chat`（中转）、`google-gemini`、`recraft`、`ideogram`、`stability`、`dashscope-qwen-image`、`dashscope-wanx`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`。
+内置协议 17 条。协议只负责「三个地址 + 组装 + 响应解码」：字段名、尺寸与质量、常量参数由预设与模型规则决定，同一条地址下真正的差异（编辑端点往哪走、鉴权头长什么样）做成**协议级选项**，不再各占一条协议 id。
 
-> 协议收敛（0.8）：原来按厂家分叉的 `dall-e-3`、`gpt-image`、`together`、`localai`、`siliconflow`、`volcengine-ark`、`azure-openai`、`xai-imagine`、`zhipu` 地址与组装本来就一样，现在合并成一条 `openai-images` + 两个选项：`edit`（`edits` / `same` / `none`，编辑走 `/images/edits`、走同一个 generations、或没有编辑）与 `auth`（`bearer` / `api-key`）。老配置里的旧 id 会在读取时自动改写，模型规则、尺寸/质量、锁与预设都不受影响。
+| 分组 | 协议 id | 用途 | 三条地址（生成 / 编辑 / 模型列表） |
+|---|---|---|---|
+| 通用 | `openai-images` | 通用兜底：OpenAI Images 及一切兼容网关；自动识别同步 / 异步 | `/images/generations` / `/images/edits`（`edit` 选项可改） / `/models` |
+| 通用 | `openai-responses` | 官方 Responses API 的 `image_generation` 工具 | `/responses` / `/responses` / `/models` |
+| 兼容网关 | `openai-chat` | chat/completions 中转站 | `/chat/completions` / `/chat/completions` / `/models` |
+| 兼容网关 | `openrouter-images` | OpenRouter 专用 Images | `/images` / `/images` / `/models` |
+| 厂商原生 | `google-gemini` | Gemini / Nano Banana 的 `generateContent` | `/models/{model}:generateContent` / 同左 / `/models` |
+| 厂商原生 | `recraft` | Recraft | `/images/generations` / `/images/imageToImage` / — |
+| 厂商原生 | `ideogram` | Ideogram（模型写在路径里） | `/generate` / — / — |
+| 厂商原生 | `stability` | Stability AI（multipart） | `/v2beta/stable-image/generate/core` / `/v2beta/stable-image/generate/sd3` / — |
+| 厂商原生 | `dashscope-qwen-image` | 百炼 Qwen-Image 原生多模态 | `/services/aigc/multimodal-generation/generation` / 同左 / — |
+| 厂商原生 | `dashscope-wanx` | 百炼通义万相（异步入队） | `/services/aigc/text2image/image-synthesis` / — / — |
+| 本地部署 | `a1111` | A1111 / Forge / SD.Next / Draw Things | `/sdapi/v1/txt2img` / `/sdapi/v1/img2img` / `/sdapi/v1/sd-models` |
+| 本地部署 | `comfyui` | ComfyUI（工作流） | `/prompt` / `/prompt` / `/object_info` |
+| 本地部署 | `swarmui` | SwarmUI | `/API/GenerateText2Image` / — / `/API/ListModels` |
+| 异步任务 | `bfl` | Black Forest Labs | 按模型拼 `/v1/{model}`（编辑同址） / — |
+| 异步任务 | `fal` | fal.ai | 按模型拼（编辑同址） / — |
+| 异步任务 | `replicate` | Replicate | 按模型拼（编辑同址） / — |
+| 异步任务 | `modelscope` | 魔搭 ModelScope | `/v1/images/generations` / 同左 / — |
+
+`openai-images` 的两个协议级选项存在 `provider.protocolOptions` 里，**没写 = 默认**：
+
+| 选项 | 取值 | 含义 |
+|---|---|---|
+| `edit` | `edits`（默认）/ `same` / `none` | 编辑走 `/images/edits`、走同一个 generations、或没有编辑端点 |
+| `auth` | `bearer`（默认）/ `api-key` | `Authorization: Bearer` 还是 `api-key` 头（Azure） |
+
+协议收敛前的 9 个旧 id 在读取配置时自动改写（`presetId`、`modelOptions`、模型规则、尺寸/质量与锁原样保留），落盘一律是新写法：
+
+| 旧 id | 合并为 | 协议级选项 |
+|---|---|---|
+| `dall-e-3` | `openai-images` | 全默认 |
+| `gpt-image` | `openai-images` | 全默认 |
+| `together` | `openai-images` | `edit: none` |
+| `localai` | `openai-images` | `edit: none` |
+| `siliconflow` | `openai-images` | `edit: same` |
+| `volcengine-ark` | `openai-images` | `edit: same` |
+| `azure-openai` | `openai-images` | `auth: api-key` |
+| `xai-imagine` | `openai-images` | `edit: none` |
+| `zhipu` | `openai-images` | `edit: none` |
+
+协议下拉默认只列常用四条（`openai-images` / `openai-chat` / `openai-responses` / `google-gemini`），其余收在「更多协议…」里，按通用 / 兼容网关 / 厂商原生 / 本地部署 / 异步任务分组展开。
 
 交互形态都覆盖：
 
@@ -418,11 +473,75 @@ $DSH_HOME/.credentials.yaml
 - **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate、魔搭五家的提交与状态词都收在适配器的 `async` 描述符里
 - **通用兜底自动识别**：自定义 API 和不认识的域名走 `openai-images`，它会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
 
-选择规则：设置页的「API 协议」下拉可直接指定适配器；点「识别协议」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → 已知 OpenAI 兼容主机表（官方 / Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 … ）→ **探测表** → 自定义」匹配。命中已知主机时**一次请求都不发**（这些网关的 `/models` 常常是 404，探测只会把能用的地址误判成自定义），并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。
+**识别协议**：设置页「API 协议」下拉右侧的按钮。判定分三步，能不发请求就不发：
 
-探测表**由协议自己的 `routes.models` 驱动**（不在探测逻辑里另抄一份路径），一条协议一行；真正发请求时的先后按地址决定：内网地址（回环 / `10.*` / `192.168.*` / `172.16-31.*` / `.local` / 单标签主机名）先问本地那三条——ComfyUI `GET /object_info`（200 + JSON 对象）、A1111 `GET /sdapi/v1/sd-models`（200 + 数组）、SwarmUI `GET /API/ListModels`（200 + JSON），最后才是 `GET /models`；公网地址反过来，先 `GET /models`（一个请求试 5 种形状，用返回形状区分 `{data:[…]}` 的 OpenAI 兼容网关 / LocalAI / sd-server 与 `{models:[…]}` 的 Gemini），不中再按同样的顺序试本地那三条——所以 `https://comfy.example.com` 这种公网自托管的 ComfyUI 也认得出（最坏 4 个请求）。探测由设置页**逐条驱动**：每发一条就把「正在尝试访问 /xxx…」写进提示，命中即停；单个探针 15 秒超时，没有整轮预算，**只发 GET、绝不触发生成**；认证失败、超时、非 JSON 都只当「不是它」，不会打断识别。全都没命中才落到「自定义」，并把三条相对地址预填好，提示里带上最后试过的路径。
+1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 四个域名）时直接判 `openai-images`，并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
+2. **客户端逐条探测**：其余地址只返回一份**探测顺序**，设置页按顺序一条条问宿主；每发一条之前就把「正在尝试访问 /xxx…」写进提示——进度是真的，不是假轮播。
+3. **命中即停**：哪条路径回来的形状能证明某个协议就停；全都不中才落到「自定义」，并预填三条相对地址，提示里带上最后试过的路径。
 
-如果用户已经在协议下拉里**手选了某条协议**，这个按钮改成**只校验不改写**：宿主只回答「这个地址像不像它」（`verified`），通过了提示「已确认」，没通过就说「地址不像 X；看起来像 Y」（`suggested`，采纳与否由用户自己点下拉决定）——协议与协议级选项一律保持原样，绝不会因为一次误判把能用的本地配置改成别的协议。
+探测表一条协议一行，路径直接取自协议的 `routes.models`（不在探测逻辑里另抄一份）：
+
+| 探针（只发 GET） | 期望返回 | 命中 |
+|---|---|---|
+| `/object_info` | 200 + JSON 对象 | `comfyui` |
+| `/sdapi/v1/sd-models` | 200 + 数组 | `a1111` |
+| `/API/ListModels` | 200 + JSON 对象 | `swarmui` |
+| `/models` | `{ data: […] }` | `openai-images`（同形状还可能是 `openai-chat` / `openai-responses` / `openrouter-images`，通用那条优先） |
+| `/models` | `{ models: […] }` | `google-gemini` |
+
+顺序按地址决定：内网地址（回环 / `10.*` / `192.168.*` / `172.16-31.*` / `.local` / 单标签主机名）先试本地三条、最后才试 `/models`；公网地址反过来，先 `/models`、再试本地三条——所以 `https://comfy.example.com` 这种公网自托管的 ComfyUI 也认得出。公网最坏 4 个请求。
+
+探测**只发 GET、绝不触发生成**；单个探针 15 秒超时（浏览器那次请求 20 秒），没有整轮预算；认证失败、超时、非 JSON 都只当「不是它」，不会打断识别。
+
+如果用户已经在下拉里**手选了某条协议**，这个按钮改成**只校验不改写**：宿主只回答「这个地址像不像它」（`verified`），通过了提示「已确认」，没通过就说「地址不像 X；看起来像 Y」（`suggested`，采纳与否由用户自己点下拉决定）——协议与协议级选项一律保持原样，绝不会因为一次误判把能用的本地配置改成别的协议。没有模型端点的协议（Recraft / Ideogram / Stability / BFL / fal / Replicate）没法用只读探针验证，静态没认出来时只报告「不像」。
+
+**尺寸控件跟着模型变**：选择器的「尺寸」面板按当前模型能接受什么渲染——收宽高就给两个输入框（`wh`）、只收宽高比就给比例下拉加档位下拉（`aspect`）、只认档位/固定像素表就给尺寸下拉加「自定义」（`preset`）、完全不收尺寸参数就给宽高输入框并把尺寸写进提示词（`prompt`）。自动尺寸复选框仍在上方；**严格**复选框始终可用，自动尺寸下模型自己填了 `size` 时同样生效。
+
+**严格模式**：开启后成品尺寸一定等于请求尺寸——上游出大了就缩、出小了就放大（会注明画质有损），比例不符时先按居中裁切再缩，绝不拉伸。工具结果同时给 `size`（成品）和 `generated`（上游原始尺寸）；缩过图时上游那张原图会留在同一目录（文件名加 `-original`），结果的 `original` 指向它，缩放失败也会明说并保留原图。档位型模型（如方舟的 `2K`）的档位只是参考值，官方并不保证像素，这种情况下严格模式不缩，只回报真实尺寸。
+
+**尺寸被拒不再自动改大**：上游报「尺寸超限/非法」时直接失败，并把该模型的合法范围写进错误（白名单、档位名，或像素/单边/倍数约束）。白名单吸附与像素夹取仍然保留——它们是把你的尺寸落成该模型真正接受的尺寸，和「偷偷换一个更大尺寸再试」不是一回事。
+
+**选择器里的尺寸页**：比例、档位、预设都和选模型一样是「点开一页、选完回来」的二级页，不再用原生下拉；预设里选「自定义」后宽高才可改。
+
+### 模型选项面板
+
+每个模型行末尾的折叠箭头打开该模型的选项（一个「高级」折叠区）。从预设创建的提供商默认全锁，展开看到的是锁而不是一排空输入；「自动检测」与「全部解锁」在这一行的右端。展开后从上到下是：
+
+| 方框 | 里面有什么 | 作用 |
+|---|---|---|
+| **常规** | ComfyUI / A1111 的自定义工作流（JSON 文本框 + 「插入示例模板」+ 「解析工作流」/「解析参数」）、一张五列参数表（参数名 / 类型 / 默认值 / 描述 / 操作） | 一行一个参数；操作列是暴露、行级锁、删除；「+ 添加参数」在表尾 |
+| **模型** | 只有参数名与行级锁 | 模型名的落点；**不存 `expose`**（是否暴露只由选择器是不是「自动」推导），也没有删除按钮 |
+| **enum 方框** | 每个 `enum` 参数单独一个框：显示名 / 值 / 默认（单选）/ 删除 | 选项表，行序就是下拉顺序；「+ 添加选项」在表尾 |
+| **尺寸** | 编码方式 / 参数名 / 分隔符 / 第二个字段 | 覆盖适配器与模型族表的默认判断 |
+| **质量** | 支持质量参数（总闸）、参数名、档位表 | 不勾时整块不渲染、也不发；档位表可自定义显示名与值 |
+| **参考图** | 支持参考图（总闸）、字段名、传法、多图策略 | 不勾时字段模板写 `null`（显式不发）；勾上时若三层都没有模板，会补一条默认的 `image` 模板 |
+
+**尺寸**的编码方式：`跟随默认` / `size = 宽x高` / `width + height` 两个字段 / 宽高比（可再带一个分辨率或档位字段）/ 档位名（1K、2K）/ 写进提示词。
+
+- 参数名留空即跟随适配器与模型族表的判断；支持 `generationConfig.imageConfig.imageSize` 这种嵌套路径。
+- `width + height` 的两个键名可以分别改（留空用 `width` / `height`）；`写进提示词` 形态不摆参数名（没有字段可填）。
+- 分隔符只在「一个字段写宽x高」时有意义：`x`、`*`（百炼）或自定义 1–4 个可见字符。
+- 第二个字段可选：把**比例**或**档位**另写一处（Gemini 的 `aspectRatio` + `imageSize` 就是这种），留空不发。
+
+典型场景：某个中转站的 nano-banana 只认 `width`/`height`，或者把尺寸藏在 `image_size` 里——不必改代码，在模型选项里点两下就行。非官方网关也会按**模型名**给一套默认形态（名字里有 `banana` / `gemini-…image` 就按比例+档位，`seedream-5.5` 就按 1K/1.5K/2K，认不出来才是宽高；只按官方模型家族匹配，中转站自造的产品名不认），猜不准或猜错就在模型选项里覆盖——和质量档位按模型 id 模糊定位是同一套思路。
+
+**一键配置与锁**：「模型目录」右侧的「一键配置」按规则表把**尺寸 / 质量 / 字段模板**写进每个模型（认不出的模型不写，只计入「未命中」）；「高级」里的「自动检测」只重算当前这一个模型。七个键（尺寸、质量、提示词、负面词、模型、张数、参考图）可以单独上锁，**锁住的键不会被一键配置与自动检测改动**，解锁后才能手填；行级锁（表格操作列里的锁）语义相同，只挡自动写入、不挡手动编辑。从预设创建的提供商默认全锁；自配网关与老配置默认不锁。一键配置写过的键会顺手锁上，避免下一次再被规则改掉；你在「质量」/「参考图」里明确取消过的，也不会被重新打开。
+
+**常规参数表：一张表，三种落点**。对每个协议都是同一张表（参数名 / 类型 / 默认值 / 描述 / 操作），区别只在「参数名」指向哪儿：
+
+| 协议 | 行的形状 | 参数名指向 | 怎么来 |
+|---|---|---|---|
+| 云端 / 中转 / 自定义 | `{ name, type, default, description, expose, options?, locked? }` | 请求体里的路径，支持 `a.b.c` 嵌套 | 手填「+ 添加参数」 |
+| A1111 / Forge / SD.Next | 同上 | sdapi 字段名（`steps`、`cfg_scale`、`sampler_name`…） | 第一次展开时按内置清单摆好六行 |
+| ComfyUI | 加 `node` / `input`（落在工作流节点的某个输入），`name` 只是给对话模型看的键 | 工作流里某个节点的某个输入 | 「解析工作流」自动补落点；「解析参数」把所有原始值输入列成候选，勾中即变成表行（默认值 = 当前值、类型按值推断） |
+
+类型只有四个：`text` / `number` / `boolean` / `enum`。`enum` 行不留在主表里——它搬进自己的方框，选项表（显示名 / 值 / 默认 / 删除）就是下拉的数据源。
+
+规则对所有落点一致：**默认值非空就随请求发送**（清空 = 不碰工作流 / WebUI 里的原值），**勾了「暴露」的对话模型才能用 `params` 覆盖**；行级锁只挡一键配置与自动检测。提示词与负面词不在这张表里——它们由工具参数 `prompt` / `negative_prompt` 直接写入，落点按解析结果自动填；要在工作流里手控落点就写 `{{prompt}}` / `{{negative_prompt}}` 占位符。给模型看的 `params` 与系统提示词也不会列它们，`note` 只回报真的用不上的键。
+
+**错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
+
+新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
 
 ## 已知限制
 
@@ -432,37 +551,6 @@ $DSH_HOME/.credentials.yaml
 - **C 级协议未实现**：Krea、Luma Photon、Runway、腾讯混元、百度文心一格、Adobe Firefly、Gemini Interactions API 留在后续版本。
 - **Google Imagen 已停用**：Gemini API 下线、Vertex 侧 2026-06-30 停服，插件不再支持；请改用 `gemini-3.1-flash-image` 等 Nano Banana 模型。
 - **Vertex AI 未支持**：需要 OAuth access token（1 小时过期）且没有模型列表端点。
-
-**尺寸控件跟着模型变**：选择器的「尺寸」面板按当前模型能接受什么渲染——收宽高就给两个输入框（`wh`）、只收宽高比就给比例下拉加档位下拉（`aspect`）、只认档位/固定像素表就给尺寸下拉加「自定义」（`preset`）、完全不收尺寸参数就给宽高输入框并把尺寸写进提示词（`prompt`）。自动尺寸复选框仍在上方；**严格**复选框始终可用，自动尺寸下模型自己填了 `size` 时同样生效。
-
-**严格模式**：开启后成品尺寸一定等于请求尺寸——上游出大了就缩、出小了就放大（会注明画质有损），比例不符时先按居中裁切再缩，绝不拉伸。工具结果同时给 `size`（成品）和 `generated`（上游原始尺寸）；缩过图时上游那张原图会留在同一目录（文件名加 `-original`），结果的 `original` 指向它，缩放失败也会明说并保留原图。档位型模型（如方舟的 `2K`）的档位只是参考值，官方并不保证像素，这种情况下严格模式不缩，只回报真实尺寸。
-
-**尺寸被拒不再自动改大**：上游报「尺寸超限/非法」时直接失败，并把该模型的合法范围写进错误（白名单、档位名，或像素/单边/倍数约束）。白名单吸附与像素夹取仍然保留——它们是把你的尺寸落成该模型真正接受的尺寸，和「偷偷换一个更大尺寸再试」不是一回事。
-
-**选择器里的尺寸页**：比例、档位、预设都和选模型一样是"点开一页、选完回来"的二级页，不再用原生下拉；预设里选「自定义」后宽高才可改。\n\n**模型选项里的「尺寸参数」**：每个模型行末尾的折叠箭头可以打开该模型的选项。ComfyUI / A1111 显示的是工作流/参数表；其它适配器（含所有中转站）显示 **尺寸参数**，用来覆盖适配器的默认判断：
-
-| 字段 | 作用 |
-|---|---|
-| 编码方式 | `跟随默认` / `size = 宽x高` / `width + height` 两个字段 / 宽高比 / 档位名（1K、2K）/ 写进提示词 |
-| 参数名 | 发哪个字段，留空用默认；支持 `generationConfig.imageConfig.imageSize` 这种嵌套路径 |
-| 分隔符 | 宽高字符串用 `x`、`*`（百炼）还是自定义（自己填，1–4 个字符，如 `|`、`,`） |
-| 第二个字段 | 可选：把**比例**或**档位**另写一个字段（Gemini 的 `aspectRatio` + `imageSize` 就是这种），留空不发 |
-
-留空即完全跟随适配器与模型族表的判断。典型场景：某个中转站的 nano-banana 只认 `width`/`height`，或者把尺寸藏在 `image_size` 里——不必改代码，在模型选项里点两下就行。非官方网关也会按**模型名**给一套默认形态（名字里有 `banana` / `gemini-…image` 就按比例+档位，`seedream-5.5` 就按 1K/1.5K/2K，认不出来才是宽高；只按官方模型家族匹配，中转站自造的产品名不认），猜不准或猜错就在模型选项里覆盖——和质量档位按模型 id 模糊定位是同一套思路。
-
-**一张参数表，两种绑定**：「常规」里的参数表对每个协议都是同一张表（参数名 / 类型 / 默认值 / 描述 / 暴露），区别只在「参数名」指向哪儿：
-
-| 协议 | 行的形状 | 参数名指向 | 怎么来 |
-|---|---|---|---|
-| 云端 / 中转 / 自定义 | `{ name, type, default, description, expose }` | 请求体里的路径，支持 `a.b.c` 嵌套 | 手填「添加参数」 |
-| A1111 / Forge / SD.Next | 同上 | sdapi 字段名（`steps`、`cfg_scale`、`sampler_name`…） | 第一次展开时按内置清单摆好六行 |
-| ComfyUI | `{ node, input, type, default, description, expose, name? }` | 工作流里某个节点的某个输入 | 「解析工作流」自动补上可调项，「解析参数」列出所有原始值输入供勾选 |
-
-规则对两种绑定一致：**默认值非空就随请求发送**（清空 = 不碰工作流/WebUI 里的原值），**勾了「暴露」的对话模型才能用 `params` 覆盖**。ComfyUI 的工作流参数、A1111 的采样参数都以这张表为准；「暴露」的项会出现在给对话模型的参数清单里，`note` 里也只会回报真的用不上的键。
-
-**错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
-
-新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
 
 ## 网络
 

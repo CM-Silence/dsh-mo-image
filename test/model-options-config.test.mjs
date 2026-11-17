@@ -284,6 +284,30 @@ test('normalizeConfig 让云端适配器也存得住离散参数表', () => {
   assert.deepEqual(config.providers[0].modelOptions['flux-1-schnell'].params, PARAM_TABLE);
 });
 
+test('模型行不落 expose：暴露只由选择器推导，行上的值没人读', () => {
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'relay', baseUrl: 'https://relay.example.com/v1', adapter: 'openai-images',
+      models: ['m'],
+      modelOptions: {
+        m: {
+          params: [
+            { role: 'model', name: 'model', type: 'text', expose: false },
+            { name: 'seed', type: 'number', default: '42', expose: true }
+          ]
+        }
+      }
+    }],
+    active: { providerId: 'p1', model: 'm' }
+  });
+  const rows = config.providers[0].modelOptions.m.params;
+  assert.equal(rows[0].role, 'model');
+  assert.equal('expose' in rows[0], false,
+    '模型行的暴露是运行时按「选择器是不是自动」推导的，行上的 expose 没人读，落盘只会留下假字段');
+  assert.equal(rows[1].expose, true, '普通参数行照旧写 expose');
+});
+
 test('只有离散参数表的模型条目不会被 normalizeConfig 丢掉', () => {
   const config = normalizeConfig({
     version: 1,
