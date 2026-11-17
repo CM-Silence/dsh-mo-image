@@ -634,6 +634,30 @@ test('the codex rail hue climbs toward violet with the quality stop', () => {
   }
 });
 
+test('a lower ultra keeps the highest stop name', () => {
+  const client = loadClient();
+  const withLowerUltra = {
+    options: [
+      { value: 'high', label: 'High' },
+      { value: 'ultra', label: 'Ultra' },
+      { value: 'max', label: 'Max Ultra' }
+    ]
+  };
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture({
+        defaults: { quality: 'max', auto: true, width: 1024, height: 1024, promptOptimization: true }
+      }),
+      setStore() {},
+      qualitySpec: withLowerUltra
+    }),
+    seed({ open: true, pane: 'quality' })
+  );
+  const text = collectText(tree).join(' ');
+  assert.match(text, /Max Ultra/);
+});
+
 test('the highest quality stop reads Ultra in the codex peak ink', () => {
   const client = loadClient();
   const four = {

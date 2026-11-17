@@ -206,8 +206,6 @@ localPreset.openai-gateway.hint,"InvokeAI、Fooocus、复杂 ComfyUI 工作流�
 "form.modelMappingSampler","采样器","Sampler","サンプラー","Muestreador","Sampler","Sampler","Сэмплер","Amostrador"
 "form.modelMappingWidth","宽度","Width","幅","Ancho","Largeur","Breite","Ширина","Largura"
 "form.modelMappingHeight","高度","Height","高さ","Alto","Hauteur","Höhe","Высота","Altura"
-"form.modelMappingSeed","种子","Seed","シード","Semilla","Graine","Seed","Сид","Semente"
-"form.modelMappingModel","模型","Model","モデル","Modelo","Modèle","Modell","Модель","Modelo"
 "form.modelMappingImage","参考图","Reference image","参照画像","Imagen de referencia","Image de référence","Referenzbild","Референс","Imagem de referência"
 "form.modelMappingColName","参数名","Parameter","パラメータ","Parámetro","Paramètre","Parameter","Параметр","Parâmetro"
 "form.modelMappingColTarget","参数映射","Mapping","マッピング","Mapeo","Correspondance","Zuordnung","Привязка","Mapeamento"
@@ -280,10 +278,14 @@ form.paramExpose,暴露,Expose,公開,Exponer,Exposer,Bereitstellen,Показы
 form.paramOptions,选项,Options,選択肢,Opciones,Options,Optionen,Варианты,Opções
 form.paramNameHint,发到请求体里的字段名；提示词行只能改名,Field name sent in the request body; the prompt row can only be renamed,リクエスト本文に送る項目名。プロンプト行は名前だけ変更できます,Nombre del campo que se envía en el cuerpo; la fila del prompt solo se puede renombrar,Nom du champ envoyé dans le corps ; la ligne du prompt peut seulement être renommée,Feldname im Anfrage-Body; die Prompt-Zeile lässt sich nur umbenennen,Имя поля в теле запроса; строку промпта можно только переименовать,Nome do campo enviado no corpo; a linha do prompt só pode ser renomeada
 form.paramDescriptionHint,给对话模型看的说明,Shown to the chat model,対話モデルに表示される説明,Se muestra al modelo de chat,Affiché au modèle de conversation,Wird dem Chat-Modell angezeigt,Показывается чат-модели,Mostrado ao modelo de conversa
-form.paramExposeHint,是否把该参数暴露给对话模型,Whether the chat model may pass this parameter,対話モデルにこのパラメータを渡せるか,Si el modelo de chat puede pasar este parámetro,Si le modèle de conversation peut transmettre ce paramètre,Ob das Chat-Modell diesen Parameter übergeben darf,Может ли чат-модель передавать этот параметр,Se o modelo de conversa pode passar este parâmetro
+form.paramExposeHint,勾上后对话模型才能用 params 改这个值,Only exposed rows can be tuned through params,オンにすると対話モデルが params でこの値を変更できます,Solo las filas expuestas se pueden ajustar con params,Seules les lignes exposées sont réglables via params,Nur freigegebene Zeilen lassen sich über params ändern,Только показанные строки можно менять через params,Só as linhas expostas podem ser ajustadas via params
+form.paramActions,操作,Actions,操作,Acciones,Actions,Aktionen,Действия,Ações
+form.paramRowLockHint,"锁定后不会被一键配置或自动检测改掉","Locked rows are skipped by bulk configuration and auto-detection","ロックすると一括設定や自動検出で変更されません","Al bloquearla, la configuración masiva y la detección automática no la cambiarán","Verrouillée, la ligne est ignorée par la configuration groupée et la détection automatique","Gesperrte Zeilen werden von Sammelkonfiguration und automatischer Erkennung übersprungen","Заблокированная строка не изменяется массовой настройкой и автоопределением","Bloqueada, a linha não é alterada pela configuração em massa nem pela detecção automática"
 form.paramOptionsHint,"逗号分隔，例如 euler、ddim","Comma-separated, e.g. euler, ddim","カンマ区切り（例：euler、ddim）","Separadas por comas, p. ej. euler, ddim","Séparées par des virgules, ex. euler, ddim","Durch Kommas getrennt, z. B. euler, ddim","Через запятую, например euler, ddim","Separadas por vírgulas, ex. euler, ddim"
+form.paramOptionsSummary,选项：{options},Options: {options},選択肢：{options},Opciones: {options},Options : {options},Optionen: {options},Варианты: {options},Opções: {options}
 form.paramAdd,添加参数,Add parameter,パラメータを追加,Añadir parámetro,Ajouter un paramètre,Parameter hinzufügen,Добавить параметр,Adicionar parâmetro
 form.paramRemove,删除参数,Remove parameter,パラメータを削除,Eliminar parámetro,Supprimer le paramètre,Parameter entfernen,Удалить параметр,Remover parâmetro
+form.paramConfirmRemove,确认删除？,Confirm delete?,削除しますか？,¿Eliminar?,Supprimer ?,Löschen?,Удалить?,Excluir?
 form.paramDescPrompt,生图提示词,Image prompt,画像生成プロンプト,Prompt de imagen,Prompt d'image,Bild-Prompt,Промпт изображения,Prompt da imagem
 form.paramDescNegative,不想出现的内容,What to avoid,避けたい内容,Lo que se debe evitar,Ce qu'il faut éviter,Was vermieden werden soll,Чего не должно быть,O que deve ser evitado
 form.paramDescModel,请求里发送的模型名,Model name sent in the request,リクエストで送るモデル名,Nombre del modelo enviado en la petición,Nom du modèle envoyé dans la requête,Im Request gesendeter Modellname,Имя модели в запросе,Nome do modelo enviado na requisição

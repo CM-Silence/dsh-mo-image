@@ -103,6 +103,21 @@ test('a row default is coerced to the same string shape on both bindings', () =>
   assert.equal(out.m.params[2].default, 'false');
 });
 
+test('一个行的 locked 标记会被保留，false 不落盘（不写 = 未锁）', () => {
+  const out = normalizeModelOptions({
+    m: {
+      params: [
+        { name: 'steps', type: 'number', locked: true },
+        { node: '7', input: 'seed', type: 'INT', locked: true },
+        { node: '7', input: 'cfg', type: 'FLOAT', locked: false }
+      ]
+    }
+  }, ['m'], 'comfyui');
+  assert.equal(out.m.params[0].locked, true, 'HTTP 行的行级锁');
+  assert.equal(out.m.params[1].locked, true, '工作流行的行级锁');
+  assert.equal(out.m.params[2].locked, undefined, 'false 不写进配置');
+});
+
 /* ------------------------------------------------------------ 候选清单 */
 
 test('listWorkflowInputs lists literal inputs with an inferred type and skips links', () => {

@@ -469,6 +469,14 @@ test('checking a candidate turns it into a table row with node/input, default an
   opened = harness.renderRoot();
   const bind = findAll(opened, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps');
   assert.equal(bind.length, 1, 'the row shows where it lands in the workflow');
+  const stepsRow = findAll(opened, (node) => node.props && node.props['data-param-grid'] === 'params:row')
+    .find((row) => findAll(row, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps').length);
+  const nameCell = findAll(stepsRow, (node) => node.props && node.props['data-param-cell'] === 'name')[0];
+  assert.ok(nameCell, '参数名单元格在');
+  assert.equal(findAll(nameCell, (node) => node.props
+    && node.props['data-param-bind-target'] === '18:7.steps').length, 1, '落点是参数名单元格里的第二行');
+  assert.equal(stepsRow.children.length, 5, '落点小字不再自占一整行');
+  assert.equal(stepsRow.props.style.minHeight, 48, '工作流行与别的行一样高');
   assert.equal(findAll(opened, (node) => node.type === 'input'
     && node.props['data-param-candidate'] === '18:7.steps')[0].props.checked, true,
   'the candidate stays checked while its row exists');
@@ -575,10 +583,10 @@ test('the A1111 panel lists sampling parameters unchecked by default', async () 
     .map((node) => String(node.props.value)).join(' ');
   assert.match(descriptions, /Sampling steps/i, '每一行都带着给对话模型看的说明');
   assert.match(descriptions, /prompt constrains the image/i);
-  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox'
+  const boxes = findAll(panel, (node) => node.type === 'button'
     && node.props['data-param-field'] === 'expose');
   assert.equal(boxes.length, 6);
-  assert.ok(boxes.every((box) => box.props.checked === false), 'everything starts unchecked');
+  assert.ok(boxes.every((box) => box.props['aria-pressed'] === 'false'), 'everything starts unexposed');
 });
 
 test('switching an A1111 parameter on persists it on the row, not in the old expose map', async () => {
@@ -586,9 +594,9 @@ test('switching an A1111 parameter on persists it on the row, not in the old exp
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox'
+  const boxes = findAll(panel, (node) => node.type === 'button'
     && node.props['data-param-field'] === 'expose');
-  boxes[0].props.onChange({ target: { checked: true } });
+  boxes[0].props.onClick();
   opened = harness.renderRoot();
   const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
   await save.props.onClick();
@@ -677,8 +685,10 @@ test('the params table has no prompt or negative prompt rows', async () => {
   assert.ok(!hasRow(tree, 'negative_prompt'));
   assert.match(textOf(tree).join(' '), /straight from the tool call/i,
     'the panel has to say why these two are absent');
-  const boxes = findAll(tree, (node) => node.type === 'input' && node.props.type === 'checkbox');
-  assert.equal(boxes.length, 3, 'width, height and steps keep their switches');
+  const boxes = findAll(tree, (node) => node.type === 'button'
+    && node.props['data-param-field'] === 'expose');
+  assert.equal(boxes.length, 3, 'width, height and steps keep their expose toggles');
+  assert.ok(boxes.every((box) => box.props['aria-pressed'] === 'false'));
 });
 
 /* ───────────────────────── 任务 9'：一键配置 + 键锁 ───────────────────────── */
@@ -1210,8 +1220,10 @@ test('「常规」是一张离散参数表：表头用 data-param-grid，表体�
   const head = paramGrid(opened, 'params:head')[0];
   assert.ok(head, '表头行在');
   assert.deepEqual(textOf(head).join('|').split('|'),
-    ['Parameter name', 'Type', 'Default', 'Description', 'Expose'],
-    '表头：参数名 / 类型 / 默认值 / 描述 / 暴露');
+    ['Parameter name', 'Type', 'Default', 'Description', 'Actions'],
+    '表头：参数名 / 类型 / 默认值 / 描述 / 操作');
+  // 只有表头居中；表体保持左对齐（操作列是图标按钮）。
+  for (const cell of head.children) assert.equal(cell.props.style.textAlign, 'center', '表头文字居中');
   assert.equal(paramRow(box, 'prompt'), null, '表头不占用 data-param-row');
   assert.equal(paramRow(box, 'negative'), null, '表体也不占用 data-param-row（label 不再固定 88px）');
 
@@ -1219,10 +1231,18 @@ test('「常规」是一张离散参数表：表头用 data-param-grid，表体�
   assert.deepEqual(rows.map((row) => row.props['data-param-role']),
     ['prompt', 'negative', 'model', 'n'], '内置四行按固定顺序排列');
   for (const row of rows) {
+    assert.equal(row.props.style.gridTemplateColumns, head.props.style.gridTemplateColumns,
+      '表体与表头共用同一套 grid 列宽');
+    assert.equal(row.props.style.columnGap, head.props.style.columnGap, '列间距也一致');
+    assert.equal(row.props.style.minHeight, 48, '所有行等高：两行小字也装得下');
+    assert.equal(row.children.length, 5, '每行只有五格：落点与选项不再自占整行');
     for (const field of ['name', 'type', 'default', 'description', 'expose']) {
       assert.ok(paramCell(row, field), row.props['data-param-role'] + ' 缺 ' + field + ' 单元格');
     }
+    assert.equal(paramCell(row, 'name').props.style.textAlign, undefined, '表体不居中');
   }
+  assert.equal(findAll(box, (node) => node.props && node.props['data-param-bind-target']).length, 0,
+    'HTTP 行没有落点，就不显示第二行小字');
 });
 
 test('提示词是固定第一行：不可删、暴露固定、类型固定 text、默认空，只有名字能改', async () => {
@@ -1240,7 +1260,7 @@ test('提示词是固定第一行：不可删、暴露固定、类型固定 text
   assert.equal(def.props.value, '');
   assert.equal(def.props.disabled, true, '默认值固定空');
   const expose = paramCell(row, 'expose');
-  assert.equal(expose.props.checked, true, '暴露固定勾选');
+  assert.equal(expose.props['aria-pressed'], 'true', '暴露固定打开');
   assert.equal(expose.props.disabled, true, '暴露不能取消');
   const name = paramCell(row, 'name');
   assert.notEqual(name.props.disabled, true, '只有参数名能改');
@@ -1262,7 +1282,12 @@ test('普通行可以新增 / 编辑 / 删除；删掉内置行会去掉对应�
   let opened = openModelPanel(harness);
   assert.equal(commonRows(opened).length, 4);
 
-  // 删除内置的负面词行：参数表与字段模板一起清掉。
+  // 删除内置的负面词行：第一次点击只进入确认，第二次才真删。
+  paramCell(commonRow(opened, 'negative'), 'remove').props.onClick();
+  opened = harness.renderRoot();
+  assert.ok(commonRow(opened, 'negative'), '第一次点击不删行');
+  assert.equal(textOf(paramCell(commonRow(opened, 'negative'), 'remove')).join(''), 'Confirm delete?',
+    '按钮变成确认文案');
   paramCell(commonRow(opened, 'negative'), 'remove').props.onClick();
   opened = harness.renderRoot();
   assert.equal(commonRow(opened, 'negative'), null, '负面词行没了');
@@ -1286,9 +1311,9 @@ test('普通行可以新增 / 编辑 / 删除；删掉内置行会去掉对应�
   edit('type', 'number');
   edit('default', '42');
   opened = edit('description', 'Seed value');
-  paramCell(commonRows(opened)[3], 'expose').props.onChange({ target: { checked: true } });
+  paramCell(commonRows(opened)[3], 'expose').props.onClick();
   opened = harness.renderRoot();
-  assert.equal(paramCell(commonRows(opened)[3], 'expose').props.checked, true);
+  assert.equal(paramCell(commonRows(opened)[3], 'expose').props['aria-pressed'], 'true');
 
   const entry = await savedTableEntry(harness);
   assert.equal(entry.fields.negative, undefined, '删掉内置行 = 去掉字段模板覆盖');
@@ -1322,33 +1347,178 @@ test('删用户行只动参数表，不动字段模板', async () => {
   const seedRow = commonRows(opened).find((row) => !row.props['data-param-role']);
   paramCell(seedRow, 'remove').props.onClick();
   opened = harness.renderRoot();
+  const stillThere = commonRows(opened).find((row) => !row.props['data-param-role']);
+  assert.ok(stillThere, '第一次点击只是确认');
+  paramCell(stillThere, 'remove').props.onClick();
+  opened = harness.renderRoot();
   assert.equal(commonRows(opened).some((row) => !row.props['data-param-role']), false, '用户行删掉了');
   const entry = await savedTableEntry(harness);
   assert.equal(entry.params.some((row) => row.name === 'seed'), false);
   assert.equal(entry.fields.model.path, 'model', '删用户行不动字段模板');
 });
 
-test('type 选 enum 时行内多一个「选项」输入，逗号分隔落盘', async () => {
+test('type 选 enum 时选项收在描述列里，默认折叠，逗号分隔落盘', async () => {
   const { harness } = await openEditor(PARAM_TABLE_CONFIG);
   let opened = openModelPanel(harness);
   assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '非 enum 不显示选项');
 
   paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'enum' } });
   opened = harness.renderRoot();
-  const options = paramCell(commonRow(opened, 'negative'), 'options');
-  assert.ok(options, 'enum 行内出现选项输入');
+  let row = commonRow(opened, 'negative');
+  const descriptionCell = findAll(row, (node) => node.props['data-param-cell'] === 'description')[0];
+  assert.ok(descriptionCell, '描述单元格在');
+  const details = findAll(descriptionCell, (node) => node.type === 'details')[0];
+  assert.ok(details, '选项是描述格里的一段折叠内容');
+  assert.equal(details.props.open, undefined, '默认折叠：不占整行，也不把每行撑高');
+  const summary = findAll(details, (node) => node.type === 'summary')[0];
+  assert.equal(textOf(summary).join(''), 'Options: —', '没有选项时显示占位');
+  const options = paramCell(row, 'options');
+  assert.ok(options, '展开后是同一个描述格里的输入');
+  assert.equal(findAll(descriptionCell, (node) => node.props['data-param-field'] === 'options').length, 1,
+    '选项输入在描述格内，不再是整行子项');
+  assert.equal(row.children.some((child) => child && child.props
+    && child.props['data-param-field'] === 'options'), false, '选项不占参数行的整行');
   options.props.onChange({ target: { value: 'euler, ddim' } });
   opened = harness.renderRoot();
-  assert.equal(paramCell(commonRow(opened, 'negative'), 'options').props.value, 'euler, ddim');
+  row = commonRow(opened, 'negative');
+  assert.equal(paramCell(row, 'options').props.value, 'euler, ddim');
+  assert.equal(textOf(findAll(row, (node) => node.type === 'summary')[0]).join(''), 'Options: euler, ddim',
+    '折叠时用一行小字给出当前选项');
+  assert.equal(row.props.style.minHeight, 48, 'enum 行与别的行一样高');
 
   const entry = await savedTableEntry(harness);
-  const negative = entry.params.find((row) => row.role === 'negative');
+  const negative = entry.params.find((item) => item.role === 'negative');
   assert.equal(negative.type, 'enum');
   assert.deepEqual(negative.options, ['euler', 'ddim']);
 
   paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'text' } });
   opened = harness.renderRoot();
   assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '切回 text 后选项收起');
+});
+
+test('操作列：暴露 / 行级锁 / 删除三个按钮，说明走即时气泡而不是原生 title', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  const row = commonRow(opened, 'negative');
+  const actions = findAll(row, (node) => node.props['data-param-cell'] === 'actions')[0];
+  assert.ok(actions, '操作列在');
+  assert.deepEqual(findAll(actions, (node) => node.type === 'button')
+    .map((node) => node.props['data-param-key']),
+  ['negative.expose', 'negative.lock', 'negative.remove'], '三个操作按钮按顺序排列');
+
+  const expose = paramCell(row, 'expose');
+  assert.equal(expose.props.title, undefined, '不用有延迟的原生 title');
+  assert.equal(typeof expose.props.onPointerEnter, 'function', '悬停立刻展开说明');
+  assert.equal(expose.props['aria-pressed'], 'false');
+  expose.props.ref.current = tipTarget({ scrollWidth: 160, clientWidth: 80 });
+  expose.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const tip = findAll(commonRow(opened, 'negative'), (node) => node.props && node.props.role === 'tooltip')[0];
+  assert.ok(tip, '悬停出即时气泡');
+  assert.match(textOf(tip).join(''), /tuned through params/i, '气泡说明暴露的用途');
+  expose.props.onPointerLeave();
+});
+
+test('单元格超长截断，悬停给出完整内容', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  const row = commonRow(opened, 'negative');
+  const name = paramCell(row, 'name');
+  assert.equal(name.props.title, undefined, '原生 title 有延迟，不能用');
+  assert.equal(name.props.style.textOverflow, 'ellipsis', '超长显示省略号');
+  assert.equal(name.props.style.whiteSpace, 'nowrap', '不换行');
+  assert.equal(name.props.style.overflow, 'hidden', '格子裁掉溢出');
+  name.props.ref.current = tipTarget({ scrollWidth: 220, clientWidth: 90 });
+  name.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const refreshedNameCell = findAll(commonRow(opened, 'negative'),
+    (node) => node.props['data-param-cell'] === 'name')[0];
+  const tip = findAll(refreshedNameCell, (node) => node.props && node.props.role === 'tooltip')[0];
+  assert.ok(tip, '被截断时悬停有气泡');
+  assert.equal(textOf(tip).join(''), 'negative_prompt', '气泡里是完整内容');
+  paramCell(commonRow(opened, 'negative'), 'name').props.onPointerLeave();
+});
+
+test('行级锁写进 params：保存后保留，且只存 true', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  const lock = paramCell(commonRow(opened, 'model'), 'lock');
+  assert.equal(lock.props['aria-pressed'], 'false', '默认不锁');
+  assert.equal(lock.props.title, undefined, '锁的说明也走即时气泡');
+  lock.props.onClick();
+  opened = harness.renderRoot();
+  assert.equal(paramCell(commonRow(opened, 'model'), 'lock').props['aria-pressed'], 'true');
+  const entry = await savedTableEntry(harness);
+  assert.equal(entry.params.find((row) => row.role === 'model').locked, true, '行级锁落盘');
+  assert.equal(entry.params.filter((row) => row.locked).length, 1, '没锁的行不写 locked:false');
+});
+
+test('一键配置/自动检测改字段路径时跳过上锁的行', () => {
+  const { api } = createHarness({ config: CUSTOM_RELAY_CONFIG });
+  const provider = CUSTOM_RELAY_CONFIG.providers[0];
+  const entries = {
+    'Qwen/Qwen-Image': {
+      matched: true,
+      rule: {},
+      fields: { model: { path: 'new_model' }, negative: { path: 'new_negative' } }
+    }
+  };
+  const modelOptions = {
+    'Qwen/Qwen-Image': {
+      params: [
+        { role: 'model', name: 'old_model', type: 'text', locked: true },
+        { role: 'negative', name: 'old_negative', type: 'text' }
+      ]
+    }
+  };
+  const result = api.__test.mergeRuleResult(provider, modelOptions, entries, {});
+  const rows = result.modelOptions['Qwen/Qwen-Image'].params;
+  assert.equal(rows.find((row) => row.role === 'model').name, 'old_model', '上锁的行不被改写');
+  assert.equal(rows.find((row) => row.role === 'negative').name, 'new_negative', '没锁的行照旧同步');
+});
+
+const SEED_MODEL_ANALYSIS = {
+  ok: true,
+  format: 'api',
+  mapping: {
+    prompt: { node: '18:17', input: 'value' },
+    seed: { node: '18:7', input: 'seed' },
+    model: { node: '18:1', input: 'unet_name' },
+    width: { node: '18:6', input: 'width' },
+    height: { node: '18:6', input: 'height' },
+    image: null
+  },
+  candidates: {
+    seed: [{ node: '18:7', input: 'seed', classType: 'KSampler', value: 1 }],
+    model: [{ node: '18:1', input: 'unet_name', classType: 'UNETLoader', value: 'flux.safetensors' }]
+  },
+  params: [
+    { name: 'seed', role: true, node: '18:7', input: 'seed', type: 'INT' },
+    { name: 'model', role: true, node: '18:1', input: 'unet_name', type: 'STRING' },
+    { name: 'steps', node: '18:7', input: 'steps', type: 'INT' }
+  ],
+  warnings: []
+};
+
+test('删掉旧的种子/模型映射下拉后，两行仍在参数表里可编辑', async () => {
+  const tree = await openParsed(SEED_MODEL_ANALYSIS, FIXED_SIZE_CONFIG);
+  assert.equal(findAll(tree, (node) => node.props && node.props['data-mapping-key']).length, 0,
+    '映射面板不再有种子/模型下拉');
+  assert.match(textOf(tree).join(' '), /straight from the tool call/i,
+    '提示词那句说明还在（解释它们为什么不在映射里）');
+  const rows = commonRows(tree);
+  const rowWith = (name) => rows.find((row) => findAll(row, (node) => node.props
+    && node.props['data-param-field'] === 'name' && node.props.value === name).length);
+  const seed = rowWith('seed');
+  const model = rowWith('model');
+  assert.ok(seed, '种子是参数表里的普通行');
+  assert.ok(model, '模型是参数表里的普通行');
+  assert.equal(findAll(seed, (node) => node.props['data-param-bind-target'] === '18:7.seed').length, 1);
+  assert.equal(findAll(model, (node) => node.props['data-param-bind-target'] === '18:1.unet_name').length, 1);
+  const name = paramCell(model, 'name');
+  assert.notEqual(name.props.disabled, true, '模型行仍可编辑');
+  assert.equal(typeof name.props.onChange, 'function', '改名照旧走行内输入');
+  assert.equal(paramCell(model, 'type').props.value, 'text');
 });
 
 test('老配置没有 params 时从 fields 派生；没有的字段不显示行', async () => {
@@ -1378,7 +1548,7 @@ test('老配置没有 params 时从 fields 派生；没有的字段不显示行'
     '描述默认值来自内置文案表');
 
   // 第一次编辑就把派生行落成 params（不再依赖 fields）。
-  paramCell(commonRow(opened, 'model'), 'expose').props.onChange({ target: { checked: true } });
+  paramCell(commonRow(opened, 'model'), 'expose').props.onClick();
   const entry = await savedTableEntry(harness);
   assert.deepEqual(entry.params.map((row) => row.role), ['prompt', 'negative', 'model']);
   assert.equal(entry.params[1].name, 'negative_prompt');
@@ -1419,11 +1589,11 @@ test('params 回读：类型 / 默认值 / 描述 / 暴露按落盘的来', asyn
   assert.equal(paramCell(negative, 'type').props.value, 'enum');
   assert.equal(paramCell(negative, 'default').props.value, 'blurry');
   assert.equal(paramCell(negative, 'description').props.value, 'avoid');
-  assert.equal(paramCell(negative, 'expose').props.checked, false);
+  assert.equal(paramCell(negative, 'expose').props['aria-pressed'], 'false');
   assert.equal(paramCell(negative, 'options').props.value, 'blurry, low quality');
   const custom = commonRows(opened)[2];
   assert.equal(paramCell(custom, 'name').props.value, 'seed');
-  assert.equal(paramCell(custom, 'expose').props.checked, true);
+  assert.equal(paramCell(custom, 'expose').props['aria-pressed'], 'true');
   assert.equal(paramCell(commonRow(opened, 'prompt'), 'description').props.value, 'custom prompt doc');
 });
 
@@ -1442,7 +1612,7 @@ test('params 落盘后能通过 config-store 回读（端到端）', async () =>
   edit('type', 'number');
   edit('default', '42');
   opened = edit('description', 'Random seed');
-  paramCell(commonRows(opened)[4], 'expose').props.onChange({ target: { checked: true } });
+  paramCell(commonRows(opened)[4], 'expose').props.onClick();
   opened = harness.renderRoot();
 
   const saved = await saveAndPosted(harness);
