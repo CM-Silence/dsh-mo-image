@@ -8,8 +8,20 @@ import { applyFields, multipartFields, promptParts, resolveFields } from '../lib
 
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
+/**
+ * 宿主下发的参考图能力（`capabilities[].models[].image`）：这些 fixture 多数是 OpenAI 兼容
+ * 网关，宿主会声明 `{ multipart: 'image[]' }`。个别用例（「宿主什么都没声明」）显式传
+ * `capabilities: []` 覆盖掉。
+ */
+function defaultCapabilities(config) {
+  return ((config && config.providers) || []).map((provider) => ({
+    providerId: provider.id,
+    models: (provider.models || []).map((model) => ({ model: model, image: { multipart: 'image[]' } }))
+  }));
+}
+
 /** Stateful React stand-in, so clicking the chevron re-renders the settings section. */
-function createHarness({ config, primitives = null, analyze = null, detect = null, models = null } = {}) {
+function createHarness({ config, primitives = null, analyze = null, detect = null, models = null, capabilities = null } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -69,7 +81,8 @@ function createHarness({ config, primitives = null, analyze = null, detect = nul
       return new Response(JSON.stringify({
         ok: true, config, adapters: [],
         providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
-        localPresets: []
+        localPresets: [],
+        capabilities: capabilities === null ? defaultCapabilities(config) : capabilities
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
     setTimeout: () => 0, clearTimeout() {}, URL
@@ -1569,6 +1582,338 @@ test('传法暂存只认三种编码，别的东西不会被记成模板的一�
   assert.equal(pending('bogus'), '', '不认识的传法当作没选：别让它跟着字段名混进模板');
   assert.equal(api.__test.pendingFieldAsOf({}, 'image'), '', '没暂存就是空');
   assert.equal(api.__test.pendingFieldAsOf(null, 'image'), '');
+});
+
+/* ───────── 参考图方框：支持开关 + 多图策略（策略就是模板形状） ───────── */
+
+/** 带字段模板覆盖的云端配置（p2 / gpt-image-2.5-flare）。 */
+function imageConfig(fields) {
+  const config = JSON.parse(JSON.stringify(CLOUD_CONFIG));
+  if (fields) config.providers[0].modelOptions = { 'gpt-image-2.5-flare': { fields: fields } };
+  return config;
+}
+
+/** 宿主声明的参考图模板：capabilities[].models[].image。 */
+function imageCapability(template) {
+  return [{ providerId: 'p2', models: [{ model: 'gpt-image-2.5-flare', image: template }] }];
+}
+
+/** 「支持参考图」勾选框（面板别处也有复选框，所以按方框限定）。 */
+function imageCheckbox(tree) {
+  const box = paramBox(tree, 'image');
+  return box && findAll(box, (node) => node.type === 'input' && node.props.type === 'checkbox')[0] || null;
+}
+
+/** 多图策略下拉。 */
+function imageModeSelect(tree) {
+  const row = paramRow(tree, 'image:mode');
+  return row ? row.children[1] : null;
+}
+
+/** 勾 / 取消勾「支持参考图」。 */
+function toggleImage(harness, checked) {
+  imageCheckbox(harness.renderRoot()).props.onChange({ target: { checked: checked } });
+  return harness.renderRoot();
+}
+
+/** 选多图策略。 */
+function pickMode(harness, value) {
+  imageModeSelect(harness.renderRoot()).props.onChange({ target: { value: value } });
+  return harness.renderRoot();
+}
+
+/** 两张参考图：小到可以直接比对 base64。 */
+const REF_A = { buffer: Buffer.from('a'), contentType: 'image/png' };
+const REF_B = { buffer: Buffer.from('b'), contentType: 'image/png' };
+const dataUrlOf = (tag) => 'data:image/png;base64,' + Buffer.from(tag).toString('base64');
+
+/** 模板 → 请求体（JSON 与 multipart 两个出口）。 */
+function bodiesOf(fields, images) {
+  const resolved = resolveFields({ override: fields });
+  const json = JSON.parse(JSON.stringify(applyFields({}, resolved, { image: images })));
+  const form = multipartFields(resolved, { image: images }, images).map((item) => item.name);
+  return { json, form };
+}
+
+test('参考图方框的标题行下面多一个「支持参考图」：和质量的勾选框同一套', async () => {
+  const { harness } = await openEditor(imageConfig({ image: { path: 'image', as: 'dataUrl' } }));
+  const opened = openModelPanel(harness);
+  const box = paramBox(opened, 'image');
+  assert.ok(box, '参考图还是独立方框');
+  assert.equal(textOf(box.children[0].children[0]).join(''), 'Reference image', '标题没变');
+  const supported = paramRow(box, 'image:supported');
+  assert.ok(supported, '勾选框自己占一行');
+  assert.equal(textOf(supported.children[0]).join(''), 'Supports reference image');
+  assert.equal(supported.children[1].type, 'input');
+  assert.equal(supported.children[1].props.type, 'checkbox');
+  assert.equal(supported.children[1].props['data-param-key'], 'image');
+  assert.equal(imageCheckbox(opened).props.checked, true, '已经有模板就勾着');
+});
+
+test('取消勾选：框内其余行整块不渲染，字段模板写成显式不发，请求里没有参考图字段', async () => {
+  const { harness } = await openEditor(imageConfig({ image: { path: 'image', as: 'dataUrl' } }));
+  openModelPanel(harness);
+  const panel = toggleImage(harness, false);
+  assert.equal(imageCheckbox(panel).props.checked, false);
+  assert.equal(paramRow(panel, 'image:field'), null, '不勾时没有字段名');
+  assert.equal(paramRow(panel, 'image:as'), null, '不勾时没有传法');
+  assert.equal(paramRow(panel, 'image:mode'), null, '不勾时没有多图策略');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields, { image: null }, '显式不发就是 null，不是「没配」');
+  const bodies = bodiesOf(entry.fields, REF_A);
+  assert.deepEqual(bodies.json, {}, 'JSON body 里没有参考图');
+  assert.deepEqual(bodies.form, [], 'multipart 表单里也没有参考图');
+});
+
+test('勾上时补默认模板：宿主什么都没声明就写 { path, as: dataUrl }', async () => {
+  const { harness } = await openEditor(imageConfig(), { capabilities: [] });
+  let panel = openModelPanel(harness);
+  assert.equal(imageCheckbox(panel).props.checked, false, '宿主没声明就不勾');
+  assert.equal(paramRow(panel, 'image:field'), null, '不勾时框里只有勾选框');
+
+  panel = toggleImage(harness, true);
+  assert.equal(imageCheckbox(panel).props.checked, true);
+  assert.equal(imageFieldInput(panel).props.value, 'image', '默认模板的字段名');
+  assert.equal(imageAsSelect(panel).props.value, 'dataUrl', '默认模板的传法');
+  assert.equal(imageModeSelect(panel).props.value, 'single', '默认是单张');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'image', as: 'dataUrl' });
+  const bodies = bodiesOf(entry.fields, REF_A);
+  assert.deepEqual(bodies.json, { image: dataUrlOf('a') }, '勾了就真的发得出去');
+});
+
+test('默认勾上来自宿主声明：有模板就勾着，且不写一条多余的覆盖', async () => {
+  const { harness } = await openEditor(imageConfig(), {
+    capabilities: imageCapability({ numbered: 'input_image', as: 'dataUrl' })
+  });
+  const panel = openModelPanel(harness);
+  assert.equal(imageCheckbox(panel).props.checked, true, '预设/规则声明了 image 模板就默认勾上');
+  assert.equal(imageFieldInput(panel).props.value, '', '继承时不写覆盖，字段名留空');
+  assert.equal(imageModeSelect(panel).props.value, 'numbered', '策略照宿主声明的形状显示');
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry && entry.fields, undefined, '什么都没动就不该多出一条覆盖');
+});
+
+test('取消勾选后再勾回来：回到继承宿主声明的状态，不再凭空造模板', async () => {
+  const { harness } = await openEditor(imageConfig(), {
+    capabilities: imageCapability({ multipart: 'image[]' })
+  });
+  openModelPanel(harness);
+  toggleImage(harness, false);
+  toggleImage(harness, true);
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry, undefined, 'null 被删掉，链路回到「跟随预设/规则」，什么都不留');
+});
+
+test('多图策略 single：同一个字段，一张图就是标量', async () => {
+  const { harness } = await openEditor(imageConfig(), {
+    capabilities: imageCapability({ path: 'image', as: 'dataUrl' })
+  });
+  let panel = openModelPanel(harness);
+  assert.equal(imageModeSelect(panel).props.value, 'single');
+  panel = pickMode(harness, 'single');
+  assert.deepEqual(
+    findAll(imageModeSelect(panel), (node) => node.type === 'option').map((node) => String(node.props.value)),
+    ['single', 'array', 'numbered'], '三个取值：单张 / 数组 / 按序号'
+  );
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'image', as: 'dataUrl' });
+  assert.deepEqual(bodiesOf(entry.fields, REF_A).json, { image: dataUrlOf('a') }, '一张就是标量');
+});
+
+test('多图策略 array：所有图塞进同一个字段的数组', async () => {
+  const { harness } = await openEditor(imageConfig(), {
+    capabilities: imageCapability({ path: 'image', as: 'dataUrl' })
+  });
+  openModelPanel(harness);
+  pickMode(harness, 'array');
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'image[]', as: 'dataUrl' });
+  assert.deepEqual(bodiesOf(entry.fields, [REF_A, REF_B]).json,
+    { image: [dataUrlOf('a'), dataUrlOf('b')] }, '两张都在同一个数组里');
+  assert.deepEqual(bodiesOf(entry.fields, REF_A).json, { image: [dataUrlOf('a')] },
+    '数组形态一张也还是数组');
+});
+
+test('多图策略 numbered：字段名当前缀，按序号展开', async () => {
+  const { harness } = await openEditor(imageConfig({ image: { path: 'input_image', as: 'dataUrl' } }));
+  openModelPanel(harness);
+  pickMode(harness, 'numbered');
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { numbered: 'input_image', as: 'dataUrl' });
+  assert.deepEqual(bodiesOf(entry.fields, [REF_A, REF_B]).json,
+    { input_image: dataUrlOf('a'), input_image_2: dataUrlOf('b') },
+    '第一张不带序号，第二张开始 _2 / _3 …');
+});
+
+test('multipart 端点：策略只换字段名，形状仍是 multipart（换成 JSON 路径会丢图）', async () => {
+  const cases = [
+    ['array', { multipart: 'image[]' }, ['image[]', 'image[]']],
+    ['single', { multipart: 'image' }, ['image', 'image']]
+  ];
+  for (const [mode, template, names] of cases) {
+    const { harness } = await openEditor(imageConfig(), {
+      capabilities: imageCapability({ multipart: 'image[]' })
+    });
+    const panel = openModelPanel(harness);
+    assert.equal(imageModeSelect(panel).props.value, 'array', 'image[] 读回来就是数组策略');
+
+    pickMode(harness, mode);
+    const entry = await savedImageEntry(harness);
+    assert.deepEqual(entry.fields.image, template, mode + ' 的形状');
+    const bodies = bodiesOf(entry.fields, [REF_A, REF_B]);
+    assert.deepEqual(bodies.form, names, mode + ' 的表单字段名');
+    assert.deepEqual(bodiesOf(entry.fields, REF_A).json, {}, 'multipart 模板不往 JSON body 里写东西');
+  }
+});
+
+test('切策略时字段名与传法不丢', async () => {
+  const start = { path: 'image_url', as: 'url' };
+  const cases = [
+    ['array', { path: 'image_url[]', as: 'url' }],
+    ['numbered', { numbered: 'image_url', as: 'url' }],
+    ['single', { path: 'image_url', as: 'url' }]
+  ];
+  for (const [mode, template] of cases) {
+    const { harness } = await openEditor(imageConfig({ image: start }));
+    const before = openModelPanel(harness);
+    assert.equal(imageFieldInput(before).props.value, 'image_url');
+    assert.equal(imageAsSelect(before).props.value, 'url');
+
+    const panel = pickMode(harness, mode);
+    assert.equal(imageFieldInput(panel).props.value, 'image_url', mode + '：字段名没丢（[] 归策略管）');
+    assert.equal(imageAsSelect(panel).props.value, 'url', mode + '：传法没丢');
+    assert.deepEqual((await savedImageEntry(harness)).fields.image, template, mode + ' 的形状');
+  }
+
+  // 切完策略再改传法：形状与字段名都还在。
+  for (const [mode, template] of [
+    ['array', { path: 'image_url[]', as: 'base64' }],
+    ['numbered', { numbered: 'image_url', as: 'base64' }]
+  ]) {
+    const { harness } = await openEditor(imageConfig({ image: start }));
+    openModelPanel(harness);
+    pickMode(harness, mode);
+    pickAs(harness, 'base64');
+    assert.deepEqual((await savedImageEntry(harness)).fields.image, template, mode + ' 之后改传法');
+  }
+});
+
+test('multipart 端点不提供「按序号」：那个形状写不进表单，选了会静默丢图', async () => {
+  const optionsOf = (tree) => findAll(imageModeSelect(tree), (node) => node.type === 'option')
+    .map((node) => ({ value: String(node.props.value), disabled: node.props.disabled === true }));
+
+  const multipart = await openEditor(imageConfig(), { capabilities: imageCapability({ multipart: 'image[]' }) });
+  assert.deepEqual(optionsOf(openModelPanel(multipart.harness)), [
+    { value: 'single', disabled: false },
+    { value: 'array', disabled: false },
+    { value: 'numbered', disabled: true }
+  ], '表单端点只有单张 / 数组两种形状');
+
+  // JSON 端点三种都能选；老配置里已经存成 numbered 的，就算宿主声明是表单也照样显示。
+  const json = await openEditor(imageConfig({ image: { numbered: 'input_image', as: 'dataUrl' } }));
+  assert.deepEqual(optionsOf(openModelPanel(json.harness)).map((item) => item.disabled), [false, false, false]);
+});
+
+test('老配置读回来能显示成对应策略（只有 path / 只有 multipart 都认）', async () => {
+  const cases = [
+    [{ path: 'image' }, 'single', 'image'],
+    [{ path: 'images[]', as: 'dataUrl' }, 'array', 'images'],
+    [{ multipart: 'image[]' }, 'array', 'image'],
+    [{ multipart: 'image' }, 'single', 'image'],
+    [{ numbered: 'input_image', as: 'dataUrl' }, 'numbered', 'input_image'],
+    [{ path: 'input.messages[0].content[]', wrap: 'image', as: 'dataUrl' }, 'array', 'input.messages[0].content']
+  ];
+  for (const [template, mode, name] of cases) {
+    const { harness } = await openEditor(imageConfig({ image: template }));
+    const panel = openModelPanel(harness);
+    assert.equal(imageCheckbox(panel).props.checked, true, JSON.stringify(template) + ' 有模板，勾着');
+    assert.equal(imageModeSelect(panel).props.value, mode, JSON.stringify(template) + ' 的策略');
+    assert.equal(imageFieldInput(panel).props.value, name, JSON.stringify(template) + ' 的字段名');
+  }
+});
+
+test('上锁时参考图方框里的控件全部禁用', async () => {
+  const config = imageConfig({ image: { path: 'image', as: 'dataUrl' } });
+  config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+  const { harness } = await openEditor(config);
+  const opened = openModelPanel(harness);
+  assert.equal(paramLock(opened, 'image').props['aria-pressed'], 'true', '这个键是上锁的');
+  for (const control of [imageCheckbox(opened), imageFieldInput(opened), imageAsSelect(opened), imageModeSelect(opened)]) {
+    assert.ok(control, '控件在');
+    assert.equal(control.props.disabled, true, '上锁后每个控件都该禁用');
+  }
+});
+
+test('imageStrategyOf / imageNameOf / imageTemplateOf：策略就是模板形状', () => {
+  const { api } = createHarness({ config: CLOUD_CONFIG });
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.equal(api.__test.imageStrategyOf({ path: 'image' }), 'single');
+  assert.equal(api.__test.imageStrategyOf({ path: 'images[]' }), 'array');
+  assert.equal(api.__test.imageStrategyOf({ multipart: 'image[]' }), 'array');
+  assert.equal(api.__test.imageStrategyOf({ multipart: 'image' }), 'single');
+  assert.equal(api.__test.imageStrategyOf({ numbered: 'input_image' }), 'numbered');
+  assert.equal(api.__test.imageStrategyOf(null), 'single', '没模板时按单张摆');
+
+  assert.equal(api.__test.imageNameOf({ path: 'image[]' }), 'image', '[] 归策略管');
+  assert.equal(api.__test.imageNameOf({ numbered: 'input_image' }), 'input_image');
+  assert.equal(api.__test.imageNameOf(undefined), '');
+
+  assert.deepEqual(plain(api.__test.imageTemplateOf('path', 'single', 'image', 'url')), { path: 'image', as: 'url' });
+  assert.deepEqual(plain(api.__test.imageTemplateOf('path', 'array', 'image', 'url')), { path: 'image[]', as: 'url' });
+  assert.deepEqual(plain(api.__test.imageTemplateOf('path', 'array', 'image[]', 'url')), { path: 'image[]', as: 'url' },
+    '字段名自己带 [] 也不会叠成 [][]');
+  assert.deepEqual(plain(api.__test.imageTemplateOf('numbered', 'single', 'input_image', 'dataUrl')),
+    { path: 'input_image', as: 'dataUrl' });
+  assert.deepEqual(plain(api.__test.imageTemplateOf('path', 'numbered', 'input_image', 'dataUrl')),
+    { numbered: 'input_image', as: 'dataUrl' });
+  assert.deepEqual(plain(api.__test.imageTemplateOf('multipart', 'array', 'image', 'url')),
+    { multipart: 'image[]' }, 'multipart 的模板不认 as，别硬塞');
+  assert.equal(api.__test.imageTemplateOf('path', 'single', '  ', 'url'), null, '空字段名不造模板');
+});
+
+test('一键配置不会撤销「这个模型不发参考图」：用户关掉过的保持关掉', async () => {
+  // 中转站没有 presetId（锁默认全开），所以「上锁即保护」在这里不成立：
+  // 用户明确取消勾选过的参考图要像上锁一样挡住规则写入。
+  const declined = {
+    providers: [{
+      id: 'p9', name: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1',
+      key: '', hasKey: true, adapter: 'custom', protocol: 'openai-images', optionalKey: false,
+      customEndpoints: {
+        generate: 'https://api.siliconflow.cn/v1/images/generations',
+        edit: '',
+        models: 'https://api.siliconflow.cn/v1/models'
+      },
+      models: ['Qwen/Qwen-Image'], names: {},
+      modelOptions: { 'Qwen/Qwen-Image': { fields: { image: null } } }
+    }],
+    active: { providerId: 'p9', model: 'Qwen/Qwen-Image' },
+    defaults: {}
+  };
+  const detect = {
+    ok: true,
+    models: ['Qwen/Qwen-Image'],
+    rules: {
+      'Qwen/Qwen-Image': {
+        size: { mode: 'wh-string', field: 'image_size', separator: 'x', second: null, domain: {} },
+        quality: null
+      }
+    },
+    fields: {
+      'Qwen/Qwen-Image': { prompt: { path: 'prompt' }, image: { path: 'images[]', as: 'dataUrl' } }
+    },
+    matched: { 'Qwen/Qwen-Image': true }
+  };
+  const { harness } = await openEditor(declined, { detect: detect });
+  await configureAll(harness);
+  const config = await saveAndPosted(harness);
+  const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
+  assert.equal(entry.fields.image, null, '规则说收也不算：用户关掉过');
+  assert.deepEqual(entry.fields.prompt, { path: 'prompt' }, '别的字段照旧抄');
 });
 
 /* ───────── 「一键配置」只给规则表能管的协议 ───────── */
