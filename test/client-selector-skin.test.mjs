@@ -530,6 +530,8 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   assert.equal(collectClass(tree, 'cmes-sp-float').length, 22);
   assert.equal(collectClass(tree, 'cmes-sp-run').length, 22);
   assert.match(collectClass(tree, 'cmes-sp-float')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
+  assert.equal(collectClass(tree, 'cmes-sp-float')[0].props.style['--x'], collectClass(tree, 'cmes-sp-float')[0].props.style.left,
+    'the exit animation starts from the same spread position');
 });
 
 test('the highest stop animates even when its id is not a quota peak', () => {
