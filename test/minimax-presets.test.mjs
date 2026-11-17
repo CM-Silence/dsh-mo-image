@@ -16,7 +16,7 @@ import { detectQualityRule, detectSizeRule } from '../lib/model-rules.js';
  *   GET  /v1/models               OpenAI 兼容的模型清单
  *   鉴权 Authorization: Bearer <API Key>
  *
- * 所以这四条预设一律是 `adapter: 'openai-images'` + 一个 baseUrl，不需要新协议。
+ * 所以这两条预设一律是 `adapter: 'openai-images'` + 一个 baseUrl，不需要新协议。
  * 这里锁三件事：地址三元组拼得对、models 里只有查证过的 id、尺寸按 H3 的真实参数
  * （aspect_ratio + area 档位，不能同时发 size）走。
  *
@@ -27,12 +27,10 @@ import { detectQualityRule, detectSizeRule } from '../lib/model-rules.js';
  *   https://platform.minimax.cn/docs/api-reference/image-generation-h3-generations.md
  */
 
-/** 四条预设：两个官方域名（国际 / 中国）+ 两个仍然活着的旧域名（同一个中国后端）。 */
+/** 两条预设：两个官方域名（国际站 / 中国站）。 */
 const PRESETS = [
-  { id: 'minimax', baseUrl: 'https://api.minimax.io/v1', documented: true },
-  { id: 'minimax-cn', baseUrl: 'https://api.minimax.cn/v1', documented: true },
-  { id: 'minimaxi', baseUrl: 'https://api.minimaxi.com/v1', documented: false },
-  { id: 'minimax-chat', baseUrl: 'https://api.minimax.chat/v1', documented: false }
+  { id: 'minimax', baseUrl: 'https://api.minimax.io/v1' },
+  { id: 'minimax-cn', baseUrl: 'https://api.minimax.cn/v1' }
 ];
 
 /** 官方 OpenAPI 的 model enum（文生图与图生图两个端点一致）。 */
@@ -74,21 +72,15 @@ test('MiniMax 预设都解析成 openai-images，并拼出 generations / edits /
   }
 });
 
-test('MiniMax 预设的 models 里只有查证过的 id，没查实的留空', () => {
-  for (const { id, documented } of PRESETS) {
+test('MiniMax 预设的 models 里只有查证过的 id', () => {
+  for (const { id } of PRESETS) {
     const preset = PROVIDER_PRESETS.find((item) => item.id === id);
     assert.ok(Array.isArray(preset.models), id + ' 的 models 必须是数组');
     for (const model of preset.models) {
       assert.ok(H3_MODELS.includes(model), id + ' 里出现了没查证过的模型 id：' + model);
     }
-    if (documented) {
-      // 两个官方域名的文档都列了这两个模型，没有理由留空。
-      assert.deepEqual(preset.models, H3_MODELS, id + ' 应该带上官方文档里的两个 H3 模型');
-    } else {
-      // 旧域名只在 OpenAPI 里出现过同一个 /v1/images/generations，模型清单没有官方页面佐证，
-      // 所以留空，交给「获取可用模型」去拉。
-      assert.deepEqual(preset.models, [], id + ' 的模型清单没查实，应当留空');
-    }
+    // 两个官方域名的文档都列了这两个模型，没有理由留空。
+    assert.deepEqual(preset.models, H3_MODELS, id + ' 应该带上官方文档里的两个 H3 模型');
   }
 });
 
@@ -107,7 +99,7 @@ test('MiniMax 预设只发 H3 认的参数：负面词拼进提示词，没有�
 
 test('MiniMax 地址的自动检测不发探测请求就知道是 openai-images', () => {
   // /v1/models 要鉴权：没贴 Key 时探回来是 401，会被当成「不像任何协议」。
-  // 所以这四个主机登记在 KNOWN_OPENAI_HOSTS 里，检测直接给出答案、一个请求都不发。
+  // 所以这两个主机登记在 KNOWN_OPENAI_HOSTS 里，检测直接给出答案、一个请求都不发。
   for (const { id, baseUrl } of PRESETS) {
     const start = detectProtocolStart({ baseUrl: baseUrl }, H3_MODELS[0]);
     assert.equal(start.done, true, id + ' 的检测应该当场有结论');

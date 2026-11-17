@@ -286,13 +286,13 @@ $DSH_HOME/.credentials.yaml
 | 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
 | 智谱 BigModel | `openai-images`（`edit:'none'`） | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 | **MiniMax**（国际站 `api.minimax.io`） | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | H3-Image 就是 OpenAI Images 形状（生成 + `/images/edits` 收 1–16 张参考图）；`aspect_ratio` + `area`（`1K/2K/4K`），不发 `size` |
-| MiniMax 中国 | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | 同一套接口，基础地址换成 `api.minimax.cn`（现行官方域名）；旧域名 `api.minimaxi.com` / `api.minimax.chat` 也各有一条预设，仍能用，但模型清单没有官方页面可核，默认留空等「获取可用模型」 |
+| MiniMax 中国 | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | 同一套接口，基础地址换成 `api.minimax.cn`（现行官方域名） |
 
 说明：
 
 - Google Gemini 使用 `x-goog-api-key` 头；`imageSize` 按模型分级（3.1-flash 支持 `512/1K/2K/4K`，2.5 不发），`aspectRatio` 新模型 14 档。
 - xAI 使用 `aspect_ratio` + `resolution`，不是 OpenAI 的 `size`。
-- MiniMax H3-Image 的 `size` 与 `aspect_ratio`/`area` 是互斥的（同时给会 400），插件只发后者，让服务端按档位算宽高；它没有 `negative_prompt`（负面词拼进提示词），也没有质量档位枚举（只有 `output_compression` 0–100 的压缩率）。旧模型 `image-01` / `image-01-live` 走的是另一条旧接口 `POST /v1/image_generation`（`aspect_ratio` + `base_resp` 响应），不是 OpenAI Images 形状，所以没有放进这四个预设。
+- MiniMax H3-Image 的 `size` 与 `aspect_ratio`/`area` 是互斥的（同时给会 400），插件只发后者，让服务端按档位算宽高；它没有 `negative_prompt`（负面词拼进提示词），也没有质量档位枚举（只有 `output_compression` 0–100 的压缩率）。旧模型 `image-01` / `image-01-live` 走的是另一条旧接口 `POST /v1/image_generation`（`aspect_ratio` + `base_resp` 响应），不是 OpenAI Images 形状，所以没有放进这两个预设。
 - Recraft / Ideogram / Together / Stability 的默认模型 ID 只是建议值，服务端模型更新后可以在「模型目录」里改，或用「获取可用模型」重新拉取。
 - 这些云端提供商的密钥仍只写入 DSH 凭据库，不写进 `config.json`。
 - 内置列表来自宿主 manifest，客户端不单独维护一份；新增提供商会同时影响设置页和模型列表能力判断。
@@ -475,7 +475,7 @@ $DSH_HOME/.credentials.yaml
 
 **识别协议**：设置页「API 协议」下拉右侧的按钮。判定分三步，能不发请求就不发：
 
-1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 四个域名）时直接判 `openai-images`，并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
+1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 两个域名）时直接判 `openai-images`，并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
 2. **客户端逐条探测**：其余地址只返回一份**探测顺序**，设置页按顺序一条条问宿主；每发一条之前就把「正在尝试访问 /xxx…」写进提示——进度是真的，不是假轮播。
 3. **命中即停**：哪条路径回来的形状能证明某个协议就停；全都不中才落到「自定义」，并预填三条相对地址，提示里带上最后试过的路径。
 
