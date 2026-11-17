@@ -109,6 +109,26 @@ test('async edit is rejected when the descriptor says it is unsupported', async 
   );
 });
 
+test('bfl 的输出描述符钉住 task 字段（轮询地址在响应里，结果是 result.sample）', () => {
+  const providerDef = { baseUrl: 'https://api.bfl.ai/v1', adapter: 'bfl', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'flux-2-pro');
+  assert.equal(adapter.poll, undefined, '新写法只留 output，不留 poll');
+  assert.equal(adapter.output.kind, 'task');
+  assert.deepEqual(Object.keys(adapter.output).sort(), [
+    'emptyMessage', 'failure', 'failureMessagePath', 'intervalMs', 'kind', 'maxBytes',
+    'pollUrlPath', 'resultPath', 'statusPath', 'success', 'timeoutMs'
+  ]);
+  assert.equal(adapter.output.pollUrlPath, 'polling_url', '轮询地址由提交响应直接给，不按 id 拼');
+  assert.equal(adapter.output.resultPath, 'result.sample');
+  // 请求侧只留下提交：轮询相关的三个函数都搬进了描述符。
+  assert.equal(adapter.async.pollUrl, undefined);
+  assert.equal(adapter.async.statusOf, undefined);
+  assert.equal(adapter.async.resolve, undefined);
+  // 轮询头是适配器侧的（描述符里不许出现 headers），非凭据头也一样。
+  assert.equal(typeof adapter.taskPollHeaders, 'function');
+  assert.deepEqual(adapter.taskPollHeaders(providerDef), { 'x-key': 'k' });
+});
+
 test('bfl submits, polls polling_url with x-key and downloads result.sample', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
@@ -168,6 +188,32 @@ test('bfl FLUX 3 omits seed and uses aspect_ratio plus resolution', async (t) =>
   assert.equal(submitted.input_image, undefined);
 });
 
+test('fal 的输出描述符钉住 task 字段（pollUrlPath + 二次 GET response_url + error 判失败）', () => {
+  const providerDef = { baseUrl: 'https://queue.fal.run', adapter: 'fal', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'fal-ai/flux-2-pro');
+  assert.equal(adapter.poll, undefined);
+  assert.equal(adapter.output.kind, 'task');
+  assert.deepEqual(Object.keys(adapter.output).sort(), [
+    'emptyMessage', 'errorPath', 'failure', 'intervalMs', 'kind', 'maxBytes',
+    'pollUrlPath', 'resultPath', 'statusPath', 'success', 'timeoutMs', 'via'
+  ]);
+  assert.equal(adapter.output.pollUrlPath, 'status_url');
+  assert.deepEqual(adapter.output.success, ['COMPLETED']);
+  // COMPLETED + error 字段 = 失败（迁移前 resolve 里的那条判断）。
+  assert.equal(adapter.output.errorPath, 'error');
+  assert.deepEqual(adapter.output.failure, [], 'fal 的失败信号在 error 字段里，不在状态词里');
+  assert.equal(adapter.output.resultPath, 'images.0.url');
+  assert.deepEqual(adapter.output.via, {
+    kind: 'json-get',
+    urlPath: ['submission.response_url', 'payload.response_url'],
+    maxBytes: 64 * 1024 * 1024
+  }, '结果不在轮询载荷里：再 GET 一次，体积上限照迁移前的 readJsonResponse(64MB)');
+  assert.equal(adapter.async.pollUrl, undefined);
+  assert.equal(adapter.async.statusOf, undefined);
+  assert.equal(adapter.async.resolve, undefined);
+  assert.deepEqual(adapter.taskPollHeaders(providerDef), { Authorization: 'Key k' });
+});
+
 test('fal polls status_url, checks error on COMPLETED and reads images from response_url', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
@@ -219,6 +265,28 @@ test('fal treats COMPLETED with an error as a failure', async (t) => {
       { model: 'fal-ai/flux-2-pro', prompt: 'x', fitted }, new AbortController().signal),
     /runner crashed/
   );
+});
+
+test('replicate 的输出描述符钉住 task 字段（轮询地址是 urls.get，状态是小写 succeeded）', () => {
+  const providerDef = { baseUrl: 'https://api.replicate.com/v1', adapter: 'replicate', key: 'r8' };
+  const adapter = resolveAdapter(providerDef, 'black-forest-labs/flux-2-pro');
+  assert.equal(adapter.poll, undefined);
+  assert.equal(adapter.output.kind, 'task');
+  assert.deepEqual(Object.keys(adapter.output).sort(), [
+    'emptyMessage', 'failure', 'failureMessagePath', 'intervalMs', 'kind', 'maxBytes',
+    'pollUrlPath', 'resultPath', 'statusPath', 'success', 'timeoutMs'
+  ]);
+  assert.equal(adapter.output.pollUrlPath, 'urls.get');
+  // 状态词按 Replicate 自己的写法（小写）写，读取时统一大写比较。
+  assert.deepEqual(adapter.output.success, ['succeeded']);
+  assert.equal(adapter.output.resultPath, 'output', 'output 可能是字符串也可能是数组');
+  assert.equal(adapter.async.pollUrl, undefined);
+  assert.equal(adapter.async.statusOf, undefined);
+  assert.equal(adapter.async.resolve, undefined);
+  // 轮询头是适配器侧的（Bearer + JSON），描述符里不许出现 headers。
+  assert.deepEqual(adapter.taskPollHeaders(providerDef), {
+    Authorization: 'Bearer r8', 'Content-Type': 'application/json'
+  });
 });
 
 test('replicate polls urls.get and uses the model schema to pick the image field', async (t) => {

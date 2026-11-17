@@ -418,7 +418,7 @@ $DSH_HOME/.credentials.yaml
 | `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
 | `authHeader` | `bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal） |
 | `endpoints` | 可以是字符串，也可以是按模型拼路径的函数（Ideogram、fal、Replicate） |
-| `async` + `poll` | 异步入队型；新描述符自带 `build / submitPath / pollUrl / pollHeaders / statusOf / resolve` |
+| `async` + `output` | 异步入队型：`async` 只剩请求侧（`edit / build / submitPath`）；轮询地址、状态词、结果图读 `output:{kind:'task'}`（`lib/output-profiles.js`），轮询头在适配器侧（`taskPollHeaders`）；老写法的 `poll` 仍兼容 |
 | `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 

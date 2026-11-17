@@ -32,6 +32,28 @@ test('modelscope hosts resolve to the modelscope adapter with or without /v1', (
   }
 });
 
+test('modelscope 的输出描述符钉住 task 字段（轮询路径要自己拼 {root}/v1/tasks/{id}）', () => {
+  const provider = scopeProvider('https://api-inference.modelscope.cn/v1');
+  const adapter = resolveAdapter(provider, 'Qwen/Qwen-Image-2.1');
+  assert.equal(adapter.poll, undefined);
+  assert.equal(adapter.output.kind, 'task');
+  assert.deepEqual(Object.keys(adapter.output).sort(), [
+    'emptyMessage', 'failure', 'failureMessagePath', 'idPath', 'intervalMs', 'kind', 'maxBytes',
+    'path', 'resultPath', 'statusPath', 'success', 'timeoutMs'
+  ]);
+  assert.equal(adapter.output.path, '{root}/v1/tasks/{taskId}', '{root} = 去掉末尾 /v1 的站点根');
+  assert.equal(adapter.output.idPath, 'task_id');
+  // 结果两段：先 output_images（元素是字符串或 {url|image_url}），再退 data.0.url。
+  assert.deepEqual(adapter.output.resultPath, ['output_images', 'data.0.url']);
+  assert.equal(adapter.async.pollUrl, undefined);
+  assert.equal(adapter.async.statusOf, undefined);
+  assert.equal(adapter.async.resolve, undefined);
+  // 非凭据的任务类型头也在适配器侧，不进描述符。
+  assert.deepEqual(adapter.taskPollHeaders(provider), {
+    'X-ModelScope-Task-Type': 'image_generation', Authorization: 'Bearer ms-key'
+  });
+});
+
 test('modelscope submits an async task, polls with the task type header and downloads output_images', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

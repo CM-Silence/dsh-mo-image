@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   preparePhaseAsync, analyzeComfyWorkflow, resetComfyObjectInfoCache, resolveAdapter
 } from '../lib/adapters.js';
+import { callImageApi } from '../lib/index.js';
 import { resetAsyncSchemaCache } from '../lib/adapters/async.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -309,22 +310,51 @@ test('a failed schema read is retried by the next build', async (t) => {
 
 /* --------------------------------------------------- fal 结果地址的凭据范围 */
 
-test('fal never sends the key to a cross-origin response_url', async (t) => {
+/**
+ * fal 的结果不在轮询载荷里：执行器要按 response_url 再 GET 一次 JSON。
+ * 那一跳的请求头按**下载凭据**判定（同源带、跨源不带）——这是 url 泄漏风险最高的一跳。
+ * 迁移前这条断言直接调 adapter.async.resolve()；迁移后走真实执行器，判定入口不变。
+ */
+async function falViaHeaders(responseUrl) {
   const calls = [];
-  stubFetch(t, async (url, init) => {
-    calls.push({ url: String(url), headers: (init && init.headers) || {} });
-    return jsonResponse({ images: [{ url: 'https://cdn.test/out.png' }] });
-  });
-  const provider = { baseUrl: 'https://queue.fal.run', adapter: 'fal', key: 'fal-key' };
-  const adapter = resolveAdapter(provider, 'fal-ai/flux-2-pro');
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const target = String(url);
+      calls.push({ url: target, headers: (init && init.headers) || {} });
+      if (target === 'https://queue.fal.run/fal-ai/flux-2-pro') {
+        return jsonResponse({
+          status_url: 'https://queue.fal.run/fal-ai/flux-2-pro/requests/req-1/status',
+          response_url: responseUrl
+        });
+      }
+      if (target.endsWith('/status')) return jsonResponse({ status: 'COMPLETED' });
+      if (target === responseUrl) return jsonResponse({ images: [{ url: 'https://cdn.test/out.png' }] });
+      if (target === 'https://cdn.test/out.png') {
+        return new Response(Buffer.from(PNG_1PX, 'base64'), {
+          status: 200, headers: { 'content-type': 'image/png' }
+        });
+      }
+      throw new Error('unexpected url ' + target);
+    };
+    const provider = { baseUrl: 'https://queue.fal.run', adapter: 'fal', key: 'fal-key' };
+    await callImageApi('generate', resolveAdapter(provider, 'fal-ai/flux-2-pro'), provider, {
+      model: 'fal-ai/flux-2-pro', prompt: 'x', fitted
+    }, new AbortController().signal);
+  } finally {
+    globalThis.fetch = original;
+  }
+  const via = calls.find((call) => call.url === responseUrl);
+  assert.ok(via, 'response_url 必须真的被 GET 一次');
+  return via.headers;
+}
 
-  await adapter.async.resolve({}, provider, undefined, { response_url: 'https://cdn.example/result.json' });
-  assert.equal(calls[0].headers.Authorization, undefined, 'a third-party CDN must not receive the key');
+test('fal never sends the key to a cross-origin response_url', async () => {
+  const crossOrigin = await falViaHeaders('https://cdn.example/result.json');
+  assert.equal(crossOrigin.Authorization, undefined, 'a third-party CDN must not receive the key');
 
-  await adapter.async.resolve({}, provider, undefined, {
-    response_url: 'https://queue.fal.run/fal-ai/flux-2-pro/requests/req-1'
-  });
-  assert.equal(calls[1].headers.Authorization, 'Key fal-key', 'fal own origin still gets authenticated');
+  const own = await falViaHeaders('https://queue.fal.run/fal-ai/flux-2-pro/requests/req-1');
+  assert.equal(own.Authorization, 'Key fal-key', 'fal own origin still gets authenticated');
 });
 
 /* ------------------------------------------------------- ComfyUI 轮询退避 */

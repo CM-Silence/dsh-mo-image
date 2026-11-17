@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { resolveAdapter } from '../lib/adapters.js';
 import { decodeImagePayload } from '../lib/adapter-kit.js';
 import {
-  readOutput, readTaskImage, taskSpecOf, validateOutputProfile
+  readOutput, readTaskImage, resultNodeOf, taskPollTarget, taskSpecOf, taskStateOf, validateOutputProfile, viaUrlOf
 } from '../lib/output-profiles.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -148,6 +148,97 @@ test('task 结果节点：缺失用描述符文案，存在但读不出图保留
     readTaskImage({ results: [{ url: 'https://cdn.test/out.png' }] }, spec),
     { url: 'https://cdn.test/out.png' }
   );
+});
+
+/* ------------------------------------------------ task 的新字段（四条异步迁移） */
+
+test('task 的轮询地址二选一：pollUrlPath（地址在响应里）或 path（按 id 拼）', () => {
+  const base = {
+    kind: 'task', statusPath: 'status', resultPath: 'out',
+    success: ['OK'], failure: [], intervalMs: 1, maxBytes: 1, emptyMessage: 'x'
+  };
+  assert.throws(() => validateOutputProfile({ ...base }), /path.*pollUrlPath/);
+  // 按 id 拼（模板里出现 {taskId}）时 idPath 必填，否则拼不出来。
+  assert.throws(() => validateOutputProfile({ ...base, path: '/tasks/{taskId}' }), /idPath/);
+  assert.doesNotThrow(() => validateOutputProfile({ ...base, path: '/tasks/{taskId}', idPath: 'id' }));
+  // 地址在响应里：不需要 path / idPath。
+  assert.doesNotThrow(() => validateOutputProfile({ ...base, pollUrlPath: 'polling_url' }));
+});
+
+test('task 的 via 只认 json-get，必须显式写 maxBytes，且不许带 headers', () => {
+  const task = {
+    kind: 'task', pollUrlPath: 'status_url', statusPath: 'status', resultPath: 'out',
+    success: ['OK'], failure: [], intervalMs: 1, maxBytes: 1, emptyMessage: 'x'
+  };
+  assert.throws(() => validateOutputProfile({ ...task, via: { kind: 'poll', urlPath: ['a'], maxBytes: 1 } }), /via\.kind/);
+  assert.throws(() => validateOutputProfile({ ...task, via: { kind: 'json-get', urlPath: [], maxBytes: 1 } }), /urlPath/);
+  // 结果 JSON 的上限与轮询响应不同：漏写会静默落回默认值，所以必填。
+  assert.throws(() => validateOutputProfile({ ...task, via: { kind: 'json-get', urlPath: ['a'] } }), /maxBytes/);
+  assert.throws(
+    () => validateOutputProfile({ ...task, via: { kind: 'json-get', urlPath: ['a'], maxBytes: 1, headers: {} } }),
+    /凭据字段/,
+    'via 也不许开 headers 的口子'
+  );
+  assert.doesNotThrow(
+    () => validateOutputProfile({ ...task, via: { kind: 'json-get', urlPath: ['submission.response_url'], maxBytes: 1 } })
+  );
+});
+
+test('taskPollTarget：{root} 去掉末尾 /v1，pollUrlPath 优先，拼不出来返回空串', () => {
+  const provider = { baseUrl: 'https://api.example.cn/v1' };
+  assert.equal(
+    taskPollTarget({ path: '{root}/v1/tasks/{taskId}', idPath: 'task_id' }, provider, { task_id: 'a b' }),
+    'https://api.example.cn/v1/tasks/a%20b',
+    '{root} 去掉的是末尾 /v1，{taskId} 走 encodeURIComponent'
+  );
+  assert.equal(
+    taskPollTarget({ path: '/tasks/{taskId}' }, provider, {}, 't1'),
+    'https://api.example.cn/v1/tasks/t1',
+    '不带 {root} 的模板按相对 provider 的路径拼'
+  );
+  assert.equal(
+    taskPollTarget({ pollUrlPath: 'polling_url' }, provider, { polling_url: 'https://poll.test/1' }),
+    'https://poll.test/1'
+  );
+  assert.equal(taskPollTarget({ pollUrlPath: 'polling_url' }, provider, {}), '', '提交响应没给就是空串');
+  assert.equal(taskPollTarget({ path: '{root}/v1/tasks/{taskId}', idPath: 'task_id' }, provider, {}), '');
+});
+
+test('viaUrlOf：先看提交响应，再看轮询载荷；只产出 URL 字符串', () => {
+  const via = { kind: 'json-get', urlPath: ['submission.response_url', 'payload.response_url'] };
+  assert.equal(
+    viaUrlOf(via, { response_url: 'https://q/from-submit' }, { response_url: 'https://q/from-poll' }),
+    'https://q/from-submit'
+  );
+  assert.equal(viaUrlOf(via, {}, { response_url: 'https://q/from-poll' }), 'https://q/from-poll');
+  assert.equal(viaUrlOf(via, {}, {}), '');
+});
+
+test('taskStateOf：errorPath 把成功状态翻成失败；状态词比较不区分大小写', () => {
+  const fal = {
+    statusPath: 'status', success: ['COMPLETED'], failure: [], errorPath: 'error', resultPath: 'images.0.url'
+  };
+  assert.deepEqual(taskStateOf(fal, { status: 'COMPLETED' }), { state: 'success', status: 'COMPLETED', node: null });
+  assert.deepEqual(
+    taskStateOf(fal, { status: 'COMPLETED', error: 'runner crashed' }),
+    { state: 'failure', status: 'COMPLETED', message: 'runner crashed' }
+  );
+  // 迁移前的语义：COMPLETED 以外的状态词一律算「还在跑」，失败只看 error 字段。
+  assert.deepEqual(taskStateOf(fal, { status: 'IN_PROGRESS' }), { state: 'pending', status: 'IN_PROGRESS' });
+
+  const replicate = {
+    statusPath: 'status', success: ['succeeded'], failure: ['failed'], failureMessagePath: ['error'], resultPath: 'output'
+  };
+  assert.deepEqual(taskStateOf(replicate, { status: 'Succeeded' }), { state: 'success', status: 'SUCCEEDED', node: null });
+  assert.equal(taskStateOf(replicate, { status: 'FAILED', error: 'boom' }).message, 'boom');
+});
+
+test('resultNodeOf：有序候选，空数组 / 空串按「没有」处理', () => {
+  const spec = { resultPath: ['output_images', 'data.0.url'] };
+  assert.deepEqual(resultNodeOf({ output_images: ['https://cdn.test/a.png'] }, spec), ['https://cdn.test/a.png']);
+  assert.deepEqual(resultNodeOf({ output_images: [], data: [{ url: 'https://cdn.test/b.png' }] }, spec), 'https://cdn.test/b.png');
+  assert.equal(resultNodeOf({ output_images: '' }, spec), null, '空串不是结果');
+  assert.equal(resultNodeOf({}, spec), null);
 });
 
 /* ---------------------------------------------- ideogram 的真实响应路径 */
