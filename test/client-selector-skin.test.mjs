@@ -553,6 +553,8 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   assert.equal(collectClass(tree, 'cmes-sp').length, 44, 'float and run layers each carry 22 sparkles');
   assert.equal(collectClass(tree, 'cmes-sp-float').length, 22);
   assert.equal(collectClass(tree, 'cmes-sp-run').length, 22);
+  assert.equal(collectClass(tree, 'cmes-sp-run')[0].props.style['--delay'], undefined,
+    'run particles spawn together at the knob instead of being pre-distributed');
   assert.match(collectClass(tree, 'cmes-sp-float')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
   assert.equal(collectClass(tree, 'cmes-sp-float')[0].props.style['--x'], collectClass(tree, 'cmes-sp-float')[0].props.style.left,
     'the exit animation starts from the same spread position');
