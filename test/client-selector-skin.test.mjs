@@ -205,6 +205,7 @@ const messages = {
   'seat.auto': '自动',
   'seat.fallback': '生图模型',
   'seat.menuModel': '模型',
+  'seat.chooseModel': '选择模型',
   'seat.menuQuality': '质量',
   'seat.menuSize': '尺寸',
   'seat.sizeAspect': '比例',
@@ -335,7 +336,22 @@ test('the empty provider page reserves the upstream 48px empty row', () => {
     seed({ open: true, pane: 'models', menuPos: { left: 100, bottom: 50 } })
   );
   const popover = collectClass(tree, 'cmes-popover')[0];
-  assert.equal(popover.props.style.height, '98px');
+  assert.equal(popover.props.style['--cmes-height'], '98px');
+});
+
+test('the provider page header says 选择模型', () => {
+  const client = loadClient();
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct,
+      store: storeFixture(),
+      setStore() {},
+      qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', menuPos: { left: 100, bottom: 50 } })
+  );
+  const section = collectClass(tree, 'cmes-sec')[0];
+  assert.equal(section.children[0], '选择模型');
 });
 
 test('skin markers pick codex over official over generic', () => {

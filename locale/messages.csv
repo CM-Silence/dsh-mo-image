@@ -79,6 +79,7 @@ seat.empty,"还没有模型，去“设置 → 生图模型”添加","No models
 seat.auto,"自动","Auto","自動","Automático","Automatique","Automatisch","Авто","Automático"
 seat.fallback,"生图模型","Image model","画像生成モデル","Modelo de imagen","Modèle d'image","Bildmodell","Модель изображений","Modelo de imagem"
 seat.menuModel,"模型","Model","モデル","Modelo","Modèle","Modell","Модель","Modelo"
+seat.chooseModel,"选择模型","Choose model","モデルを選択","Elegir modelo","Choisir un modèle","Modell auswählen","Выбрать модель","Escolher modelo"
 seat.menuQuality,"质量","Quality","画質","Calidad","Qualité","Qualität","Качество","Qualidade"
 seat.menuSize,"尺寸","Size","サイズ","Tamaño","Taille","Größe","Размер","Tamanho"
 seat.menuPromptOptimization,"提示词优化","Prompt optimization","プロンプト最適化","Optimización de prompts","Optimisation du prompt","Prompt-Optimierung","Оптимизация промпта","Otimização de prompt"
