@@ -5,6 +5,10 @@ import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerat
 import { callImageApi } from '../lib/image-execution.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+// thought 用例专用：两张都是合法 PNG，但字节不同（1x1 黑 vs 2x2 红）。
+// 以前这里两张图用同一份 base64，选错 part 也看不出来——「跳过 thought」等于没测。
+const PNG_THOUGHT = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC';
+const PNG_FINAL = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR42mP4z8DwnwGMgRQAH+4D/a+/4gQAAAAASUVORK5CYII=';
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
@@ -43,16 +47,18 @@ test('gemini sizes images per model and skips thought parts', async (t) => {
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), init });
     return jsonResponse({ candidates: [{ content: { parts: [
-      { thought: true, inlineData: { mimeType: 'image/png', data: PNG_1PX } },
-      { inlineData: { mimeType: 'image/png', data: PNG_1PX } }
+      { thought: true, inlineData: { mimeType: 'image/png', data: PNG_THOUGHT } },
+      { inlineData: { mimeType: 'image/png', data: PNG_FINAL } }
     ] } }] });
   };
 
   const provider = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'k' };
 
-  await resolveAdapter(provider, 'gemini-3.1-flash-image').execute('generate', provider, {
+  const result = await resolveAdapter(provider, 'gemini-3.1-flash-image').execute('generate', provider, {
     model: 'gemini-3.1-flash-image', prompt: 'a cat', fitted: { width: 2048, height: 2048, size: '2048x2048', aspect: '1:1', tier: '2K' }
   }, new AbortController().signal);
+  // 逆序是为了「thinking 模型把草图放前面」：part[0] 是 thought，结果必须是 part[1] 的字节。
+  assert.deepEqual(result.bytes, Buffer.from(PNG_FINAL, 'base64'), 'thought 是中间草图，取到 part[0] 就是选错了');
   let body = JSON.parse(calls.at(-1).init.body);
   assert.equal(body.generationConfig.imageConfig.imageSize, '2K');
   assert.equal(body.generationConfig.imageConfig.aspectRatio, '1:1');

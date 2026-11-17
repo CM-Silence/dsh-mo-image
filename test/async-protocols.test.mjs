@@ -478,3 +478,55 @@ test('a sync-only adapter that receives a task envelope points at the async prot
     /异步任务[\s\S]*自动识别/
   );
 });
+
+test('dashscope-wanx 的输出描述符钉住 task 分支的字段名（后面三家异步照着它写）', () => {
+  const providerDef = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-wanx', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'wan2.6-t2i');
+  assert.equal(adapter.poll, undefined, '新写法只留 output，不留 poll');
+  assert.equal(adapter.output.kind, 'task');
+  assert.deepEqual(Object.keys(adapter.output).sort(), [
+    'emptyMessage', 'failure', 'idPath', 'intervalMs', 'kind', 'maxBytes',
+    'path', 'resultPath', 'statusPath', 'success', 'timeoutMs'
+  ]);
+  assert.equal(adapter.output.maxBytes, 32 * 1024 * 1024);
+  assert.equal(adapter.output.emptyMessage, '生图接口没有返回图片');
+});
+
+test('dashscope-wanx submits, polls output.task_status and downloads output.results[].url', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    calls.push({ url: target, init: init });
+    if (target === 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis') {
+      return jsonResponse({ output: { task_id: 'task-1', task_status: 'PENDING' } });
+    }
+    if (target === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1') {
+      const seen = calls.filter((call) => call.url === target).length;
+      if (seen === 1) return jsonResponse({ output: { task_status: 'RUNNING' } });
+      return jsonResponse({ output: { task_status: 'SUCCEEDED', results: [{ url: 'https://cdn.test/wanx.png' }] } });
+    }
+    if (target === 'https://cdn.test/wanx.png') return pngResponse();
+    throw new Error('unexpected url ' + target);
+  };
+
+  const providerDef = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-wanx', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'wan2.6-t2i');
+  assert.equal(adapter.id, 'dashscope-wanx');
+
+  const result = await callImageApi('generate', adapter, providerDef, {
+    model: 'wan2.6-t2i', prompt: 'a cat', fitted
+  }, new AbortController().signal);
+
+  assert.deepEqual(result.bytes, Buffer.from(PNG_1PX, 'base64'));
+  assert.equal(result.contentType, 'image/png');
+  const submit = calls.find((call) => call.url.endsWith('/services/aigc/text2image/image-synthesis'));
+  assert.equal(submit.init.headers['X-DashScope-Async'], 'enable');
+  assert.equal(submit.init.headers.Authorization, 'Bearer k');
+  const poll = calls.find((call) => call.url === 'https://dashscope.aliyuncs.com/api/v1/tasks/task-1');
+  assert.ok(poll, '轮询地址由 output.task_id 拼出：/tasks/{taskId}');
+  assert.equal(poll.init.headers.Authorization, 'Bearer k', '同源轮询带提交用的 Key');
+  const download = calls.find((call) => call.url === 'https://cdn.test/wanx.png');
+  assert.equal(download.init.headers, undefined, '跨源 CDN 下载不带凭据');
+});
