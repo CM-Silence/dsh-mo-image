@@ -339,6 +339,14 @@ test('the empty provider page reserves the upstream 48px empty row', () => {
   assert.equal(popover.props.style['--cmes-height'], '98px');
 });
 
+test('entering a provider page does not steal focus mid-slide', () => {
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /view !== 2 \|\| isSettingsPage/,
+    'no delayed search focus tied to the page transition');
+  assert.doesNotMatch(source, /searchRef\.current\.focus\(\)/,
+    'focus calls opt out of scrolling');
+});
+
 test('the provider page header says 切换模型', () => {
   const client = loadClient();
   const tree = client.render(
