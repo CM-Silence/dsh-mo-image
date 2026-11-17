@@ -550,15 +550,14 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   const popovers = collectClass(tree, 'cmes-popover');
   assert.equal(popovers.length, 1);
   assert.match(popovers[0].props.className, /peak/);
-  assert.equal(collectClass(tree, 'cmes-sp').length, 44, 'float and run layers each carry 22 sparkles');
-  assert.equal(collectClass(tree, 'cmes-sp-float').length, 22);
-  assert.equal(collectClass(tree, 'cmes-sp-run').length, 22);
-  const runDelays = collectClass(tree, 'cmes-sp-run').map((node) => node.props.style['--delay']);
-  assert.match(runDelays[0], /^\d+\.\d+s$/, 'run particles carry a positive stagger delay');
-  assert.notEqual(runDelays[0], runDelays[1], 'run particles are emitted one by one');
-  assert.match(collectClass(tree, 'cmes-sp-float')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
-  assert.equal(collectClass(tree, 'cmes-sp-float')[0].props.style['--x'], collectClass(tree, 'cmes-sp-float')[0].props.style.left,
-    'the exit animation starts from the same spread position');
+  assert.equal(collectClass(tree, 'cmes-sp').length, 22, 'one dust field carries 22 sparkles');
+  assert.equal(collectClass(tree, 'cmes-sp-path').length, 22, 'each sparkle travels on its own path');
+  const phases = collectClass(tree, 'cmes-sp-path').map((node) => Number(node.props.style['--phase']));
+  assert.ok(phases.every((phase) => phase > 0 && phase < 1), 'paths start at deterministic phases');
+  const dust = collectClass(tree, 'cmes-sp')[0];
+  assert.match(dust.props.style['--sp-top'], /%$/, 'the dust carries its rail inset');
+  assert.match(dust.props.style['--dur'], /s$/, 'the dust carries its float duration');
+  assert.equal(dust.props.style.left, undefined, 'horizontal travel comes from the path, not the mote');
 });
 
 test('the highest stop animates even when its id is not a quota peak', () => {
@@ -1013,9 +1012,16 @@ test('the codex rail slides to the released stop instead of teleporting', () => 
   const down = source.match(/const pointerDown = \(event\) => \{([\s\S]*?)\n      \};/);
   assert.ok(down, 'pointerDown found');
   assert.doesNotMatch(down[1], /move\(event\)/, 'pointerdown does not paint the knob immediately');
-  assert.match(source, /animation\.playbackRate = 1;[\s\S]{0,80}animation\.currentTime = 0;/,
-    'the run layer restarts at full speed');
-  assert.doesNotMatch(source, /playbackRate = 0\.15/, 'the run layer does not ramp from a low speed');
+  assert.match(source, /node\.animate\(\[[\s\S]{0,240}translateX\(-108%\)/,
+    'the shared dust engine moves each path across the rail');
+  assert.match(source, /animation\.currentTime = phase \* travel;/,
+    'the path starts at its deterministic phase');
+  assert.match(source, /animation\.updatePlaybackRate\(speed\)/,
+    'the speed is driven by playback rate');
+  assert.match(source, /data-fast-ticks-hidden/,
+    'Fast started from Ultra keeps the ticks hidden for the whole activation');
+  assert.match(source, /present \? ' present'/, 'the popover keeps its presented state during close');
+  assert.doesNotMatch(source, /playbackRate = 0\.15/, 'the dust does not ramp from a low rate');
   assert.match(source, /document\.querySelectorAll\('\.cmes-popover'\)/, 'the probe follows the portaled codex popover');
   assert.doesNotMatch(source, /root\.querySelector\('\.cmes-popover'\)/, 'it does not look only inside .cmes-root');
 });

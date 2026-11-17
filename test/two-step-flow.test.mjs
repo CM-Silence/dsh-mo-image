@@ -159,6 +159,31 @@ test('generating after reading the settings uses the picked model', async (t) =>
   assert.equal(JSON.parse(calls[0].init.body).model, 'flux-2-klein-4b.safetensors');
 });
 
+test('an exposed parameter row is sent and never reported as "unsupported workflow parameters"', async (t) => {
+  const cfg = config();
+  cfg.providers[0].modelOptions = {
+    'flux-2-klein-4b.safetensors': {
+      params: [
+        { name: 'steps', type: 'number', default: '20', expose: true },
+        { name: 'cfg_scale', type: 'number', default: '7' }
+      ]
+    }
+  };
+  const { settings, generate, calls, exec } = await harness(t, cfg);
+  await settings.execute({}, exec);
+
+  const first = await generate.execute({ prompt: 'a city at dusk', params: { steps: 30 } }, exec);
+  const body = JSON.parse(calls[calls.length - 1].init.body);
+  assert.equal(body.steps, 30, 'an exposed row takes the model value');
+  assert.equal(body.cfg_scale, 7, 'an unexposed row still sends its default');
+  assert.equal(first.note, undefined, 'nothing to report when the parameter really landed');
+
+  // 认不出的键才提，而且不再说「不支持工作流参数」（A1111 / 通用路径都认这张表）。
+  const second = await generate.execute({ prompt: 'a city at dusk', params: { steps: 30, mystery: 1 } }, exec);
+  assert.match(String(second.note), /mystery/);
+  assert.doesNotMatch(String(second.note), /不支持工作流参数/);
+});
+
 test('editing hands the config over the same way as generating', async (t) => {
   const { edit, calls, exec, home } = await harness(t);
   const reference = path.join(home, 'reference.png');

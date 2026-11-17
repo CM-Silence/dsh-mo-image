@@ -5,6 +5,12 @@ import vm from 'node:vm';
 
 import { normalizeConfig } from '../lib/config-store.js';
 import { applyFields, multipartFields, promptParts, resolveFields } from '../lib/field-templates.js';
+import { A1111_PARAMS } from '../lib/adapters.js';
+
+/** 宿主下发的「零配置参数行」：A1111 第一次展开模型时按它把行摆出来。 */
+const PARAM_DEFAULTS = {
+  a1111: A1111_PARAMS.map((param) => ({ name: param.name, type: param.type, default: param.default }))
+};
 
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
@@ -21,7 +27,7 @@ function defaultCapabilities(config) {
 }
 
 /** Stateful React stand-in, so clicking the chevron re-renders the settings section. */
-function createHarness({ config, primitives = null, analyze = null, detect = null, models = null, capabilities = null } = {}) {
+function createHarness({ config, primitives = null, analyze = null, params = null, detect = null, models = null, capabilities = null } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -71,6 +77,9 @@ function createHarness({ config, primitives = null, analyze = null, detect = nul
       if (analyze && String(url).includes('/comfy/analyze')) {
         return new Response(JSON.stringify(analyze), { status: 200, headers: { 'content-type': 'application/json' } });
       }
+      if (params && String(url).includes('/comfy/params')) {
+        return new Response(JSON.stringify(params), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       if (detect && String(url).includes('/detect-model-rule')) {
         const answer = typeof detect === 'function' ? detect(JSON.parse((init && init.body) || '{}')) : detect;
         return new Response(JSON.stringify(answer), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -82,6 +91,7 @@ function createHarness({ config, primitives = null, analyze = null, detect = nul
         ok: true, config, adapters: [],
         providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
         localPresets: [],
+        paramDefaults: PARAM_DEFAULTS,
         capabilities: capabilities === null ? defaultCapabilities(config) : capabilities
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -409,6 +419,92 @@ test('the workflow panel can send the pasted graph to the analyze route', async 
   assert.equal(body.workflow, '{"1":{"class_type":"KSampler"}}');
 });
 
+/* ───────────── 解析参数：原始值输入 → 离散参数表的行 ───────────── */
+
+const PARAMS_RESPONSE = {
+  ok: true,
+  format: 'api',
+  count: 2,
+  params: [
+    { node: '18:7', input: 'steps', name: 'steps', classType: 'KSampler', type: 'number', value: 25, display: '25' },
+    { node: '18:5', input: 'text', name: 'text', classType: 'CLIPTextEncode', type: 'text', value: 'a cat', display: 'a cat' }
+  ]
+};
+
+/** 打开 ComfyUI 折叠区，填一段工作流，点「解析参数」，返回（重渲染后的）harness。 */
+async function openParsedParams(response = PARAMS_RESPONSE) {
+  const built = await openEditor(CONFIG, { params: response });
+  optionsToggle(built.tree).props.onClick(fakeEvent());
+  let opened = built.harness.renderRoot();
+  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  findAll(panel, (node) => node.type === 'textarea')[0]
+    .props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = built.harness.renderRoot();
+  const parse = findButton(opened, (node) => /Parse parameters/i.test(textOf(node).join('')));
+  assert.ok(parse, 'expected a parse-parameters button');
+  await parse.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  return built.harness;
+}
+
+test('解析参数 posts the workflow and lists the literal inputs', async () => {
+  const harness = await openParsedParams();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/comfy/params'));
+  assert.equal(posted.length, 1, 'expected one params POST');
+  assert.equal(JSON.parse(posted[0].body).workflow, '{"1":{"class_type":"KSampler"}}');
+  const opened = harness.renderRoot();
+  const boxes = findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate']);
+  assert.deepEqual(boxes.map((box) => box.props['data-param-candidate']), ['18:7.steps', '18:5.text']);
+  assert.ok(boxes.every((box) => box.props.checked === false), 'nothing is picked before the user picks');
+  assert.equal(findAll(opened, (node) => node.props['data-param-key'] === 'params:add').length, 0,
+    'ComfyUI rows come from parsing, not from a blank row');
+});
+
+test('checking a candidate turns it into a table row with node/input, default and type', async () => {
+  const harness = await openParsedParams();
+  let opened = harness.renderRoot();
+  const box = findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0];
+  assert.ok(box, 'expected the steps candidate');
+  box.props.onChange();
+  opened = harness.renderRoot();
+  const bind = findAll(opened, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps');
+  assert.equal(bind.length, 1, 'the row shows where it lands in the workflow');
+  assert.equal(findAll(opened, (node) => node.type === 'input'
+    && node.props['data-param-candidate'] === '18:7.steps')[0].props.checked, true,
+  'the candidate stays checked while its row exists');
+
+  // 取消勾选 = 从表里移除那一行；再勾上又回来。
+  findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
+    .props.onChange();
+  let cleared = harness.renderRoot();
+  assert.equal(findAll(cleared, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps').length, 0,
+    'unchecking removes the row');
+  findAll(cleared, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
+    .props.onChange();
+  opened = harness.renderRoot();
+
+  const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
+  await save.props.onClick();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
+  const body = JSON.parse(posted[posted.length - 1].body);
+  const entry = body.config.providers.find((item) => item.id === 'p1').modelOptions['flux.safetensors'];
+  assert.ok(Array.isArray(entry.params) && entry.params.length === 1, 'the picked candidate must be saved as a row');
+  const row = entry.params[0];
+  assert.equal(row.node, '18:7');
+  assert.equal(row.input, 'steps');
+  assert.equal(row.name, 'steps');
+  assert.equal(row.type, 'number', 'INT folds into the table vocabulary');
+  assert.equal(row.default, '25', 'the default is the value the workflow carries');
+  assert.equal(row.expose, false, 'picking a row is not the same as exposing it');
+});
+
+test('a parse failure shows the host error instead of failing silently', async () => {
+  const harness = await openParsedParams({ ok: false, error: '工作流不是合法 JSON：Unexpected token n' });
+  const text = textOf(harness.renderRoot()).join(' ');
+  assert.match(text, /Parameter parsing failed/, 'the panel says what failed');
+  assert.match(text, /Unexpected token n/, 'and repeats the readable reason');
+});
+
 test('parsing keeps the mapping when the same analyze response also carries params', async () => {
   const analysis = {
     ok: true,
@@ -440,7 +536,12 @@ test('parsing keeps the mapping when the same analyze response also carries para
   const entry = provider.modelOptions['flux.safetensors'];
   assert.deepEqual(entry.mapping.prompt, { node: '18:17', input: 'value' },
     'the mapping must survive the params write');
-  assert.ok(Array.isArray(entry.params) && entry.params.length === 2, 'params must be stored too');
+  // 提示词行被挡在外面（它走工具参数），剩下的才是可调参数行；类型也折成表里的词表。
+  assert.ok(Array.isArray(entry.params) && entry.params.length === 1, 'params must be stored too');
+  assert.equal(entry.params[0].name, 'steps');
+  assert.equal(entry.params[0].node, '18:7');
+  assert.equal(entry.params[0].input, 'steps');
+  assert.equal(entry.params[0].type, 'number');
 });
 
 const A1111_SAMPLING_CONFIG = {
@@ -466,21 +567,27 @@ test('the A1111 panel lists sampling parameters unchecked by default', async () 
   const opened = harness.renderRoot();
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
   assert.ok(panel, 'expected the expanded panel');
-  const text = textOf(panel).join(' ');
-  assert.match(text, /Steps/i);
-  assert.match(text, /CFG scale/i);
   assert.ok(!findAll(panel, (node) => node.type === 'textarea').length, 'A1111 has no workflow box');
-  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  // 参数表现在是唯一一张表：六行 sdapi 字段，每行一个「暴露」开关。
+  const names = findAll(panel, (node) => node.props['data-param-field'] === 'name').map((node) => String(node.props.value));
+  assert.deepEqual(names, ['steps', 'cfg_scale', 'sampler_name', 'scheduler', 'seed', 'denoising_strength']);
+  const descriptions = findAll(panel, (node) => node.props['data-param-field'] === 'description')
+    .map((node) => String(node.props.value)).join(' ');
+  assert.match(descriptions, /Sampling steps/i, '每一行都带着给对话模型看的说明');
+  assert.match(descriptions, /prompt constrains the image/i);
+  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox'
+    && node.props['data-param-field'] === 'expose');
   assert.equal(boxes.length, 6);
   assert.ok(boxes.every((box) => box.props.checked === false), 'everything starts unchecked');
 });
 
-test('switching an A1111 parameter on persists it in the expose map', async () => {
+test('switching an A1111 parameter on persists it on the row, not in the old expose map', async () => {
   const { harness, tree } = await openEditor(A1111_SAMPLING_CONFIG);
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox');
+  const boxes = findAll(panel, (node) => node.type === 'input' && node.props.type === 'checkbox'
+    && node.props['data-param-field'] === 'expose');
   boxes[0].props.onChange({ target: { checked: true } });
   opened = harness.renderRoot();
   const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
@@ -488,7 +595,12 @@ test('switching an A1111 parameter on persists it in the expose map', async () =
   const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
   const body = JSON.parse(posted[posted.length - 1].body);
   const provider = body.config.providers.find((item) => item.id === 'p4');
-  assert.equal(provider.modelOptions['sd15.safetensors'].expose.steps, true);
+  const entry = provider.modelOptions['sd15.safetensors'];
+  assert.equal(entry.expose, undefined, 'the old per-name switch map is gone');
+  assert.equal(entry.params[0].name, 'steps');
+  assert.equal(entry.params[0].expose, true);
+  assert.equal(entry.params[1].expose, false, 'the rest stay off');
+  assert.equal(entry.params[0].default, '20', 'the seeded default travels with the row');
 });
 
 /* 尺寸：值由选择器经 mapping 注入，列表里不再占一行；认不出来时才留手选。 */
