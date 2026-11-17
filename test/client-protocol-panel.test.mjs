@@ -15,7 +15,7 @@ const T = {
   'protocol.comfyui': 'ComfyUI',
   'protocol.openai-images': 'OpenAI Images',
   'form.customProtocol': '自定义（自己填地址）',
-  'form.protocolOption.edit': '编辑端点',
+  'form.protocolOption.edit': '图生图端点',
   'form.protocolOption.edit.edits': '单独的 /images/edits',
   'form.protocolOption.edit.same': '同一个 /images/generations',
   'form.protocolOption.edit.none': '不支持图生图',
@@ -163,6 +163,25 @@ function text(node, out = []) {
   return out;
 }
 
+/** 目标节点在渲染树里的父节点（用来验证两个控件是否同处一行 / 同一个 hover 容器）。 */
+function parentOf(root, target, parent = null) {
+  if (root === null || root === undefined) return null;
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      const hit = parentOf(item, target, parent);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (typeof root !== 'object') return null;
+  if (root === target) return parent;
+  for (const child of root.children || []) {
+    const hit = parentOf(child, target, root);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function renderForm(client, provider, isNew = false) {
   const Form = client.form();
   assert.ok(Form, 'client.__test.ImageProviderForm 没暴露');
@@ -240,7 +259,7 @@ test('协议有选项时，协议下拉下面给出选择项（取值与默认�
   assert.equal(edit.props.value, 'edits', '没选过就显示默认值');
   const editOptions = collect(edit, (item) => item.type === 'option');
   assert.deepEqual(editOptions.map((option) => option.props.value), ['edits', 'same', 'none']);
-  assert.deepEqual(editOptions.map((option) => text(option).join('')), ['单独的 /images/edits', '同一个 /images/generations', '不支持图生图']);
+  assert.deepEqual(editOptions.map((option) => text(option).join('')), ['/images/edits', '/images/generations', '不支持']);
   assert.equal(selects[1].props.value, 'bearer');
 
   // 选过的值要回显。
@@ -250,6 +269,80 @@ test('协议有选项时，协议下拉下面给出选择项（取值与默认�
   }, false);
   const pickedSelects = collect(picked, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
   assert.deepEqual(pickedSelects.map((item) => item.props.value), ['same', 'api-key']);
+});
+
+test('「图生图端点」只显示路径：edits / same / none 对应三条路径或「不支持」', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  const labelRow = collect(node, (item) => item.props && item.props['data-protocol-option-label'] === 'edit')[0];
+  assert.ok(labelRow, '图生图端点 label 行在');
+  assert.match(text(labelRow).join(''), /图生图端点/, '不再叫「编辑端点」');
+  assert.doesNotMatch(text(labelRow).join(''), /编辑端点/);
+  const edit = collect(node, (item) => item.type === 'select'
+    && item.props['data-mo-image-protocol-option'] === 'edit')[0];
+  assert.deepEqual(collect(edit, (item) => item.type === 'option').map((option) => text(option).join('')),
+    ['/images/edits', '/images/generations', '不支持'], '下拉只显示值本身');
+  // 原来那行「编辑请求发到哪个地址…」不再渲染。
+  assert.doesNotMatch(text(node).join(' '), /编辑请求发到哪个地址/);
+});
+
+test('「鉴权方式」label 右侧的问号收着原来的说明，下面那行提示不再渲染', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  const labelRow = collect(node, (item) => item.props && item.props['data-protocol-option-label'] === 'auth')[0];
+  assert.ok(labelRow, '鉴权方式 label 行在');
+  const help = collect(labelRow, (item) => item.props && item.props['data-protocol-option-help'] === 'auth')[0];
+  assert.ok(help, '问号在 label 右侧');
+  assert.equal(help.props.className?.includes('helpButton') || help.props.className === 'helpButton', true,
+    '与协议问号同一套样式');
+  assert.equal(help.props['aria-description'], '鉴权头形态');
+  assert.equal(help.props.title, undefined, '不用有延迟的原生 title');
+  assert.equal(typeof help.props.onPointerEnter, 'function', '悬停立刻展开');
+  assert.doesNotMatch(text(node).join(' '), /鉴权头形态/, '说明只进气泡，不再占一行');
+  assert.equal(text(help).join(''), '?');
+});
+
+test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  const select = collect(node, (item) => item.type === 'select'
+    && item.props['data-mo-image-protocol'] !== undefined)[0];
+  const detect = collect(node, (item) => item.props
+    && item.props['data-mo-image-detect-protocol'] !== undefined)[0];
+  assert.ok(select && detect);
+  const row = parentOf(node, detect);
+  assert.ok(row, '识别按钮有父容器');
+  assert.equal(row.props['data-mo-image-protocol-row'], '', '与下拉同一行');
+  assert.equal(parentOf(node, select), row, '识别按钮紧贴协议下拉右侧');
+  assert.equal(collect(row, (item) => item.type === 'select'
+    && item.props['data-mo-image-protocol'] !== undefined).length, 1);
+
+  // 问号在 label 行，识别按钮在下拉行：hover 只作用在各自按钮上。
+  const help = routeHelpOf(node);
+  const labelRow = parentOf(node, help);
+  assert.ok(labelRow, '问号有 label 行容器');
+  assert.equal(labelRow.props['data-mo-image-protocol-label-row'], '');
+  assert.notEqual(labelRow, row, '问号与识别按钮不共用一个容器');
+  assert.equal(collect(labelRow, (item) => item.props
+    && item.props['data-mo-image-detect-protocol'] !== undefined).length, 0,
+  '识别按钮不在问号所在的 label 行');
+  assert.equal(collect(row, (item) => item.props && item.props['data-route-help'] !== undefined).length, 0,
+    '问号不在下拉行');
+  // 悬停识别协议不会触发问号的即时气泡。
+  if (typeof detect.props.onPointerEnter === 'function') detect.props.onPointerEnter();
+  assert.equal(collect(renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  }), (item) => item.props && item.props.role === 'tooltip').length, 0,
+  'hover 识别协议时问号不进入 hover 态');
 });
 
 test('没有声明选项的协议不渲染选项下拉', () => {

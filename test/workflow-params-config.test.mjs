@@ -143,6 +143,50 @@ test('a size parameter can still be switched on by hand when a workflow needs it
   assert.deepEqual(workflowParamsOf(provider, 'm1', { id: 'comfyui' }).map((param) => param.name), ['width']);
 });
 
+/* ───── 模型行（role:'model'）：暴露只由「选择器是不是自动」推导 ───── */
+
+/**
+ * 一个云端模型条目：模型行 + 一行真的暴露的普通参数。
+ *
+ * 模型行的 expose 故意写 false：推导规则不看这个值（老配置里写着什么都与它无关）。
+ */
+const MODEL_ROW_PROVIDER = {
+  modelOptions: {
+    'gpt-image-2.5-flare': {
+      params: [
+        { role: 'model', name: 'model', type: 'text', expose: false },
+        { name: 'seed', type: 'number', default: '42', expose: true }
+      ]
+    }
+  }
+};
+const CLOUD_ADAPTER = { id: 'openai-images' };
+
+test('选择器停在「自动」时，模型行出现在暴露清单里', () => {
+  const out = workflowParamsOf(MODEL_ROW_PROVIDER, 'auto', CLOUD_ADAPTER) || [];
+  assert.deepEqual(out.map((param) => param.name), ['model'],
+    '行上写着 expose:false 也不影响：自动模式就是暴露');
+  assert.equal(out[0].expose, true, '输出里带着推导结果，下游按 expose 过滤时不会把它滤掉');
+});
+
+test('选了具体模型时，模型行不出现在暴露清单里', () => {
+  const provider = {
+    modelOptions: {
+      'gpt-image-2.5-flare': { params: [{ role: 'model', name: 'model', type: 'text', expose: true }] }
+    }
+  };
+  assert.equal(workflowParamsOf(provider, 'gpt-image-2.5-flare', CLOUD_ADAPTER), undefined,
+    '行上写着 expose:true 也不认：固定模型时模型这一行不暴露');
+});
+
+test('模型行的推导不牵连其它参数行', () => {
+  const fixed = workflowParamsOf(MODEL_ROW_PROVIDER, 'gpt-image-2.5-flare', CLOUD_ADAPTER) || [];
+  assert.deepEqual(fixed.map((param) => param.name), ['seed'], '固定模型：普通参数行照旧按自己的 expose 出现');
+  const auto = workflowParamsOf(MODEL_ROW_PROVIDER, 'auto', CLOUD_ADAPTER) || [];
+  assert.deepEqual(auto.map((param) => param.name), ['model'],
+    '自动模式：没有固定条目，只补上模型行，别的条目里的普通行不跟过来');
+});
+
 test('role params take their type from object_info and never report a link as a string', () => {
   const objectInfo = JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
   const graph = {

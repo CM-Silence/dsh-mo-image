@@ -27,7 +27,7 @@ function defaultCapabilities(config) {
 }
 
 /** Stateful React stand-in, so clicking the chevron re-renders the settings section. */
-function createHarness({ config, primitives = null, analyze = null, params = null, detect = null, models = null, capabilities = null } = {}) {
+function createHarness({ config, primitives = null, analyze = null, params = null, detect = null, models = null, capabilities = null, paramDefaults = null } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -91,7 +91,7 @@ function createHarness({ config, primitives = null, analyze = null, params = nul
         ok: true, config, adapters: [],
         providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
         localPresets: [],
-        paramDefaults: PARAM_DEFAULTS,
+        paramDefaults: paramDefaults === null ? PARAM_DEFAULTS : paramDefaults,
         capabilities: capabilities === null ? defaultCapabilities(config) : capabilities
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -342,14 +342,111 @@ test('the model options toggle opens the size panel for a cloud provider', async
   assert.ok(input, 'the parameter name is editable');
 });
 
-test('the workflow textarea is compact but still usable', async () => {
+test('the workflow textarea is about half the old height', async () => {
   const { harness, tree } = await openEditor();
   optionsToggle(tree).props.onClick(fakeEvent());
   const opened = harness.renderRoot();
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
-  assert.ok(Number(textarea.props.rows) >= 8, 'textarea should default to at least 8 rows');
-  assert.ok(Number(textarea.props.style.minHeight) >= 160, 'textarea should keep a usable minimum height');
+  assert.equal(Number(textarea.props.rows), 4, '8 行 → 4 行');
+  assert.equal(Number(textarea.props.style.minHeight), 80, '160px → 80px');
+});
+
+/** 「常规」方框里工作流那一行（label + 示例按钮）。 */
+const workflowLabelRow = (tree) => findAll(commonBox(tree), (node) => node.props
+  && node.props['data-param-workflow'] === 'label')[0] || null;
+/** 「常规」方框里工作流的 textarea。 */
+const workflowTextarea = (tree) => findAll(commonBox(tree), (node) => node.props
+  && node.props['data-param-workflow'] === 'input')[0] || null;
+
+test('自定义工作流搬进「常规」方框，且排在参数表前面', async () => {
+  const { harness, tree } = await openEditor();
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const box = commonBox(opened);
+  assert.ok(box, 'ComfyUI 的「常规」方框在');
+  const labelRow = workflowLabelRow(opened);
+  const textarea = workflowTextarea(opened);
+  assert.ok(labelRow, '工作流 label 行在「常规」方框里');
+  assert.ok(textarea, '工作流 textarea 在「常规」方框里');
+  // 方框第一个孩子是标题行；工作流 label 紧跟标题，是参数表前的第一行。
+  assert.equal(box.children[1], labelRow, '工作流 label 是标题后的第一行');
+  assert.equal(box.children[2], textarea, 'textarea 紧跟 label 行');
+  const table = findAll(box, (node) => node.props && node.props['data-param-table'] === 'common')[0];
+  assert.ok(table, '参数表还在');
+  assert.ok(box.children.indexOf(table) > box.children.indexOf(textarea), '参数表排在工作流后面');
+});
+
+test('「插入示例模板」在 label 行右侧，靠右对齐', async () => {
+  const { harness, tree } = await openEditor();
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const labelRow = workflowLabelRow(opened);
+  assert.ok(labelRow, '工作流 label 行在');
+  assert.equal(labelRow.props.style.display, 'flex', 'label 与按钮同一行');
+  const sample = findAll(labelRow, (node) => node.type === 'button'
+    && node.props['data-param-workflow-action'] === 'sample')[0];
+  assert.ok(sample, '示例模板按钮在 label 行');
+  assert.equal(textOf(sample).join(''), 'Insert sample template');
+  assert.equal(sample.props.style.marginLeft, 'auto', '靠右对齐');
+  const labelText = findAll(labelRow, (node) => node.type === 'span'
+    && hasClass(node, 'modelFieldLabel'))[0];
+  assert.ok(labelText, 'label 文本在');
+  assert.equal(textOf(labelText).join(''), 'Custom workflow (ComfyUI API format)');
+});
+
+test('两段旧提示（整行说明 / 占位符清单）不再渲染', async () => {
+  const { harness, tree } = await openEditor();
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const body = textOf(opened).join(' ');
+  assert.doesNotMatch(body, /Override the ComfyUI workflow for this model/, '整行说明已删');
+  assert.doesNotMatch(body, /Placeholders:/, '占位符清单已删');
+  assert.doesNotMatch(body, /\{\{prompt\}\}/, '占位符本身也不再出现');
+  // 自动选择那句并进了 placeholder，不再单独占一行。
+  assert.match(workflowTextarea(opened).props.placeholder, /Leave blank to use the builtin workflow/);
+});
+
+test('参数表为空时给一行空状态提示，有行就消失（不占表格行）', async () => {
+  const { harness, tree } = await openEditor(CONFIG, { params: PARAMS_RESPONSE });
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  let box = commonBox(opened);
+  const empty = findAll(box, (node) => node.props && node.props['data-param-empty'])[0];
+  assert.ok(empty, '空表的提示在');
+  assert.equal(empty.props['data-param-empty'], 'workflow', 'ComfyUI 用解析相关的文案');
+  assert.equal(empty.props['data-param-grid'], undefined, '不是表格行');
+  assert.equal(empty.props['data-param-table'], undefined, '也不另起一张表');
+  assert.match(textOf(empty).join(''), /No parameters parsed yet/);
+  assert.equal(commonRows(opened).length, 0, '确实还没有参数行');
+
+  // 解析参数并勾中一行后，空状态消失。
+  workflowTextarea(opened).props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  await findButton(opened, (node) => /Parse parameters/i.test(textOf(node).join(''))).props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  const candidate = findAll(harness.renderRoot(), (node) => node.type === 'input'
+    && node.props['data-param-candidate'] === '18:7.steps')[0];
+  assert.ok(candidate, '候选行在');
+  candidate.props.onChange();
+  opened = harness.renderRoot();
+  box = commonBox(opened);
+  assert.equal(findAll(box, (node) => node.props && node.props['data-param-empty']).length, 0,
+    '有参数行就不再显示空状态');
+  assert.equal(commonRows(opened).length, 1);
+});
+
+test('不靠解析的协议空表用通用文案（点「添加参数」自己加）', async () => {
+  const { harness, tree } = await openEditor(A1111_CONFIG, { paramDefaults: { a1111: [] } });
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
+  const empty = findAll(commonBox(opened), (node) => node.props && node.props['data-param-empty'])[0];
+  assert.ok(empty, 'A1111 空表也有提示');
+  assert.equal(empty.props['data-param-empty'], 'generic');
+  assert.match(textOf(empty).join(''), /Add parameter/);
+  assert.equal(findAll(empty, (node) => node.props['data-param-grid']).length, 0);
+  assert.ok(findAll(commonBox(opened), (node) => node.props['data-param-key'] === 'params:add').length,
+    '「添加参数」还在');
 });
 
 test('a local provider without a parameter table still opens the size panel', async () => {
@@ -1301,12 +1398,10 @@ const enumCell = (box, field, index) => {
 
 /* ─────────────── 模型：独立成框（不再是「常规」表里的一行） ─────────────── */
 
-/** 模型方框：`data-param-box="model"`，框里是参数名 + 暴露 + 行级锁，不可删。 */
+/** 模型方框：`data-param-box="model"`，框里是参数名 + 行级锁（暴露是推导的，没有控件），不可删。 */
 const modelBox = (tree) => paramBox(tree, 'model');
 const modelNameInput = (tree) => findAll(modelBox(tree), (node) => node.type === 'input'
   && node.props['data-param-field'] === 'name')[0] || null;
-const modelEye = (tree) => findAll(modelBox(tree), (node) => node.type === 'button'
-  && node.props['data-param-field'] === 'expose')[0] || null;
 const modelRowLock = (tree) => findAll(modelBox(tree), (node) => node.type === 'button'
   && node.props['data-lock-key'] === 'model')[0] || null;
 /** 选择器切到「自动」：不固定模型，模型名交给对话模型挑。 */
@@ -1644,9 +1739,9 @@ test('方框顺序：常规 → 模型 → 各 enum 方框（按表里的顺序�
   '常规表 → 模型框 → enum 各自成框（按表里顺序）→ 尺寸 / 质量 / 参考图照旧在最后');
 });
 
-/* ─────────────── 模型框：独立方框 + 暴露默认值 + 参数名提示 ─────────────── */
+/* ─────────────── 模型框：独立方框 + 参数名提示（暴露是推导的，没有控件） ─────────────── */
 
-test('模型独立成框：常规表里没有 model 行，框里是参数名 / 暴露 / 行级锁，且不可删', async () => {
+test('模型独立成框：常规表里没有 model 行，框里只有参数名与行级锁，且不可删', async () => {
   const { harness } = await openEditor(PARAM_TABLE_CONFIG);
   let opened = openModelPanel(harness);
   assert.ok(modelBox(opened), '模型方框存在');
@@ -1656,8 +1751,10 @@ test('模型独立成框：常规表里没有 model 行，框里是参数名 / �
     ['prompt', 'negative', 'n'], '「常规」只留还能增删的普通行');
   assert.equal(textOf(modelNameInput(opened).props.value).join(''), 'model', '参数名默认 model');
   assert.equal(modelNameInput(opened).props['data-param-key'], 'model', '沿用的还是 model 这个键');
-  assert.equal(modelEye(opened).props['aria-pressed'], 'false', '具体模型：默认不暴露');
-  assert.match(String(modelEye(opened).props['aria-label']), /Expose/, '暴露开关带可读的名称');
+  // 模型是特殊值：暴露只由「选择器是不是自动」推导，框里不给手动开关。
+  assert.equal(findAll(modelBox(opened), (node) => node.props && node.props['data-param-field'] === 'expose').length, 0,
+    '模型框里没有暴露控件');
+  assert.equal(findAll(modelBox(opened), (node) => node.props && node.props['data-param-key'] === 'model.expose').length, 0);
   const lock = modelRowLock(opened);
   assert.ok(lock, '行级锁在标题行');
   assert.equal(lock.props['aria-pressed'], 'false', '默认不锁');
@@ -1665,48 +1762,65 @@ test('模型独立成框：常规表里没有 model 行，框里是参数名 / �
     '模型行不可删：行尾没有删除按钮');
   assert.equal(findAll(modelBox(opened), (node) => node.props && node.props['data-param-key'] === 'model.remove').length, 0);
 
-  // 暴露 / 行级锁都写回 params 里同一行。
-  modelEye(opened).props.onClick();
-  opened = harness.renderRoot();
-  assert.equal(modelEye(opened).props['aria-pressed'], 'true', '点一下眼睛就开');
+  // 行级锁仍写回 params 里同一行；模型行不写 expose（那是推导值，写了也没人读）。
   modelRowLock(opened).props.onClick(fakeEvent());
   opened = harness.renderRoot();
-  assert.equal(modelRowLock(opened).props['aria-pressed'], 'true', '行级锁也写回同一行');
+  assert.equal(modelRowLock(opened).props['aria-pressed'], 'true', '行级锁写回同一行');
   const entry = await savedTableEntry(harness);
   const modelRow = entry.params.find((row) => row.role === 'model');
-  assert.equal(modelRow.expose, true, '暴露落在 role:model 那一行');
   assert.equal(modelRow.locked, true, '行级锁落在同一行');
+  assert.equal('expose' in modelRow, false, '模型行没有 expose：暴露是按选择器推导的');
 });
 
-test('模型暴露默认值：选择器在「自动」时默认暴露，选了具体模型后默认不暴露', async () => {
-  const auto = await openEditor(autoConfig(PARAM_TABLE_CONFIG));
-  const autoPanel = openModelPanel(auto.harness);
-  assert.equal(modelEye(autoPanel).props['aria-pressed'], 'true',
-    '「自动」= 不固定模型，由对话模型挑：默认暴露');
-  assert.equal(modelNameInput(autoPanel).props['data-param-key'], 'model');
-
-  const specific = await openEditor(PARAM_TABLE_CONFIG);
-  const specificPanel = openModelPanel(specific.harness);
-  assert.equal(modelEye(specificPanel).props['aria-pressed'], 'false',
-    '选了具体模型：这一行默认不暴露');
-});
-
-test('用户改过暴露后以用户设置为准：默认值不再覆盖，保存后回读仍是用户的值', async () => {
+test('选择器在「自动」时模型框也没有暴露控件，落盘的模型行同样不写 expose', async () => {
   const auto = await openEditor(autoConfig(PARAM_TABLE_CONFIG));
   let panel = openModelPanel(auto.harness);
-  assert.equal(modelEye(panel).props['aria-pressed'], 'true', '先按「自动」的默认打开');
-  modelEye(panel).props.onClick();
+  assert.equal(findAll(modelBox(panel), (node) => node.props && node.props['data-param-field'] === 'expose').length, 0,
+    '自动模式下框里也没有暴露控件');
+  assert.equal(modelNameInput(panel).props['data-param-key'], 'model');
+
+  // 任何一次编辑都会把整张表写回 draft：这时模型行照样不带 expose。
+  modelRowLock(panel).props.onClick(fakeEvent());
   panel = auto.harness.renderRoot();
-  assert.equal(modelEye(panel).props['aria-pressed'], 'false', '点一下就关，渲染不会又按默认打开');
+  assert.equal(modelRowLock(panel).props['aria-pressed'], 'true', '行级锁照常写回');
+  const entry = await savedTableEntry(auto.harness);
+  const modelRow = entry.params.find((row) => row.role === 'model');
+  assert.ok(modelRow, '模型行照常在表里');
+  assert.equal(modelRow.locked, true, '行级锁落在同一行');
+  assert.equal('expose' in modelRow, false, '自动模式也不给模型行写 expose');
+});
 
-  const saved = await saveAndPosted(auto.harness);
-  const entry = saved.providers.find((item) => item.id === 'p2').modelOptions['gpt-image-2.5-flare'];
-  assert.equal(entry.params.find((row) => row.role === 'model').expose, false, '用户的选择落盘');
+test('老配置里模型行带着 expose：读进来照常可用，改一次就以推导为准（不再写回）', async () => {
+  const stored = {
+    providers: [{
+      ...PARAM_TABLE_CONFIG.providers[0],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          params: [
+            { role: 'prompt', name: 'prompt', type: 'text', default: '', expose: true },
+            { role: 'model', name: 'model', type: 'text', default: '', description: 'old', expose: true, locked: true }
+          ]
+        }
+      }
+    }],
+    active: PARAM_TABLE_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(stored);
+  let opened = openModelPanel(harness);
+  assert.equal(modelNameInput(opened).props.value, 'model', '老行照常读进来');
+  assert.equal(modelRowLock(opened).props['aria-pressed'], 'true', '行级锁保留');
+  assert.equal(findAll(modelBox(opened), (node) => node.props && node.props['data-param-field'] === 'expose').length, 0,
+    '框里没有暴露控件');
 
-  // 仍然在「自动」状态重开面板：读回行上的 false，不被默认值推翻。
-  const reopened = await openEditor(autoConfig(saved));
-  const again = openModelPanel(reopened.harness);
-  assert.equal(modelEye(again).props['aria-pressed'], 'false', '行上的值优先于默认值');
+  modelNameInput(opened).props.onChange({ target: { value: 'image_model' } });
+  opened = harness.renderRoot();
+  assert.equal(modelNameInput(opened).props.value, 'image_model');
+  const entry = await savedTableEntry(harness);
+  const modelRow = entry.params.find((row) => row.role === 'model');
+  assert.equal(modelRow.name, 'image_model', '改名照旧落盘');
+  assert.equal(modelRow.locked, true, '行级锁照旧保留');
+  assert.equal('expose' in modelRow, false, '老配置里的 expose 被忽略，不再写回去');
 });
 
 test('模型参数名为空：标红并给一行提示，但保存照常成功', async () => {
@@ -1750,6 +1864,51 @@ test('操作列：暴露 / 行级锁 / 删除三个按钮，说明走即时气�
   assert.ok(tip, '悬停出即时气泡');
   assert.match(textOf(tip).join(''), /tuned through params/i, '气泡说明暴露的用途');
   expose.props.onPointerLeave();
+});
+
+test('即时气泡宽度跟随内容：max-content + 上限 260，到上限才换行', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  const row = commonRow(opened, 'negative');
+  const expose = paramCell(row, 'expose');
+  expose.props.ref.current = tipTarget({ scrollWidth: 160, clientWidth: 80 });
+  expose.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const tip = findAll(commonRow(opened, 'negative'), (node) => node.props
+    && node.props.role === 'tooltip')[0];
+  assert.ok(tip, '悬停出即时气泡');
+  assert.equal(tip.props.style.width, 'max-content', '短说明不再被拉成固定宽度');
+  assert.equal(tip.props.style.maxWidth, 260, '到上限才折行');
+  assert.equal(tip.props.style.whiteSpace, 'normal');
+  assert.equal(tip.props.style.wordBreak, 'break-word');
+});
+
+test('操作列三个按钮换成同一套 SVG 图标，尺寸 / 描边 / 基线一致', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  const row = commonRow(opened, 'negative');
+  const actions = findAll(row, (node) => node.props['data-param-cell'] === 'actions')[0];
+  const buttons = findAll(actions, (node) => node.type === 'button');
+  assert.deepEqual(buttons.map((node) => node.props['data-param-key']),
+    ['negative.expose', 'negative.lock', 'negative.remove'], '三个操作按钮仍在原位');
+  const glyphs = buttons.map((button) => findAll(button, (node) => node.type === 'svg')[0]);
+  for (const [at, svg] of glyphs.entries()) {
+    assert.ok(svg, '第 ' + (at + 1) + ' 个按钮用 SVG 图标');
+    assert.equal(svg.props.width, 14);
+    assert.equal(svg.props.height, 14);
+    assert.equal(svg.props.fill, 'none');
+    assert.equal(svg.props.stroke, 'currentColor');
+    assert.equal(Number(svg.props.strokeWidth), 1.6);
+    assert.equal(textOf(buttons[at]).join(''), '', '不再渲染 emoji 文本');
+  }
+  assert.deepEqual(glyphs.map((svg) => svg.props['data-param-glyph']), ['eye', 'unlock', 'trash']);
+
+  // 上锁后锁图标跟着变，aria-pressed 语义不变。
+  buttons[1].props.onClick(fakeEvent());
+  opened = harness.renderRoot();
+  const lock = paramCell(commonRow(opened, 'negative'), 'lock');
+  assert.equal(findAll(lock, (node) => node.type === 'svg')[0].props['data-param-glyph'], 'lock');
+  assert.equal(lock.props['aria-pressed'], 'true');
 });
 
 test('单元格超长截断，悬停给出完整内容', async () => {
@@ -1882,11 +2041,12 @@ test('老配置没有 params 时从 fields 派生；没有的字段不显示行'
   assert.equal(modelNameInput(opened).props.value, 'model', '模型方框从 fields 派生参数名');
 
   // 第一次编辑就把派生行落成 params（不再依赖 fields）。
-  modelEye(opened).props.onClick();
+  modelRowLock(opened).props.onClick(fakeEvent());
   const entry = await savedTableEntry(harness);
   assert.deepEqual(entry.params.map((row) => row.role), ['prompt', 'negative', 'model']);
   assert.equal(entry.params[1].name, 'negative_prompt');
-  assert.equal(entry.params[2].expose, true);
+  assert.equal(entry.params[2].locked, true, '这次编辑是模型行的行级锁');
+  assert.equal('expose' in entry.params[2], false, '模型行不写 expose');
 });
 
 test('没有 fields 也没有 params 的老配置只剩固定的提示词行，模型框回落到默认名', async () => {
@@ -2196,6 +2356,8 @@ test('协议问号：悬停立刻弹出气泡，三条地址一行一条', async
   assert.ok(tip, '悬停立刻出现气泡');
   assert.equal(tip.props.style.position, 'fixed');
   assert.equal(tip.props.style.whiteSpace, 'pre-line', '气泡按 \\n 分行');
+  assert.equal(tip.props.style.width, 'max-content', '宽度仍跟随内容');
+  assert.equal(tip.props.style.maxWidth, 300, '多行地址的上限仍收在 300');
   const lines = String(tip.children[0]).split('\n');
   assert.deepEqual(lines,
     ['Text-to-image：Not supported', 'Image-to-image：Not supported', 'List models：Not supported'],

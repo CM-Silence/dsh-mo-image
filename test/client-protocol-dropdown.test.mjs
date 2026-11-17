@@ -275,7 +275,7 @@ test('识别协议：地址不认识 → 切到自定义，三条地址预填相
   client.setCatalog();
   const props = formProps(providerFixture());
   const button = detectButton(client.renderForm(props));
-  assert.ok(button, '协议 label 右侧要有「识别协议」按钮');
+  assert.ok(button, '协议下拉右侧要有「识别协议」按钮');
   assert.equal(textOf(button).join(''), '识别协议');
   await button.props.onClick();
   const tree = client.renderForm(props);
