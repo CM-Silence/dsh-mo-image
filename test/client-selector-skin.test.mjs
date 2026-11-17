@@ -961,10 +961,10 @@ test('the codex portal is above the composer and keeps its last position when cl
     seed({ open: false, pane: 'quality', menuPos: { left: 900, bottom: 50 } })
   );
   const roots = collectClass(tree, 'cmes-root');
-  const portal = roots.find((node) => node.props && node.props.style && node.props.style.position === 'fixed');
+  const portal = roots.find((node) => node.props && node.props.style && node.props.style.display === 'contents');
   assert.ok(portal);
-  assert.equal(portal.props.style.zIndex, 2147482000);
   const popover = collectClass(tree, 'cmes-popover')[0];
+  assert.equal(popover.props.style.zIndex, 1100);
   assert.equal(popover.props.style.left, '900px');
   assert.equal(popover.props.style.bottom, '50px');
 });
