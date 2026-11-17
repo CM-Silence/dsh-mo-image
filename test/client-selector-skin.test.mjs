@@ -935,7 +935,8 @@ test('other settings keeps only size controls', () => {
   );
   assert.equal(collectClass(tree, 'cmes-rows').length >= 1, true);
   const reset = collectClass(tree, 'cmes-reset')[0];
-  assert.equal(reset.props.title, '其他设置');
+  assert.equal(reset.props.title, undefined, 'the native title is replaced by the instant tip');
+  assert.equal(typeof reset.props.onPointerEnter, 'function', 'hover shows the instant tip');
 });
 
 test('the prompt optimization star shows the quota hint and toggles the real default', () => {

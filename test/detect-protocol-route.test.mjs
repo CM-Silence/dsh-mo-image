@@ -1,9 +1,12 @@
 /**
  * /api/mo-image/detect-protocol 路由：「识别协议」按钮在宿主这一侧的样子。
  *
- * 重点不是翻译逻辑（那在 detectProtocolOf 里），而是这条路由的约定：
- * 用请求里现填的地址/密钥（或已保存的提供商），认得出协议就 200 返回 id，
- * 认不出就返回 custom；地址缺失/提供商不存在时给带 code 的 400。
+ * 路由现在是**一次问一条**：
+ *   - 不带 `probe`：静态能认就给答案（零上游请求），否则只返回探测顺序；
+ *   - 带 `probe`：只探这一条路径，返回形状与它能证明的协议；命中即停由客户端做。
+ *
+ * 这里只管路由的约定：请求里现填的地址/密钥（或已保存的提供商）怎么用、
+ * 计划外的 probe 怎么拒、地址缺失/提供商不存在时给带 code 的 400。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -79,7 +82,9 @@ test('known host: answers from the local match without probing anything', async 
   const res = makeRes();
   await route.handler(jsonReq({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash-image' }), res);
   assert.equal(res.status, 200);
-  assert.deepEqual(JSON.parse(res.body), { ok: true, protocol: 'google-gemini', matched: true, probed: false });
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: true, protocol: 'google-gemini', matched: true, probed: false
+  });
   assert.deepEqual(calls, [], '认出协议时不该探测上游');
 });
 
@@ -92,35 +97,60 @@ test('已知主机：火山方舟 Agent Plan 的完整地址 → openai-images +
   assert.equal(res.status, 200);
   // /api/plan/v3/models 是 404，探测一定失败；所以这条路必须是「本地就认出来」。
   assert.deepEqual(JSON.parse(res.body), {
-    ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { edit: 'same' }
+    ok: true, done: true, protocol: 'openai-images', matched: true, probed: false,
+    protocolOptions: { edit: 'same' }
   });
   assert.deepEqual(calls, [], '已知主机一个请求都不该发');
 });
 
-test('known host: azure carries the api-key option through the route', async (t) => {
+test('unknown host: answers only with the probe plan — zero upstream requests', async (t) => {
   const { route, calls } = await setup(t);
   const res = makeRes();
-  await route.handler(jsonReq({ baseUrl: 'https://res.openai.azure.com/openai/v1', key: 'draft-key', model: 'gpt-image-2.5-flare' }), res);
+  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', key: 'draft-key' }), res);
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { auth: 'api-key' }
-  });
-  assert.deepEqual(calls, []);
+    ok: true, done: false,
+    probes: ['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels']
+  }, '公网 /models 打头，再试本地那三条');
+  assert.deepEqual(calls, [], '排顺序不发请求');
 });
 
-test('unknown host: one read-only /models probe decides openai-images vs custom', async (t) => {
+test('probe step: one request, returns hit + shape + protocols', async (t) => {
   const { route, calls, setRespond } = await setup(t);
-  const ok = makeRes();
-  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', key: 'draft-key' }), ok);
-  assert.equal(ok.status, 200);
-  assert.deepEqual(JSON.parse(ok.body), { ok: true, protocol: 'openai-images', matched: false, probed: true });
-  assert.deepEqual(calls, [{ url: 'https://relay.example/v1/models', method: 'GET' }]);
+  setRespond((url) => (url.endsWith('/object_info')
+    ? json({ CheckpointLoaderSimple: {} })
+    : new Response('missing', { status: 404 })));
+  const res = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://comfy.example.com', key: 'k', probe: '/object_info' }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: false, probe: '/object_info', hit: true, shape: 'object', protocols: ['comfyui']
+  });
+  assert.deepEqual(calls, [{ url: 'https://comfy.example.com/object_info', method: 'GET' }]);
   assert.doesNotMatch(calls[0].url, /images\/(generations|edits)/, '绝不能发会生成图片的请求');
+});
 
+test('probe miss: 404 answers hit:false (客户端继续下一条)', async (t) => {
+  const { route, calls, setRespond } = await setup(t);
   setRespond(() => new Response('missing', { status: 404 }));
-  const miss = makeRes();
-  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1' }), miss);
-  assert.deepEqual(JSON.parse(miss.body), { ok: true, protocol: 'custom', matched: false, probed: true });
+  const res = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', probe: '/models' }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: false, probe: '/models', hit: false, shape: '', protocols: []
+  });
+  assert.deepEqual(calls.map((call) => call.url), ['https://relay.example/v1/models']);
+});
+
+test('probe outside the plan: 400 with a translatable code, and zero requests', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'https://relay.example/v1', probe: '/admin/secret'
+  }), res);
+  assert.equal(res.status, 400);
+  assert.equal(JSON.parse(res.body).code, 'provider.invalidProbe');
+  assert.deepEqual(calls, [], '这条路由不是任意路径的 GET 代理');
 });
 
 test('a saved provider is used by id (no key in the draft)', async (t) => {
@@ -128,7 +158,14 @@ test('a saved provider is used by id (no key in the draft)', async (t) => {
   const res = makeRes();
   await route.handler(jsonReq({ providerId: 'p1' }), res);
   assert.equal(res.status, 200);
-  assert.equal(JSON.parse(res.body).protocol, 'openai-images');
+  const answer = JSON.parse(res.body);
+  assert.equal(answer.done, false);
+  assert.deepEqual(answer.probes, ['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels']);
+  assert.deepEqual(calls, [], '排顺序不发请求');
+
+  const probe = makeRes();
+  await route.handler(jsonReq({ providerId: 'p1', probe: '/models' }), probe);
+  assert.deepEqual(JSON.parse(probe.body).protocols, ['openai-images', 'openai-chat', 'openai-responses', 'openrouter-images']);
   assert.deepEqual(calls.map((call) => call.url), ['https://saved.example/v1/models'], '用已保存的地址探测');
 });
 

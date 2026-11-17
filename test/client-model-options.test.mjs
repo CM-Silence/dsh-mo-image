@@ -491,7 +491,9 @@ test('the model row exposes model options as a chevron icon button, not a text b
   assert.ok(toggle, 'expected an aria-expanded icon button on the model row');
   assert.equal(toggle.props['aria-expanded'], false);
   assert.match(String(toggle.props['aria-label']), /Model options/);
-  assert.equal(toggle.props.title, 'Model options');
+  // 原生 title 有延迟：模型选项按钮也走即时气泡。
+  assert.equal(toggle.props.title, undefined, '不再用有延迟的原生 title');
+  assert.equal(typeof toggle.props.onPointerEnter, 'function', '悬停立刻展开说明');
   // 图标按钮的可见内容是图标组件，不是文字
   const label = textOf(toggle).join('').trim();
   assert.equal(label, '', 'the toggle must not render a text label');
@@ -1424,8 +1426,11 @@ test('普通行可以新增 / 编辑 / 删除；删掉内置行会去掉对应�
   paramCell(commonRow(opened, 'negative'), 'remove').props.onClick();
   opened = harness.renderRoot();
   assert.ok(commonRow(opened, 'negative'), '第一次点击不删行');
-  assert.equal(textOf(paramCell(commonRow(opened, 'negative'), 'remove')).join(''), 'Confirm delete?',
-    '按钮变成确认文案');
+  const armed = paramCell(commonRow(opened, 'negative'), 'remove');
+  assert.equal(textOf(armed).join(''), '', '确认态不换文字');
+  assert.equal(findAll(armed, (node) => node.type === 'svg')[0].props['data-param-glyph'], 'warning',
+    '同一个按钮换成警告图标');
+  assert.ok(hasClass(armed, 'iconButtonDanger'), '仍是模型列表那个删除按钮的样式');
   paramCell(commonRow(opened, 'negative'), 'remove').props.onClick();
   opened = harness.renderRoot();
   assert.equal(commonRow(opened, 'negative'), null, '负面词行没了');
@@ -1518,8 +1523,8 @@ test('enum 行搬出「常规」表：每个 enum 参数一个方框，标题是
   assert.equal(name.props['data-param-key'], 'negative', '参数名沿用行键，旧查询仍可用');
   // ③ 框里是选项表，不是散装输入框。
   assert.ok(enumHead(box), '选项表有表头');
-  assert.deepEqual(textOf(enumHead(box)), ['Option name', 'Value', 'Default'],
-    '表头：选项名 / 值 / 是否默认');
+  assert.deepEqual(textOf(enumHead(box)), ['Option name', 'Value', 'Default', 'Actions'],
+    '表头：选项名 / 值 / 是否默认 / 操作');
   assert.equal(enumOptions(box).length, 0, '刚切成 enum 时没有选项行');
   assert.ok(enumCell(box, 'option.add'), '框里有「添加选项」');
   assert.ok(enumCell(box, 'remove'), '行级删除也跟过来：enum 行仍能被去掉');
@@ -1612,8 +1617,10 @@ test('enum 方框的删除：第一次只变成确认，第二次才真删', asy
   enumCell(enumBoxNamed(opened, 'sampler'), 'remove').props.onClick();
   opened = harness.renderRoot();
   assert.ok(enumBoxNamed(opened, 'sampler'), '第一次点击不删');
-  assert.equal(textOf(enumCell(enumBoxNamed(opened, 'sampler'), 'remove')).join(''), 'Confirm delete?',
-    '按钮变成确认文案');
+  const armed = enumCell(enumBoxNamed(opened, 'sampler'), 'remove');
+  assert.equal(textOf(armed).join(''), '', '确认态不换文字');
+  assert.equal(findAll(armed, (node) => node.type === 'svg')[0].props['data-param-glyph'], 'warning',
+    '同一个按钮换成警告图标');
   enumCell(enumBoxNamed(opened, 'sampler'), 'remove').props.onClick();
   opened = harness.renderRoot();
   assert.equal(enumBoxNamed(opened, 'sampler'), null, '第二次点击才真删');
@@ -1664,6 +1671,25 @@ test('选项表与参数表同一套 grid：列宽固定 / 表头居中 / 超长
     if (!textOf(cell).length) continue;
     assert.equal(cell.props.style.textAlign, 'center', '挡位表表头也居中');
   }
+});
+
+test('三张表的最后一列表头统一是「操作」并居中', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  const opened = openModelPanel(harness);
+  const heads = [
+    ['常规参数表', paramGrid(opened, 'params:head')[0]],
+    ['enum 选项表', enumHead(enumBoxNamed(opened, 'negative_prompt'))],
+    ['质量挡位表', qualityHead(opened)]
+  ];
+  const lastTexts = [];
+  for (const [label, head] of heads) {
+    assert.ok(head, label + ' 的表头在');
+    const last = head.children[head.children.length - 1];
+    assert.equal(textOf(last).join(''), 'Actions', label + ' 的最后一列表头是「操作」');
+    assert.equal(last.props.style.textAlign, 'center', label + ' 的最后一列表头居中');
+    lastTexts.push(textOf(last).join(''));
+  }
+  assert.deepEqual(lastTexts, ['Actions', 'Actions', 'Actions'], '三张表的最后一列表头一致');
 });
 
 test('方框顺序：常规 → 模型 → 各 enum 方框（按表里的顺序）→ 尺寸 → 质量 → 参考图', async () => {
@@ -1828,7 +1854,8 @@ test('操作列三个按钮换成同一套 SVG 图标，尺寸 / 描边 / 基线
   const buttons = findAll(actions, (node) => node.type === 'button');
   assert.deepEqual(buttons.map((node) => node.props['data-param-key']),
     ['negative.expose', 'negative.lock', 'negative.remove'], '三个操作按钮仍在原位');
-  const glyphs = buttons.map((button) => findAll(button, (node) => node.type === 'svg')[0]);
+  // 暴露 / 锁定是插件自己的 SVG；删除按钮复用模型列表那个 primitives 垃圾桶图标。
+  const glyphs = buttons.slice(0, 2).map((button) => findAll(button, (node) => node.type === 'svg')[0]);
   for (const [at, svg] of glyphs.entries()) {
     assert.ok(svg, '第 ' + (at + 1) + ' 个按钮用 SVG 图标');
     assert.equal(svg.props.width, 14);
@@ -1838,14 +1865,47 @@ test('操作列三个按钮换成同一套 SVG 图标，尺寸 / 描边 / 基线
     assert.equal(Number(svg.props.strokeWidth), 1.6);
     assert.equal(textOf(buttons[at]).join(''), '', '不再渲染 emoji 文本');
   }
-  assert.deepEqual(glyphs.map((svg) => svg.props['data-param-glyph']), ['eye', 'unlock', 'trash']);
+  // 未暴露 = 划掉的眼睛（eye-off），不是正常眼睛。
+  assert.deepEqual(glyphs.map((svg) => svg.props['data-param-glyph']), ['eye-off', 'unlock']);
+  assert.equal(findAll(buttons[2], (node) => node.type === 'IconTrash').length, 1,
+    '删除按钮用的是模型列表同一套垃圾桶图标');
+  assert.equal(textOf(buttons[2]).join(''), '', '删除按钮不渲染文字');
 
-  // 上锁后锁图标跟着变，aria-pressed 语义不变。
+  // 暴露打开后眼睛变回正常眼睛。
+  buttons[0].props.onClick();
+  opened = harness.renderRoot();
+  const exposed = paramCell(commonRow(opened, 'negative'), 'expose');
+  assert.equal(findAll(exposed, (node) => node.type === 'svg')[0].props['data-param-glyph'], 'eye');
+  assert.equal(exposed.props['aria-pressed'], 'true');
+
+  // 上锁后锁图标跟着变，aria-pressed 语义不变；闭锁 / 开锁形状不同。
   buttons[1].props.onClick(fakeEvent());
   opened = harness.renderRoot();
   const lock = paramCell(commonRow(opened, 'negative'), 'lock');
-  assert.equal(findAll(lock, (node) => node.type === 'svg')[0].props['data-param-glyph'], 'lock');
+  const lockGlyph = findAll(lock, (node) => node.type === 'svg')[0];
+  assert.equal(lockGlyph.props['data-param-glyph'], 'lock');
   assert.equal(lock.props['aria-pressed'], 'true');
+  const unlockedGlyph = findAll(paramCell(commonRow(opened, 'n'), 'lock'), (node) => node.type === 'svg')[0];
+  assert.equal(unlockedGlyph.props['data-param-glyph'], 'unlock', '未锁的行仍是开锁');
+  // 两种锁的路径/矩形形状必须不一样（不是只靠颜色区分）。
+  const shapeOf = (glyph) => findAll(glyph, (node) => node.type === 'path' || node.type === 'rect')
+    .map((node) => node.props.d || [node.props.x, node.props.y, node.props.width, node.props.height, node.props.rx].join(','))
+    .join('|');
+  assert.notEqual(shapeOf(lockGlyph), shapeOf(unlockedGlyph), '闭锁 / 开锁形状不同');
+});
+
+test('三张表的删除按钮复用模型列表那个删除按钮：同一个组件、同一套样式与图标', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  const opened = openModelPanel(harness);
+  const dangerButtons = findAll(opened, (node) => node.type === 'button' && hasClass(node, 'iconButtonDanger'));
+  // 模型行 + 参数表行 + enum 选项行 + 质量挡位行，都是同一个删除按钮。
+  assert.ok(dangerButtons.length >= 4, '删除按钮分布在模型行与三张表里');
+  for (const button of dangerButtons) {
+    assert.ok(hasClass(button, 'iconButton'), '同一个 iconButton 基类');
+    assert.equal(findAll(button, (node) => node.type === 'IconTrash').length, 1, '同一个垃圾桶图标');
+    assert.equal(textOf(button).join(''), '', '图标按钮不渲染文字');
+    assert.equal(typeof button.props.onPointerEnter, 'function', '说明走即时气泡');
+  }
 });
 
 test('单元格超长截断，悬停给出完整内容', async () => {
@@ -2172,6 +2232,37 @@ test('方框标题比正文大一号并加粗，锁仍在标题行原位', async
   }
 });
 
+test('方框标题旁的锁：tooltip 走即时气泡，不用原生 title', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  let opened = openModelPanel(harness);
+  const boxes = [
+    ['common', 'prompt'],
+    ['model', 'model'],
+    ['size', 'size'],
+    ['quality', 'quality'],
+    ['image', 'image']
+  ];
+  for (const [boxKey, lockKey] of boxes) {
+    const box = paramBox(opened, boxKey);
+    assert.ok(box, boxKey + ' 方框在');
+    const lock = findAll(box.children[0], (node) => node.type === 'button'
+      && node.props['data-lock-key'] === lockKey)[0];
+    assert.ok(lock, boxKey + ' 的锁在标题行');
+    assert.equal(lock.props.title, undefined, boxKey + ' 的锁不再用原生 title');
+    assert.equal(typeof lock.props.onPointerEnter, 'function', boxKey + ' 的锁悬停立刻出气泡');
+    assert.equal(lock.props['data-locked'], 'false', boxKey + ' 的 data-locked 仍在');
+  }
+  // 悬停其中一个锁：气泡里是「未上锁：会被一键配置覆盖」。
+  const qualityLock = findAll(paramBox(opened, 'quality').children[0], (node) => node.type === 'button'
+    && node.props['data-lock-key'] === 'quality')[0];
+  qualityLock.props.ref.current = tipTarget();
+  qualityLock.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const tip = tipNodes(paramBox(opened, 'quality'))
+    .find((node) => /bulk configuration may overwrite/i.test(textOf(node).join('')));
+  assert.ok(tip, '未上锁的锁气泡给出「会被一键配置覆盖」');
+});
+
 test('参数行 label 固定 88px 并单行截断：长键名不再把输入框挤没', async () => {
   const { harness } = await openEditor(sizedConfig('aspect', {
     field: 'aspect_ratio', second: { from: 'aspect', field: 'imageSize' }
@@ -2316,15 +2407,30 @@ test('尺寸是多输入参数：一个方框，标题行带锁，框内每行�
   assert.equal(findAll(box, (node) => node.type === 'p').length, 0, '框里不再有说明段落');
 });
 
-test('说明文字改成 title：悬停才显示，不占一行', async () => {
+test('尺寸 / 参考图的说明改成即时气泡：悬停才显示，不占一行', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
-  const opened = openModelPanel(harness);
+  let opened = openModelPanel(harness);
   const box = paramBox(opened, 'size');
   const modeSelect = findAll(box, (node) => node.type === 'select' && node.props['data-param-key'] === 'size')[0];
   assert.ok(modeSelect, '有编码方式下拉');
-  assert.match(String(modeSelect.props.title || ''), /adapter decides/i, '尺寸块的说明挂在编码方式上');
-  const nameInput = findAll(box, (node) => node.type === 'input' && node.props['data-param-key'] === 'size')[0];
-  assert.match(String(nameInput.props.title || ''), /dotted paths/i, '参数名的说明挂在输入框上');
+  assert.equal(modeSelect.props.title, undefined, '不再用有延迟的原生 title');
+  assert.equal(typeof modeSelect.props.onPointerEnter, 'function', '悬停立刻展开说明');
+  modeSelect.props.ref.current = tipTarget({ scrollWidth: 200, clientWidth: 100 });
+  modeSelect.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const modeTip = tipNodes(paramBox(opened, 'size'))
+    .find((node) => /adapter decides/i.test(textOf(node).join('')));
+  assert.ok(modeTip, '尺寸块的说明挂在编码方式上的即时气泡里');
+
+  const nameInput = findAll(paramBox(opened, 'size'), (node) => node.type === 'input' && node.props['data-param-key'] === 'size')[0];
+  assert.ok(nameInput, '有参数名输入');
+  assert.equal(nameInput.props.title, undefined, '参数名的说明也不用原生 title');
+  nameInput.props.ref.current = tipTarget({ scrollWidth: 200, clientWidth: 100 });
+  nameInput.props.onPointerEnter();
+  opened = harness.renderRoot();
+  const nameTip = tipNodes(paramBox(opened, 'size'))
+    .find((node) => /dotted paths/i.test(textOf(node).join('')));
+  assert.ok(nameTip, '参数名的说明挂在输入框上的即时气泡里');
 });
 
 test('宽+高 编码方式下有两个参数名输入：宽 / 高，且都能改', async () => {
@@ -3085,7 +3191,11 @@ test('勾选后出现参数名与挡位表，并把字段模板这条闸门补�
   assert.equal(qualityCheckbox(panel).props.checked, true);
   assert.ok(qualityRow(panel, 'field'), '勾上以后有参数名');
   assert.ok(qualityHead(panel), '勾上以后有表头');
-  assert.equal(textOf(qualityHead(panel)).join(''), 'Level nameValueDefault', '三列表头：挡位名 / 值 / 是否默认');
+  assert.equal(textOf(qualityHead(panel)).join(''), 'Level nameValueDefaultActions', '四列表头：挡位名 / 值 / 是否默认 / 操作');
+  // 最后一列「操作」和参数表一致，居中。
+  const qualityHeadCells = qualityHead(panel).children;
+  assert.equal(textOf(qualityHeadCells[qualityHeadCells.length - 1]).join(''), 'Actions', '最后一列是「操作」');
+  for (const cell of qualityHeadCells) assert.equal(cell.props.style.textAlign, 'center', '表头文字居中');
   assert.ok(qualityAddButton(panel), '勾上以后有「添加挡位」');
 
   const entry = await savedImageEntry(harness);

@@ -1,13 +1,12 @@
 /**
- * `/api/mo-image/detect-protocol` 路由：探测表结果怎么送到设置页。
+ * `/api/mo-image/detect-protocol` 路由：校验模式（expectedProtocol）怎么走。
  *
- * 宿主那边认得对不对由 test/detect-protocol-local.test.mjs 钉；这里只管**路由的约定**：
- *   - 探针认出来的协议，`probe`（命中路径）与 `shape`（返回形状）要一起带回去，
- *     设置页才能写「已识别为 ComfyUI（/object_info 返回 JSON 对象）」；
- *   - 用户手选了协议（请求体里的 `expectedProtocol`）时，路由要把它转成校验模式：
- *     回答里带 `verified`，`protocol` 仍然是用户选的那条（外加可能有的 `suggested`）；
- *   - 一穷二白的老形状（公网 `/models` 命中 / 自定义）字段一个不多——老客户端不认新键，
- *     也不该因为多了个键就显示错话。
+ * 用户手选了协议时按钮只校验、不改写。宿主这边把它翻译成：
+ *   - 静态能证明 → 一次请求都不发，直接 `verified: true`；
+ *   - 否则把**手选协议自己的探针**排在探测顺序最前面，由客户端逐条问；
+ *     客户端拿 `protocols` 里有没有手选协议来判断「像不像它」，全都不中时保留用户的选择。
+ *
+ * 这里只管路由把这两件事送对；提示文案与循环在 test/client-detect-protocol-notes.test.mjs。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -77,41 +76,8 @@ async function setup(t) {
   return { route, calls, setRespond(fn) { respond = fn; } };
 }
 
-test('内网 ComfyUI：路由把命中的探针与形状一起带回去', async (t) => {
-  const { route, calls, setRespond } = await setup(t);
-  setRespond(routeOf('/object_info', () => json({ CheckpointLoaderSimple: {} })));
-  const res = makeRes();
-  await route.handler(jsonReq({ baseUrl: 'http://127.0.0.1:8188', key: 'draft-key' }), res);
-  assert.equal(res.status, 200);
-  assert.deepEqual(JSON.parse(res.body), {
-    ok: true, protocol: 'comfyui', matched: false, probed: true,
-    probe: '/object_info', shape: 'object'
-  });
-  assert.deepEqual(calls.map((call) => call.url), ['http://127.0.0.1:8188/object_info']);
-  assert.equal(calls[0].method, 'GET');
-});
-
-test('expectedProtocol：路由进校验模式，回答 verified + 看起来像谁，协议不变', async (t) => {
-  const { route, calls, setRespond } = await setup(t);
-  setRespond(routeOf('/object_info', () => json({ CheckpointLoaderSimple: {} })));
-  const res = makeRes();
-  await route.handler(jsonReq({
-    baseUrl: 'http://127.0.0.1:7860', key: 'draft-key', expectedProtocol: 'a1111'
-  }), res);
-  assert.equal(res.status, 200);
-  const answer = JSON.parse(res.body);
-  assert.equal(answer.protocol, 'a1111', '用户选的协议不许被改掉');
-  assert.equal(answer.verified, false);
-  assert.equal(answer.suggested, 'comfyui');
-  assert.equal(answer.suggestedProbe, '/object_info');
-  assert.deepEqual(calls.map((call) => call.url), [
-    'http://127.0.0.1:7860/sdapi/v1/sd-models',
-    'http://127.0.0.1:7860/object_info'
-  ]);
-});
-
-test('expectedProtocol 校验通过：verified + probe 一起回去', async (t) => {
-  const { route } = await setup(t);
+test('expectedProtocol 静态就能证明：零请求直接 verified', async (t) => {
+  const { route, calls } = await setup(t);
   const res = makeRes();
   await route.handler(jsonReq({
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
@@ -120,14 +86,75 @@ test('expectedProtocol 校验通过：verified + probe 一起回去', async (t) 
   }), res);
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    ok: true, protocol: 'google-gemini', matched: true, probed: false, verified: true
+    ok: true, done: true, protocol: 'google-gemini', matched: true, probed: false, verified: true
   });
+  assert.deepEqual(calls, []);
 });
 
-test('公网 /models 命中还是老形状：不多带探针字段', async (t) => {
+test('expectedProtocol 校验：手选协议的探针排在计划最前面，且排顺序不发请求', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'http://127.0.0.1:7860', expectedProtocol: 'a1111'
+  }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: false,
+    probes: ['/sdapi/v1/sd-models', '/object_info', '/API/ListModels', '/models']
+  });
+  assert.deepEqual(calls, []);
+});
+
+test('校验探针命中：protocols 里带着手选协议（客户端据此 verified）', async (t) => {
+  const { route, calls, setRespond } = await setup(t);
+  setRespond(routeOf('/sdapi/v1/sd-models', () => json([{ title: 'sdxl' }])));
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'http://127.0.0.1:7860', probe: '/sdapi/v1/sd-models', expectedProtocol: 'a1111'
+  }), res);
+  assert.equal(res.status, 200);
+  const answer = JSON.parse(res.body);
+  assert.equal(answer.hit, true);
+  assert.deepEqual(answer.protocols, ['a1111']);
+  assert.deepEqual(calls.map((call) => call.url), ['http://127.0.0.1:7860/sdapi/v1/sd-models']);
+});
+
+test('校验没通过、下一条命中：protocols 告诉客户端「看起来像谁」', async (t) => {
+  const { route, calls, setRespond } = await setup(t);
+  setRespond(routeOf('/object_info', () => json({ CheckpointLoaderSimple: {} })));
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'http://127.0.0.1:7860', probe: '/object_info', expectedProtocol: 'a1111'
+  }), res);
+  assert.equal(res.status, 200);
+  const answer = JSON.parse(res.body);
+  assert.equal(answer.hit, true);
+  assert.deepEqual(answer.protocols, ['comfyui'], 'a1111 的协议保留给客户端，suggested 用这条');
+  assert.deepEqual(calls.map((call) => call.url), ['http://127.0.0.1:7860/object_info']);
+});
+
+test('手选的是没有模型端点的协议（BFL 一类）：只报告「不像」，不发请求', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'https://relay.example/v1', model: 'some-model', expectedProtocol: 'bfl'
+  }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: true, protocol: 'bfl', matched: false, probed: false, verified: false
+  });
+  assert.deepEqual(calls, []);
+});
+
+test('expectedProtocol 是「自定义」：不算手选协议，走普通识别顺序', async (t) => {
   const { route } = await setup(t);
   const res = makeRes();
-  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', key: 'draft-key' }), res);
+  await route.handler(jsonReq({
+    baseUrl: 'https://relay.example/v1', expectedProtocol: 'custom'
+  }), res);
   assert.equal(res.status, 200);
-  assert.deepEqual(JSON.parse(res.body), { ok: true, protocol: 'openai-images', matched: false, probed: true });
+  const answer = JSON.parse(res.body);
+  assert.equal(answer.done, false);
+  assert.equal(answer.verified, undefined, '自定义没有可校验的协议');
+  assert.deepEqual(answer.probes, ['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels']);
 });

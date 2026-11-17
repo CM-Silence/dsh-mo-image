@@ -76,7 +76,10 @@ function createHarness({ adapters = adapterManifest(), detect = null } = {}) {
     fetch: async (url, init) => {
       fetchCalls.push({ url: String(url), method: (init && init.method) || 'GET', body: init && init.body });
       if (String(url).endsWith('/api/mo-image/detect-protocol')) {
-        const answer = detect || { status: 500, body: { error: 'no stub' } };
+        const asked = JSON.parse(String((init && init.body) || '{}'));
+        const answer = typeof detect === 'function'
+          ? await detect(asked)
+          : (detect || { status: 500, body: { error: 'no stub' } });
         return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'content-type': 'application/json' } });
       }
       return new Response(JSON.stringify({
@@ -268,9 +271,14 @@ test('重开面板回到收起状态：展开只是个 UI 状态，不进配置'
   assert.ok(optionValues(reopened).length <= 9);
 });
 
-test('识别协议：地址不认识 → 切到自定义，三条地址预填相对路径', async () => {
+test('识别协议：地址不认识 → 逐条试完，切到自定义并预填相对路径', async () => {
   const client = createHarness({
-    detect: { status: 200, body: { ok: true, protocol: 'custom', matched: false, probed: true } }
+    detect: (body) => (body.probe
+      ? { status: 200, body: { ok: true, done: false, probe: body.probe, hit: false, shape: '', protocols: [] } }
+      : {
+        status: 200,
+        body: { ok: true, done: false, probes: ['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels'] }
+      })
   });
   client.setCatalog();
   const props = formProps(providerFixture());
@@ -286,11 +294,11 @@ test('识别协议：地址不认识 → 切到自定义，三条地址预填相
   assert.equal(routes.edit.props.value, '/images/edits');
   assert.equal(routes.models.props.value, '/models');
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'warn');
-  assert.equal(textOf(noteOf(tree)).join(''), '没认出协议，已切到自定义并预填地址');
+  assert.equal(textOf(noteOf(tree)).join(''), '没认出协议，已切到自定义并预填地址；最后尝试 /API/ListModels');
 
-  // 只问了宿主一次（识别路由）；探测在宿主那边，客户端没有往上打任何请求。
+  // 一次问计划 + 四条探针：探测是客户端按顺序逐条驱动的。
   const asked = client.fetchCalls.filter((call) => call.url.endsWith('/api/mo-image/detect-protocol'));
-  assert.equal(asked.length, 1);
+  assert.equal(asked.length, 5, '问一次计划，再一条一个请求');
   const body = JSON.parse(asked[0].body);
   assert.equal(body.baseUrl, 'https://relay.example/v1');
   assert.equal(body.model, 'Qwen/Qwen-Image', '协议匹配也带模型名（百炼那类按模型判）');
@@ -298,7 +306,10 @@ test('识别协议：地址不认识 → 切到自定义，三条地址预填相
 
 test('识别协议：认得出具体协议 → 直接切过去，提示具体名字', async () => {
   const client = createHarness({
-    detect: { status: 200, body: { ok: true, protocol: 'google-gemini', matched: true, probed: false } }
+    detect: {
+      status: 200,
+      body: { ok: true, done: true, protocol: 'google-gemini', matched: true, probed: false }
+    }
   });
   client.setCatalog();
   const props = formProps(providerFixture());
@@ -315,7 +326,10 @@ test('识别协议：已知主机连同协议级选项一起带回，面板直�
   const client = createHarness({
     detect: {
       status: 200,
-      body: { ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { edit: 'same' } }
+      body: {
+        ok: true, done: true, protocol: 'openai-images', matched: true, probed: false,
+        protocolOptions: { edit: 'same' }
+      }
     }
   });
   client.setCatalog();

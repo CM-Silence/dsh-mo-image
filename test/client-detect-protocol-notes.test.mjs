@@ -1,11 +1,14 @@
 /**
- * 设置页「识别协议」按钮：校验模式与探针提示。
+ * 设置页「识别协议」按钮：客户端驱动的探测循环、真实进度与校验模式。
  *
- * 两条规矩（宿主那一半在 test/detect-protocol-local.test.mjs）：
- *   1. 用户**手选过**具体协议时，按钮只做校验：请求里带 `expectedProtocol`，回答里的
- *      `verified` / `suggested` 只用来出提示，**协议与协议级选项一个字都不改**；
- *   2. 没手选（「自动」/「自定义」）时照旧识别，探针认出来的协议把命中路径写进提示，
- *      例如「已识别为 ComfyUI（/object_info 返回 JSON 对象）」。
+ * 三条规矩（宿主那一半在 test/detect-protocol-local.test.mjs）：
+ *   1. 客户端按宿主给的顺序**逐条**发探针，每发一条就把「正在尝试访问 {path}…」写进
+ *      提示——进度是真的，不是一次请求换个「识别中…」；
+ *   2. 用户**手选过**具体协议时，按钮只做校验：请求里带 `expectedProtocol`，回答里的
+ *      `protocols` 只用来出提示，**协议与协议级选项一个字都不改**；
+ *   3. 没手选（「自动」/「自定义」）时照旧识别，探针认出来的协议把命中路径写进提示，
+ *      例如「已识别为 ComfyUI（/object_info 返回 JSON 对象）」；全都不中时提示里带上
+ *      最后试过的路径。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,7 +77,12 @@ function createHarness({ adapters = adapterManifest(), detect = null } = {}) {
     fetch: async (url, init) => {
       fetchCalls.push({ url: String(url), method: (init && init.method) || 'GET', body: init && init.body });
       if (String(url).endsWith('/api/mo-image/detect-protocol')) {
-        const answer = detect || { status: 500, body: { error: 'no stub' } };
+        const asked = JSON.parse(String((init && init.body) || '{}'));
+        // detect 可以是固定答案，也可以按请求（静态结论 / 探测顺序 / 单条探针）回答；
+        // 返回 Promise 就能把某一条探针挂在 pending 上，测试在那一刻看真实进度。
+        const answer = typeof detect === 'function'
+          ? await detect(asked)
+          : (detect || { status: 500, body: { error: 'no stub' } });
         return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'content-type': 'application/json' } });
       }
       return new Response(JSON.stringify({
@@ -163,6 +171,7 @@ const protocolSelect = (tree) => findAll(tree, (node) => node.type === 'select'
   && node.props && node.props['data-mo-image-protocol'] !== undefined)[0] || null;
 const detectButton = (tree) => findAll(tree, (node) => node.type === 'button'
   && node.props && node.props['data-mo-image-detect-protocol'] !== undefined)[0] || null;
+const spinnerIn = (tree) => findAll(tree, (node) => node.props && node.props['data-mo-image-spinner'] !== undefined);
 const noteOf = (tree) => findAll(tree, (node) => node.props && node.props['data-mo-image-protocol-note'] !== undefined)[0] || null;
 const noteTextOf = (tree) => textOf(noteOf(tree)).join('');
 const routeInputs = (tree) => {
@@ -198,24 +207,40 @@ async function clickDetect(client, props) {
   return client.renderForm(props);
 }
 
-const askedBodyOf = (client) => {
-  const asked = client.fetchCalls.filter((call) => call.url.endsWith('/api/mo-image/detect-protocol'));
-  assert.equal(asked.length, 1, '只问宿主一次');
-  return JSON.parse(asked[0].body);
+/** 识别路由的请求体，按发出顺序。 */
+const askedBodiesOf = (client) => client.fetchCalls
+  .filter((call) => call.url.endsWith('/api/mo-image/detect-protocol'))
+  .map((call) => JSON.parse(call.body));
+
+/**
+ * 「计划 + 单条探针」的桩：`hits` 里没写的路径一律当没命中。
+ * 宿主真正的形状→协议翻译在 test/detect-protocol-local.test.mjs 钉，这里只模拟回答。
+ */
+const detectStub = (probes, hits = {}) => (asked) => {
+  if (!asked.probe) return { status: 200, body: { ok: true, done: false, probes: probes } };
+  const hit = hits[asked.probe];
+  return {
+    status: 200,
+    body: {
+      ok: true, done: false, probe: asked.probe, hit: Boolean(hit),
+      shape: hit ? hit.shape : '', protocols: hit ? hit.protocols : []
+    }
+  };
 };
 
-test('自动：请求不带 expectedProtocol，探针命中后切协议并写清命中路径与形状', async () => {
+test('自动：先要计划，再按顺序逐条探；命中后切协议并写清路径与形状', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: { ok: true, protocol: 'comfyui', matched: false, probed: true, probe: '/object_info', shape: 'object' }
-    }
+    detect: detectStub(['/models', '/object_info'], {
+      '/object_info': { shape: 'object', protocols: ['comfyui'] }
+    })
   });
   client.setCatalog();
-  const props = formProps(providerFixture());
+  const props = formProps(providerFixture({ baseUrl: 'https://comfy.example.com' }));
   const tree = await clickDetect(client, props);
 
-  assert.equal(askedBodyOf(client).expectedProtocol, '', '没手选协议就不进校验模式');
+  const asked = askedBodiesOf(client);
+  assert.deepEqual(asked.map((body) => body.probe), [undefined, '/models', '/object_info'], '第一条要计划，之后一条一个请求');
+  assert.equal(asked[0].expectedProtocol, '', '没手选协议就不进校验模式');
   assert.equal(protocolSelect(tree).props.value, 'comfyui', '认出来就切过去');
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'ok');
   assert.equal(noteTextOf(tree), '已识别为 ComfyUI（/object_info 返回 JSON 对象）');
@@ -223,47 +248,50 @@ test('自动：请求不带 expectedProtocol，探针命中后切协议并写清
 
 test('自动：Gemini 的 models 列表也写清楚（同一个 /models，形状不同）', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: { ok: true, protocol: 'google-gemini', matched: false, probed: true, probe: '/models', shape: 'gemini-models' }
-    }
+    detect: detectStub(['/models', '/object_info'], {
+      '/models': { shape: 'gemini-models', protocols: ['google-gemini'] }
+    })
   });
   client.setCatalog();
   const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
   const tree = await clickDetect(client, props);
   assert.equal(protocolSelect(tree).props.value, 'google-gemini');
   assert.equal(noteTextOf(tree), '已识别为 Google Gemini（/models 返回 models 列表）');
+  assert.deepEqual(askedBodiesOf(client).map((body) => body.probe), [undefined, '/models'], '第一条就命中，不必再问');
+});
+
+test('自动：openai 的 {data:[…]} 是通用兜底，提示保持「地址可用」的老形状', async () => {
+  const client = createHarness({
+    detect: detectStub(['/models'], { '/models': { shape: 'openai-data', protocols: ['openai-images'] } })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(protocolSelect(tree).props.value, 'openai-images');
+  assert.equal(noteTextOf(tree), '地址可用，已设为 OpenAI Images', '兜底协议不带探针细节');
 });
 
 test('手选了 ComfyUI：只校验，不改写；通过时提示「已确认」', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: {
-        ok: true, protocol: 'comfyui', matched: true, probed: true, verified: true,
-        probe: '/object_info', shape: 'object'
-      }
-    }
+    detect: detectStub(['/object_info', '/models'], {
+      '/object_info': { shape: 'object', protocols: ['comfyui'] }
+    })
   });
   client.setCatalog();
   const props = formProps(providerFixture({ adapter: 'comfyui' }));
   const tree = await clickDetect(client, props);
 
-  assert.equal(askedBodyOf(client).expectedProtocol, 'comfyui', '手选的协议要送给宿主校验');
+  assert.equal(askedBodiesOf(client)[0].expectedProtocol, 'comfyui', '手选的协议要送给宿主校验');
   assert.equal(protocolSelect(tree).props.value, 'comfyui', '协议不能被改写');
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'ok');
   assert.equal(noteTextOf(tree), '已确认：ComfyUI（/object_info 返回 JSON 对象）');
 });
 
-test('手选的协议没通过：协议与选项都不动，提示「不像」并说出看起来像谁', async () => {
+test('手选的协议没通过：协议与选项都不动，提示「不像」+ 看起来像谁 + 最后试过哪条', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: {
-        ok: true, protocol: 'openai-images', matched: false, probed: true, verified: false,
-        probe: '/models', suggested: 'comfyui', suggestedProbe: '/object_info'
-      }
-    }
+    detect: detectStub(['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels'], {
+      '/object_info': { shape: 'object', protocols: ['comfyui'] }
+    })
   });
   client.setCatalog();
   // 用户选了 OpenAI Images 并且手动改过协议级选项：这些都不该被按钮动。
@@ -274,44 +302,41 @@ test('手选的协议没通过：协议与选项都不动，提示「不像」�
 
   assert.equal(protocolSelect(tree).props.value, 'openai-images', '不许把用户选的协议改掉');
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'warn');
-  assert.equal(noteTextOf(tree), '地址不像 OpenAI Images；看起来像 ComfyUI，未改动当前选择');
+  assert.equal(
+    noteTextOf(tree),
+    '地址不像 OpenAI Images；看起来像 ComfyUI，未改动当前选择；最后尝试 /API/ListModels'
+  );
   const editOption = findAll(tree, (node) => node.type === 'select'
     && node.props && node.props['data-mo-image-protocol-option'] === 'edit')[0];
   assert.ok(editOption, '协议级选项照常显示');
   assert.equal(editOption.props.value, 'none', '校验没通过也不该动协议级选项');
 });
 
-test('手选的协议没通过、也没更像的：只提示「不像」', async () => {
+test('手选的协议没通过、也没更像的：只提示「不像」，并说清最后试到哪', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: { ok: true, protocol: 'swarmui', matched: false, probed: true, verified: false, probe: '/API/ListModels' }
-    }
+    detect: detectStub(['/API/ListModels', '/models', '/object_info', '/sdapi/v1/sd-models'])
   });
   client.setCatalog();
   const props = formProps(providerFixture({ adapter: 'swarmui', baseUrl: 'https://relay.example/v1' }));
   const tree = await clickDetect(client, props);
   assert.equal(protocolSelect(tree).props.value, 'swarmui');
-  assert.equal(noteTextOf(tree), '地址不像 SwarmUI，未改动当前选择');
+  assert.equal(noteTextOf(tree), '地址不像 SwarmUI，未改动当前选择；最后尝试 /sdapi/v1/sd-models');
 });
 
 test('手选「自定义」不算手选了协议：仍然做完整识别', async () => {
   const client = createHarness({
-    detect: {
-      status: 200,
-      body: { ok: true, protocol: 'comfyui', matched: false, probed: true, probe: '/object_info', shape: 'object' }
-    }
+    detect: detectStub(['/object_info'], { '/object_info': { shape: 'object', protocols: ['comfyui'] } })
   });
   client.setCatalog();
   const props = formProps(providerFixture({ adapter: 'custom' }));
   const tree = await clickDetect(client, props);
-  assert.equal(askedBodyOf(client).expectedProtocol, '', '自定义没有可校验的协议');
+  assert.equal(askedBodiesOf(client)[0].expectedProtocol, '', '自定义没有可校验的协议');
   assert.equal(protocolSelect(tree).props.value, 'comfyui');
 });
 
-test('自定义兜底：预填三条相对地址（行为没变）', async () => {
+test('自定义兜底：预填三条相对地址，并说清最后试到哪', async () => {
   const client = createHarness({
-    detect: { status: 200, body: { ok: true, protocol: 'custom', matched: false, probed: true } }
+    detect: detectStub(['/object_info', '/sdapi/v1/sd-models', '/API/ListModels', '/models'])
   });
   client.setCatalog();
   const props = formProps(providerFixture({ baseUrl: 'http://127.0.0.1:9999' }));
@@ -321,5 +346,58 @@ test('自定义兜底：预填三条相对地址（行为没变）', async () =>
   assert.equal(routes.generate.props.value, '/images/generations');
   assert.equal(routes.edit.props.value, '/images/edits');
   assert.equal(routes.models.props.value, '/models');
-  assert.equal(noteTextOf(tree), '没认出协议，已切到自定义并预填地址');
+  assert.equal(noteTextOf(tree), '没认出协议，已切到自定义并预填地址；最后尝试 /models');
+});
+
+test('进度是真的：探针没回来之前就显示「正在尝试访问 xxx」，按钮禁用 + 转圈', async () => {
+  // 第一条探针挂在 pending 上：测试就在它没回来的时候渲染一次。
+  let releaseFirst;
+  const firstProbe = new Promise((resolve) => { releaseFirst = resolve; });
+  const client = createHarness({
+    detect: async (asked) => {
+      if (!asked.probe) {
+        return { status: 200, body: { ok: true, done: false, probes: ['/models', '/object_info'] } };
+      }
+      if (asked.probe === '/models') {
+        await firstProbe;
+        return { status: 200, body: { ok: true, done: false, probe: '/models', hit: false, shape: '', protocols: [] } };
+      }
+      return {
+        status: 200,
+        body: { ok: true, done: false, probe: '/object_info', hit: true, shape: 'object', protocols: ['comfyui'] }
+      };
+    }
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://comfy.example.com' }));
+  const running = detectButton(client.renderForm(props)).props.onClick();
+  // 让「要计划」那一步跑完，停在第一条探针的 pending 上。
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const pending = client.renderForm(props);
+  assert.equal(detectButton(pending).props.disabled, true, '识别期间按钮禁用');
+  assert.equal(spinnerIn(pending).length, 1, '识别期间按钮里要有转圈');
+  assert.equal(noteTextOf(pending), '正在尝试访问 /models…', '进度写的是真实正在试的路径');
+
+  releaseFirst();
+  await running;
+  const done = client.renderForm(props);
+  assert.equal(protocolSelect(done).props.value, 'comfyui');
+  assert.equal(noteTextOf(done), '已识别为 ComfyUI（/object_info 返回 JSON 对象）');
+  assert.deepEqual(askedBodiesOf(client).map((body) => body.probe), [undefined, '/models', '/object_info']);
+});
+
+test('静态结论（一次请求都不发探测）：直接落结果，不走循环', async () => {
+  const client = createHarness({
+    detect: () => ({
+      status: 200,
+      body: { ok: true, done: true, protocol: 'google-gemini', matched: true, probed: false }
+    })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(protocolSelect(tree).props.value, 'google-gemini');
+  assert.equal(noteTextOf(tree), '已识别为 Google Gemini');
+  assert.equal(askedBodiesOf(client).length, 1, '静态判定只问一次宿主');
 });
