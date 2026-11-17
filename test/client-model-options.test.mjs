@@ -408,7 +408,16 @@ test('两段旧提示（整行说明 / 占位符清单）不再渲染', async ()
 });
 
 test('参数表为空时给一行空状态提示，有行就消失（不占表格行）', async () => {
-  const { harness, tree } = await openEditor(CONFIG, { params: PARAMS_RESPONSE });
+  // 「解析工作流」的响应里可以带可挂参数的行；这里用它把空表填上。
+  const analysis = {
+    ok: true,
+    format: 'api',
+    mapping: { prompt: { node: '18:17', input: 'value' } },
+    candidates: { prompt: [{ node: '18:17', input: 'value', classType: 'PrimitiveStringMultiline' }] },
+    params: [{ name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25 }],
+    warnings: []
+  };
+  const { harness, tree } = await openEditor(CONFIG, { analyze: analysis });
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
   let box = commonBox(opened);
@@ -418,22 +427,20 @@ test('参数表为空时给一行空状态提示，有行就消失（不占表�
   assert.equal(empty.props['data-param-grid'], undefined, '不是表格行');
   assert.equal(empty.props['data-param-table'], undefined, '也不另起一张表');
   assert.match(textOf(empty).join(''), /No parameters parsed yet/);
+  assert.match(textOf(empty).join(''), /Parse workflow/, '引导点「解析工作流」');
   assert.equal(commonRows(opened).length, 0, '确实还没有参数行');
 
-  // 解析参数并勾中一行后，空状态消失。
+  // 粘贴工作流并解析后，空状态消失。
   workflowTextarea(opened).props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
-  await findButton(opened, (node) => /Parse parameters/i.test(textOf(node).join(''))).props.onClick();
+  await findButton(opened, (node) => /Parse workflow/i.test(textOf(node).join(''))).props.onClick();
   await new Promise((resolve) => setImmediate(resolve));
-  const candidate = findAll(harness.renderRoot(), (node) => node.type === 'input'
-    && node.props['data-param-candidate'] === '18:7.steps')[0];
-  assert.ok(candidate, '候选行在');
-  candidate.props.onChange();
   opened = harness.renderRoot();
   box = commonBox(opened);
   assert.equal(findAll(box, (node) => node.props && node.props['data-param-empty']).length, 0,
     '有参数行就不再显示空状态');
   assert.equal(commonRows(opened).length, 1);
+  assert.equal(paramCell(commonRows(opened)[0], 'name').props.value, 'steps');
 });
 
 test('不靠解析的协议空表用通用文案（点「添加参数」自己加）', async () => {
@@ -551,123 +558,53 @@ test('the workflow panel can send the pasted graph to the analyze route', async 
   assert.equal(body.workflow, '{"1":{"class_type":"KSampler"}}');
 });
 
-/* ───────────── 解析参数：原始值输入 → 离散参数表的行 ───────────── */
+/* ───────────── ComfyUI 折叠区只保留「解析工作流」 ───────────── */
 
-const PARAMS_RESPONSE = {
-  ok: true,
-  format: 'api',
-  count: 2,
-  params: [
-    { node: '18:7', input: 'steps', name: 'steps', classType: 'KSampler', type: 'number', value: 25, display: '25' },
-    { node: '18:5', input: 'text', name: 'text', classType: 'CLIPTextEncode', type: 'text', value: 'a cat', display: 'a cat' }
-  ]
+test('解析参数入口、loading 与候选清单已移除，只留「解析工作流」', async () => {
+  const { harness, tree } = await openEditor(CONFIG);
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  findAll(opened, (node) => node.type === 'textarea')[0]
+    .props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  const labels = findAll(opened, (node) => node.type === 'button').map((node) => textOf(node).join(''));
+  assert.ok(labels.includes('Parse workflow'), '解析工作流还在');
+  assert.equal(labels.filter((label) => /Parse parameters/i.test(label)).length, 0, '解析参数按钮没了');
+  assert.equal(findAll(opened, (node) => node.props['data-param-key'] === 'params:parse').length, 0,
+    '入口的定位属性也不在了');
+  assert.equal(findAll(opened, (node) => node.props['data-param-candidate']).length, 0,
+    '候选清单整段不渲染');
+  assert.doesNotMatch(textOf(opened).join(' '), /Checked inputs become parameter rows/i,
+    '候选清单的说明文案也不再出现');
+});
+
+/** ComfyUI 工作流行里已经存下来的 enum 行：走的是和其他协议同一套 enum 方框。 */
+const COMFY_ENUM_CONFIG = {
+  providers: [{
+    ...CONFIG.providers[0],
+    modelOptions: {
+      'flux.safetensors': {
+        workflow: '{"1":{"class_type":"KSampler"}}',
+        params: [{
+          name: 'sampler_name', node: '18:7', input: 'sampler_name',
+          type: 'enum', options: ['euler', 'ddim'], expose: false
+        }]
+      }
+    }
+  }],
+  active: CONFIG.active,
+  defaults: {}
 };
 
-/** 打开 ComfyUI 折叠区，填一段工作流，点「解析参数」，返回（重渲染后的）harness。 */
-async function openParsedParams(response = PARAMS_RESPONSE) {
-  const built = await openEditor(CONFIG, { params: response });
-  optionsToggle(built.tree).props.onClick(fakeEvent());
-  let opened = built.harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  findAll(panel, (node) => node.type === 'textarea')[0]
-    .props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
-  opened = built.harness.renderRoot();
-  const parse = findButton(opened, (node) => /Parse parameters/i.test(textOf(node).join('')));
-  assert.ok(parse, 'expected a parse-parameters button');
-  await parse.props.onClick();
-  await new Promise((resolve) => setImmediate(resolve));
-  return built.harness;
-}
-
-test('解析参数 posts the workflow and lists the literal inputs', async () => {
-  const harness = await openParsedParams();
-  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/comfy/params'));
-  assert.equal(posted.length, 1, 'expected one params POST');
-  assert.equal(JSON.parse(posted[0].body).workflow, '{"1":{"class_type":"KSampler"}}');
-  const opened = harness.renderRoot();
-  const boxes = findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate']);
-  assert.deepEqual(boxes.map((box) => box.props['data-param-candidate']), ['18:7.steps', '18:5.text']);
-  assert.ok(boxes.every((box) => box.props.checked === false), 'nothing is picked before the user picks');
-  assert.equal(findAll(opened, (node) => node.props['data-param-key'] === 'params:add').length, 0,
-    'ComfyUI rows come from parsing, not from a blank row');
-});
-
-test('checking a candidate turns it into a table row with node/input, default and type', async () => {
-  const harness = await openParsedParams();
-  let opened = harness.renderRoot();
-  const box = findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0];
-  assert.ok(box, 'expected the steps candidate');
-  box.props.onChange();
-  opened = harness.renderRoot();
-  assert.deepEqual(findAll(opened, (node) => node.props && node.props['data-param-bind-target']), [],
-    '落点不再渲染：node/input 只留在数据里');
-  const stepsRow = findAll(opened, (node) => node.props && node.props['data-param-grid'] === 'params:row')
-    .find((row) => findAll(row, (node) => node.type === 'input'
-      && node.props['data-param-field'] === 'name' && node.props.value === 'steps').length);
-  const nameCell = findAll(stepsRow, (node) => node.props && node.props['data-param-cell'] === 'name')[0];
-  assert.ok(nameCell, '参数名单元格在');
-  assert.equal(nameCell.children.length, 1, '参数名格子里只剩输入框，没有第二行小字');
-  assert.equal(stepsRow.children.length, 5, '每行仍是五格');
-  assert.equal(findAll(stepsRow, (node) => node.type === 'summary').length, 0, '工作流行里没有折叠的选项小字');
-  assert.equal(stepsRow.props.style.minHeight, 48, '工作流行与别的行一样高');
-  assert.equal(findAll(opened, (node) => node.type === 'input'
-    && node.props['data-param-candidate'] === '18:7.steps')[0].props.checked, true,
-  'the candidate stays checked while its row exists');
-
-  // 取消勾选 = 从表里移除那一行；再勾上又回来。
-  findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
-    .props.onChange();
-  let cleared = harness.renderRoot();
-  assert.equal(commonRows(cleared).some((row) => findAll(row, (node) => node.type === 'input'
-    && node.props['data-param-field'] === 'name' && node.props.value === 'steps').length), false,
-  'unchecking removes the row');
-  findAll(cleared, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
-    .props.onChange();
-  opened = harness.renderRoot();
-
-  const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
-  await save.props.onClick();
-  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
-  const body = JSON.parse(posted[posted.length - 1].body);
-  const entry = body.config.providers.find((item) => item.id === 'p1').modelOptions['flux.safetensors'];
-  assert.ok(Array.isArray(entry.params) && entry.params.length === 1, 'the picked candidate must be saved as a row');
-  const row = entry.params[0];
-  assert.equal(row.node, '18:7');
-  assert.equal(row.input, 'steps');
-  assert.equal(row.name, 'steps');
-  assert.equal(row.type, 'number', 'INT folds into the table vocabulary');
-  assert.equal(row.default, '25', 'the default is the value the workflow carries');
-  assert.equal(row.expose, false, 'picking a row is not the same as exposing it');
-});
-
-test('a parse failure shows the host error instead of failing silently', async () => {
-  const harness = await openParsedParams({ ok: false, error: '工作流不是合法 JSON：Unexpected token n' });
-  const text = textOf(harness.renderRoot()).join(' ');
-  assert.match(text, /Parameter parsing failed/, 'the panel says what failed');
-  assert.match(text, /Unexpected token n/, 'and repeats the readable reason');
-});
-
 test('工作流的 enum 参数也单独成框：ComfyUI 折叠区走的是同一套渲染', async () => {
-  const harness = await openParsedParams({
-    ok: true,
-    format: 'api',
-    count: 1,
-    params: [{
-      node: '18:7', input: 'sampler_name', name: 'sampler_name', classType: 'KSampler',
-      type: 'enum', value: 'euler', display: 'euler', options: ['euler', 'ddim']
-    }]
-  });
-  let opened = harness.renderRoot();
-  const candidate = findAll(opened, (node) => node.type === 'input'
-    && node.props['data-param-candidate'] === '18:7.sampler_name')[0];
-  assert.ok(candidate, '候选清单里有这一项');
-  candidate.props.onChange();
-  opened = harness.renderRoot();
+  const { harness, tree } = await openEditor(COMFY_ENUM_CONFIG);
+  optionsToggle(tree).props.onClick(fakeEvent());
+  const opened = harness.renderRoot();
   assert.equal(commonRows(opened).length, 0, 'enum 行不进「常规」表');
   const box = enumBoxNamed(opened, 'sampler_name');
   assert.ok(box, 'enum 行在自己的方框里');
   assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.label', at).props.value),
-    ['euler', 'ddim'], '候选带来的选项原样呈现');
+    ['euler', 'ddim'], '存下来的选项原样呈现');
   assert.deepEqual(findAll(opened, (node) => node.props && node.props['data-param-bind-target']), [],
     '工作流的落点也不渲染');
 });
