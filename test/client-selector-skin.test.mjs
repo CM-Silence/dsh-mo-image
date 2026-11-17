@@ -553,8 +553,9 @@ test('the peak quality lights the codex violet treatment and its dust', () => {
   assert.equal(collectClass(tree, 'cmes-sp').length, 44, 'float and run layers each carry 22 sparkles');
   assert.equal(collectClass(tree, 'cmes-sp-float').length, 22);
   assert.equal(collectClass(tree, 'cmes-sp-run').length, 22);
-  assert.equal(collectClass(tree, 'cmes-sp-run')[0].props.style['--delay'], undefined,
-    'run particles spawn together at the knob instead of being pre-distributed');
+  const runDelays = collectClass(tree, 'cmes-sp-run').map((node) => node.props.style['--delay']);
+  assert.match(runDelays[0], /^\d+\.\d+s$/, 'run particles carry a positive stagger delay');
+  assert.notEqual(runDelays[0], runDelays[1], 'run particles are emitted one by one');
   assert.match(collectClass(tree, 'cmes-sp-float')[0].props.style.left, /%$/, 'the floating sparkles are spread horizontally');
   assert.equal(collectClass(tree, 'cmes-sp-float')[0].props.style['--x'], collectClass(tree, 'cmes-sp-float')[0].props.style.left,
     'the exit animation starts from the same spread position');
@@ -1012,8 +1013,9 @@ test('the codex rail slides to the released stop instead of teleporting', () => 
   const down = source.match(/const pointerDown = \(event\) => \{([\s\S]*?)\n      \};/);
   assert.ok(down, 'pointerDown found');
   assert.doesNotMatch(down[1], /move\(event\)/, 'pointerdown does not paint the knob immediately');
-  assert.match(source, /animation\.playbackRate = 0\.15/, 'entering Fast ramps the run layer up');
-  assert.match(source, /from\[index\] \* \(1 - t\)/, 'leaving Fast ramps the run layer down');
+  assert.match(source, /animation\.playbackRate = 1;[\s\S]{0,80}animation\.currentTime = 0;/,
+    'the run layer restarts at full speed');
+  assert.doesNotMatch(source, /playbackRate = 0\.15/, 'the run layer does not ramp from a low speed');
   assert.match(source, /document\.querySelectorAll\('\.cmes-popover'\)/, 'the probe follows the portaled codex popover');
   assert.doesNotMatch(source, /root\.querySelector\('\.cmes-popover'\)/, 'it does not look only inside .cmes-root');
 });
