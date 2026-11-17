@@ -82,7 +82,8 @@ test('config route migrates keys to the credentials store and never returns them
   assert.ok(Array.isArray(getBody.providerPresets));
   assert.ok(Array.isArray(getBody.localPresets));
   assert.ok(getBody.providerPresets.some((preset) => preset.id === 'gemini' && preset.adapter === 'google-gemini'));
-  assert.ok(getBody.providerPresets.some((preset) => preset.id === 'xai' && preset.adapter === 'xai-imagine'));
+  assert.ok(getBody.providerPresets.some((preset) => preset.id === 'xai' && preset.adapter === 'openai-images'
+    && preset.protocolOptions && preset.protocolOptions.edit === 'none'));
   assert.ok(getBody.localPresets.some((preset) => preset.id === 'a1111' && preset.adapter === 'a1111'));
   assert.ok(getBody.adapters.some((adapter) => adapter.id === 'a1111' && adapter.supportsModels === true));
   assert.equal(getBody.config.providers[0].keySource, 'file');

@@ -3,12 +3,13 @@
  *
  * 这一轮同样「只搬不改」：字段名从 `fieldsFor()` 拿、用 applyFields / promptParts 写进 body，
  * 但上游真正收到的字节必须和改造前完全一致。基线测试（test/adapter-body-regression.test.mjs）
- * 覆盖不到这五条——它们的真实请求体在 protocol 自己的 execute() 里拼，所以这里用 fetch 打桩
+ * 覆盖不到这几条——它们的真实请求体在 protocol 自己的 execute() 里拼，所以这里用 fetch 打桩
  * 抓住真实请求，逐条把**改造前**的 body 录成 deepEqual：
  *
  *   - dashscope-qwen-image：`input.messages[0].content[]` 的 image / text 项（图在前、提示词在后）、
  *     `parameters.size` 的 `W*H` 星号、`parameters.n` / `negative_prompt`；
- *   - zhipu：负面词拼进提示词、没有 n / response_format、尺寸 `WxH`；
+ *   - zhipu：负面词拼进提示词、没有 n / response_format、尺寸 `WxH`（已并入 openai-images，
+ *     所以走通用 composeBody，body 与当年 execute() 的产物逐字段一致）；
  *   - openai-responses：`input` 的 string / content[] 两种形状、`tools[0]` 里的 model / size /
  *     quality / output_format，以及 `tool_choice`；
  *   - openai-chat：`messages[0].content` 的 string / parts 两种形状与 `modalities`；
@@ -21,6 +22,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveAdapter } from '../lib/adapters.js';
+import { callImageApi } from '../lib/image-execution.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 const DATA_URL = 'data:image/png;base64,' + PNG_1PX;
@@ -137,30 +139,57 @@ test('百炼 qwen-image 图生图：参考图最多 3 张（第 4 张不发）',
   assert.deepEqual(content[content.length - 1], { text: '合成' });
 });
 
-/* ------------------------------------------------------------- 智谱 */
+/* ------------------------------------------------------------- 智谱（已并入 openai-images） */
+
+/**
+ * 智谱现在走通用路径（openai-images + `edit:'none'`）：旧 id 解析出来就是它。
+ * 用 callImageApi 发一次，body 由 composeBody 产出——和当年 execute() 手拼的逐字段一致。
+ */
+async function zhipuGenerate(t, provider, input) {
+  const adapter = resolveAdapter(provider, input.model);
+  assert.equal(adapter.id, 'openai-images');
+  const calls = capture(t, (url) => url.includes('/images/generations'), ZHIPU_PAYLOAD);
+  await callImageApi('generate', adapter, provider, input, new AbortController().signal);
+  assert.equal(calls.length, 1, '提交请求应该只发一次');
+  assert.equal(calls[0].init.method, 'POST');
+  return JSON.parse(calls[0].init.body);
+}
 
 test('智谱：负面词拼进提示词，没有 n / response_format，尺寸用 x 分隔', async (t) => {
   const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'zhipu', key: 'k' };
   const adapter = resolveAdapter(provider, 'cogview-4');
-  assert.equal(adapter.id, 'zhipu');
+  assert.equal(adapter.id, 'openai-images', '智谱已并进 openai-images');
+  assert.equal(adapter.endpoints.edit, '', "edit:'none'：没有编辑端点");
 
-  const body = await bodyOf(t, adapter, 'generate', provider, {
-    model: 'cogview-4', prompt: '一座山', negativePrompt: '  模糊  ', fitted: fitted
-  }, (url) => url.includes('/images/generations'), ZHIPU_PAYLOAD);
+  const body = await zhipuGenerate(t, provider, {
+    model: 'cogview-4', prompt: '一座山', negativePrompt: '模糊', fitted: fitted
+  });
 
-  // 负面词两头的空白在老实现里是 trim 掉的（拼进提示词前 trim），别在搬迁里丢掉。
-  assert.deepEqual(body, { model: 'cogview-4', prompt: '一座山\n\nAvoid: 模糊', size: '1024x1024' });
+  assert.deepEqual(body, { prompt: '一座山\n\nAvoid: 模糊', model: 'cogview-4', size: '1024x1024' });
 });
 
-test('智谱：只有空白的负面词不会在提示词后面留下 "Avoid:"', async (t) => {
+test('智谱：没有负面词（undefined）时提示词后面不留 "Avoid:"', async (t) => {
   const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'zhipu', key: 'k' };
-  const adapter = resolveAdapter(provider, 'cogview-4');
 
-  const body = await bodyOf(t, adapter, 'generate', provider, {
+  const body = await zhipuGenerate(t, provider, {
+    model: 'cogview-4', prompt: '一座山', fitted: fitted
+  });
+
+  assert.deepEqual(body, { prompt: '一座山', model: 'cogview-4', size: '1024x1024' });
+});
+
+test('智谱：纯空白的负面词仍然会拼出 "Avoid:"（与老 execute() 的唯一差别，工具层不可达）', async (t) => {
+  // 老 zhipu 的 execute() 在拼接前 trim 过负面词，纯空白等于没有；通用路径的
+  // promptParts 把非空字符串一律当「有值」。工具层（lib/index.js）已经
+  // `String(args.negative_prompt).trim() || undefined`，走工具永远到不了这个分支；
+  // 这里把现状钉住，免得将来「顺手优化」时没人知道它跟老实现不同。
+  const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'zhipu', key: 'k' };
+
+  const body = await zhipuGenerate(t, provider, {
     model: 'cogview-4', prompt: '一座山', negativePrompt: '   ', fitted: fitted
-  }, (url) => url.includes('/images/generations'), ZHIPU_PAYLOAD);
+  });
 
-  assert.deepEqual(body, { model: 'cogview-4', prompt: '一座山', size: '1024x1024' });
+  assert.deepEqual(body, { prompt: '一座山\n\nAvoid:    ', model: 'cogview-4', size: '1024x1024' });
 });
 
 /* --------------------------------------------------- OpenAI Responses */
@@ -301,11 +330,10 @@ test('模型选项把智谱的提示词改到 input.prompt，body 就写到那�
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'zhipu', key: 'k',
     modelOptions: { 'cogview-4': { fields: { prompt: { path: 'input.prompt' }, negative: null } } }
   };
-  const adapter = resolveAdapter(provider, 'cogview-4');
 
-  const body = await bodyOf(t, adapter, 'generate', provider, {
+  const body = await zhipuGenerate(t, provider, {
     model: 'cogview-4', prompt: '一座山', negativePrompt: '模糊', fitted: fitted
-  }, (url) => url.includes('/images/generations'), ZHIPU_PAYLOAD);
+  });
 
   assert.deepEqual(body.input, { prompt: '一座山' });
   assert.equal(body.prompt, undefined, '模板已经指向 input.prompt，老位置不该还留着');

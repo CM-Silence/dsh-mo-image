@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布
+
+1. **结果图下载统一鉴权**：走 `execute()` 的 12 条协议不再用裸 fetch 下载结果图，全部改为 `fetchResultImage()`——同源带 Key、跨源默认不带、适配器声明过的 `resultAuthOrigins` 才带。同一个 `data[0].url` 在同步 / 异步 / 通用三条路径上产出的请求头现在完全一致，也不会再把 Key 发给响应里伪造的第三方域名。
+2. **协议进一步收敛（17 条）**：`azure-openai`（`auth:'api-key'`）、`xai-imagine` 与 `zhipu`（`edit:'none'`）并进 `openai-images`；老配置读取时自动映射，`presetId` / `modelOptions` 原样保留。xai 的 `response_format` 与 `resolution`、azure 的 `output_format` 改为按主机的请求常量 / 尺寸规则，线上 body 逐字节不变（基线 `variants` 段继续锁死）。
+3. **「识别协议」不再误判已知主机**：官方 / Azure / Together / 硅基流动 / 火山方舟（含 `/api/plan/v3`）/ xAI / 智谱等 OpenAI 兼容主机直接判定为 `openai-images` 并带回协议级选项，**零探测请求**；只有主机不在表里时才 `GET /models`，失败再退到自定义。
+
 ## v0.7.0
 
 1. **尺寸选项优化与严格模式**：现在模型选择器中的size参数会根据模型实际情况调整。严格模式下成品强制等于请求尺寸，比例不符先居中裁切再缩放；结果同时给出成品 `size` 与上游原始 `generated`，原图保留为同目录的 `-original` 文件。

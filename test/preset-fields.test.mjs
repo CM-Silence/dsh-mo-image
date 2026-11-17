@@ -152,7 +152,7 @@ test('同一个网关家族的所有预设，fields 必须完全一致（防止�
   }
 });
 
-test('协议复用清单：合并后这 8 条预设落在同一条 openai-images 上', () => {
+test('协议复用清单：合并后这 13 条预设落在同一条 openai-images 上', () => {
   const byProtocol = new Map();
   for (const preset of presets()) {
     const id = protocolOf(preset).id;
@@ -161,11 +161,11 @@ test('协议复用清单：合并后这 8 条预设落在同一条 openai-images
   }
   assert.deepEqual(
     byProtocol.get('openai-images').sort(),
-    ['fireworks', 'localai', 'novita', 'openai', 'openai-gateway', 'sd-server', 'siliconflow', 'together', 'volcengine', 'volcengine-plan'].sort(),
+    ['azure', 'bigmodel', 'fireworks', 'localai', 'novita', 'openai', 'openai-gateway', 'sd-server', 'siliconflow', 'together', 'volcengine', 'volcengine-plan', 'xai'].sort(),
     'openai-images 的复用清单变了'
   );
-  // 六条合并掉的协议 id 不能再出现在清单里。
-  for (const gone of ['dall-e-3', 'gpt-image', 'together', 'localai', 'siliconflow', 'volcengine-ark']) {
+  // 合并掉的协议 id 不能再出现在清单里。
+  for (const gone of ['dall-e-3', 'gpt-image', 'together', 'localai', 'siliconflow', 'volcengine-ark', 'azure-openai', 'xai-imagine', 'zhipu']) {
     assert.equal(byProtocol.has(gone), false, gone + ' 应该已经合并进 openai-images');
   }
 });

@@ -264,12 +264,12 @@ $DSH_HOME/.credentials.yaml
 | OpenAI | `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
 | **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在高级设置里填「调度模型」 |
 | **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
-| **Azure OpenAI** | `azure-openai` | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
+| **Azure OpenAI** | `openai-images`（`auth:'api-key'`） | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
 | **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
 | **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **魔搭 ModelScope** | `modelscope` | `Qwen/Qwen-Image-2.1`、`Qwen/Qwen-Image-Edit` | 异步任务；提交带 `X-ModelScope-Async-Mode`，轮询 `/v1/tasks/{id}` |
-| **xAI Grok Imagine** | `xai-imagine` | `grok-imagine-image` | 生成；原生编辑暂未支持 |
+| **xAI Grok Imagine** | `openai-images`（`edit:'none'`） | `grok-imagine-image` | 生成；`aspect_ratio` + `resolution`（由主机规则给），原生编辑暂未支持 |
 | **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
 | **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4`、`ideogram-4-5`、`ideogram-4-transparent` | 生成；模型写在路径里，4 收 JSON+像素枚举，4-5 只收 `size`，3/transparent 收字母 `x` 的比例 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
@@ -282,7 +282,7 @@ $DSH_HOME/.credentials.yaml
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
 | 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 异步入队任务；只有 wan2.7 认 `1K/2K/4K` 档位 |
 | 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
-| 智谱 BigModel | `zhipu` | `cogview-4`、`glm-image` | 生成；一次只回一张 |
+| 智谱 BigModel | `openai-images`（`edit:'none'`） | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 
 说明：
 
@@ -408,9 +408,9 @@ $DSH_HOME/.credentials.yaml
 | `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置适配器：`openai-images`（通用兜底，自动同步/异步；`edit` / `auth` 两个协议级选项）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`。
+内置适配器：`openai-images`（通用兜底，自动同步/异步；`edit` / `auth` 两个协议级选项，Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 都落在它上面）、`openai-responses`、`openrouter-images`、`openai-chat`（中转）、`google-gemini`、`recraft`、`ideogram`、`stability`、`dashscope-qwen-image`、`dashscope-wanx`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`。
 
-> 协议收敛（0.8）：原来按厂家分叉的 `dall-e-3`、`gpt-image`、`together`、`localai`、`siliconflow`、`volcengine-ark` 地址与组装本来就一样，现在合并成一条 `openai-images` + 两个选项：`edit`（`edits` / `same` / `none`，编辑走 `/images/edits`、走同一个 generations、或没有编辑）与 `auth`（`bearer` / `api-key`）。老配置里的旧 id 会在读取时自动改写，模型规则、尺寸/质量、锁与预设都不受影响。
+> 协议收敛（0.8）：原来按厂家分叉的 `dall-e-3`、`gpt-image`、`together`、`localai`、`siliconflow`、`volcengine-ark`、`azure-openai`、`xai-imagine`、`zhipu` 地址与组装本来就一样，现在合并成一条 `openai-images` + 两个选项：`edit`（`edits` / `same` / `none`，编辑走 `/images/edits`、走同一个 generations、或没有编辑）与 `auth`（`bearer` / `api-key`）。老配置里的旧 id 会在读取时自动改写，模型规则、尺寸/质量、锁与预设都不受影响。
 
 交互形态都覆盖：
 
@@ -418,12 +418,12 @@ $DSH_HOME/.credentials.yaml
 - **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate、魔搭五家的提交与状态词都收在适配器的 `async` 描述符里
 - **通用兜底自动识别**：自定义 API 和不认识的域名走 `openai-images`，它会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
 
-选择规则：设置页的「API 协议」下拉可直接指定适配器；选「自动识别」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → `openai-images` 兜底」匹配。
+选择规则：设置页的「API 协议」下拉可直接指定适配器；点「识别协议」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → 已知 OpenAI 兼容主机表（官方 / Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 … ）→ 一次只读 `GET /models` 探测 → 自定义」匹配。命中已知主机时**一次请求都不发**（这些网关的 `/models` 常常是 404，探测只会把能用的地址误判成自定义），并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。
 
 ## 已知限制
 
 - **通用异步识别有边界**：`openai-images` 的自动轮询只覆盖「OpenAI 兼容形状 + 常见任务字段/状态词」。如果厂商要求专用请求头（如魔搭的 `X-ModelScope-Async-Mode`）、专用轮询头、或者完全不同的 envelope，仍然需要专用适配器——这类平台已经内置了适配器（`modelscope`、`bfl`、`fal`、`replicate`、`dashscope-wanx`）。
-- **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`、`bfl`、`fal`、`replicate`、`modelscope` 的协议形状来自 2026-11 官方文档/官方示例代码，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
+- **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`openai-chat`、`bfl`、`fal`、`replicate`、`modelscope` 的协议形状来自 2026-11 官方文档/官方示例代码，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
 - **gpt-image 的新参数没做 UI**：`background` / `moderation` / `output_compression` 等 2026 年新增字段暂不发送，等设置页有入口再接。
 - **C 级协议未实现**：Krea、Luma Photon、Runway、腾讯混元、百度文心一格、Adobe Firefly、Gemini Interactions API 留在后续版本。
 - **Google Imagen 已停用**：Gemini API 下线、Vertex 侧 2026-06-30 停服，插件不再支持；请改用 `gemini-3.1-flash-image` 等 Nano Banana 模型。

@@ -8,8 +8,9 @@
     "  async-build    = 异步描述符的 async.build() 拼提交体，这里只录了通用 composeBody 的产物",
     "generate / edit：{ supported, path, body }；body 是 multipart 时记成 { $multipart: {…} }，文件项是 { $file, type, bytes }；",
     "prepare* 抛错时记成 { supported, throws }。",
-    "variants：协议合并（dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark",
-    "  → openai-images + edit/auth 选项）之前这六条协议各自的输入，按新写法重放的 body。",
+    "variants：协议合并（dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark /",
+    "  azure-openai / xai-imagine / zhipu → openai-images + edit/auth 选项）之前这几条协议各自的输入，",
+    "  按新写法重放的 body；legacy/xai-imagine 与 legacy/zhipu 的 generate 段是合并前 execute() 真正发出去的请求体。",
     "  它们与 adapters 里的条目同形，多一个 options 字段记录协议级选项。",
     "人工维护的记录：test/adapter-body-regression.test.mjs（改这个文件请先读它的文件头）。"
   ],
@@ -27,26 +28,6 @@
         "supported": true,
         "path": "/models",
         "body": {
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "xai-imagine": {
-      "model": "grok-imagine-image",
-      "quality": null,
-      "covers": "execute",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "aspect_ratio": "1:1"
-        }
-      },
-      "edit": {
-        "supported": false,
-        "path": "",
-        "body": {
-          "aspect_ratio": "1:1",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
       }
@@ -152,26 +133,6 @@
         "path": "/services/aigc/multimodal-generation/generation",
         "body": {
           "size": "1024*1024",
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "zhipu": {
-      "model": "cogview-4",
-      "quality": null,
-      "covers": "execute",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": false,
-        "path": "",
-        "body": {
-          "size": "1024x1024",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
       }
@@ -391,42 +352,6 @@
         "body": {
           "aspect_ratio": "1:1",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "azure-openai": {
-      "model": "gpt-image-2.5-flare",
-      "quality": "high",
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "model": "gpt-image-2.5-flare",
-          "n": 1,
-          "quality": "high",
-          "output_format": "png",
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": true,
-        "path": "/images/edits",
-        "body": {
-          "$multipart": {
-            "prompt": "a cat sitting on a windowsill, soft morning light",
-            "model": "gpt-image-2.5-flare",
-            "n": "1",
-            "quality": "high",
-            "output_format": "png",
-            "size": "1024x1024",
-            "image[]": {
-              "$file": "ref.png",
-              "type": "image/png",
-              "bytes": 68
-            }
-          }
         }
       }
     },
@@ -742,6 +667,96 @@
               "bytes": 68
             }
           }
+        }
+      }
+    },
+    "legacy/azure-openai": {
+      "model": "gpt-image-2.5-flare",
+      "quality": "high",
+      "covers": "prepare",
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "model": "gpt-image-2.5-flare",
+          "n": 1,
+          "quality": "high",
+          "output_format": "png",
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "model": "gpt-image-2.5-flare",
+            "n": "1",
+            "quality": "high",
+            "output_format": "png",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      },
+      "options": {
+        "auth": "api-key"
+      }
+    },
+    "legacy/xai-imagine": {
+      "model": "grok-imagine-image",
+      "quality": null,
+      "options": {
+        "edit": "none"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "grok-imagine-image",
+          "prompt": "a cat sitting on a windowsill, soft morning light\n\nAvoid: blurry, watermark, text",
+          "n": 1,
+          "response_format": "url",
+          "aspect_ratio": "1:1",
+          "resolution": "1k"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "aspect_ratio": "1:1",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "legacy/zhipu": {
+      "model": "cogview-4",
+      "quality": null,
+      "options": {
+        "edit": "none"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "prompt": "a cat sitting on a windowsill, soft morning light\n\nAvoid: blurry, watermark, text",
+          "model": "cogview-4",
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
       }
     }

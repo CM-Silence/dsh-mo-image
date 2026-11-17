@@ -115,9 +115,11 @@ test('openrouter-images sends input_references for edits', async (t) => {
 });
 
 test('azure images uses the api-key header and the deployment name as model', () => {
+  // Azure 不再是独立协议：openai-images + 协议级选项 auth:'api-key'（老 id 由 LEGACY 映射升上来）。
   const provider = { baseUrl: 'https://res.openai.azure.com/openai/v1', adapter: 'azure-openai', key: 'k' };
   const adapter = resolveAdapter(provider, 'my-deployment');
-  assert.equal(adapter.id, 'azure-openai');
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.authHeader, 'api-key', 'azure 的鉴权头形态由协议级选项给');
 
   const built = prepareGenerate(adapter, provider, { model: 'my-deployment', prompt: 'a bear', fitted }, new Set());
   assert.equal(built.path, '/images/generations');

@@ -1,8 +1,8 @@
 /**
  * 协议下拉的「别一长串」改造 + 请求体里的「识别协议」按钮。
  *
- * - 默认只列常用几条（自动 / OpenAI 家族 / Gemini / Azure / 自定义 / 更多协议…），
- *   点「更多协议…」才分组展开全部 20 条；展开状态只是 UI，重开面板就收起，
+ * - 默认只列常用几条（自动 / OpenAI 家族 / Gemini / 自定义 / 更多协议…），
+ *   点「更多协议…」才分组展开全部 17 条；展开状态只是 UI，重开面板就收起，
  *   「更多协议…」也绝不会变成配置里的值。
  * - 「识别协议」先问宿主（本地匹配不发请求），兜底到自定义时三条地址预填相对路径。
  */
@@ -202,25 +202,25 @@ function formProps(provider) {
   return { provider: provider, isNew: false, onSave() {}, onClose() {}, t: t };
 }
 
-test('默认只列常用协议：加上「自动」「自定义」「更多协议…」一共 8 项', () => {
+test('默认只列常用协议：加上「自动」「自定义」「更多协议…」一共 7 项', () => {
   const client = createHarness();
   client.setCatalog();
   const tree = client.renderForm(formProps(providerFixture()));
   const select = protocolSelect(tree);
   assert.ok(select, '找不到协议下拉');
   assert.deepEqual(optionValues(select), [
-    '', 'openai-images', 'openai-chat', 'openai-responses', 'google-gemini', 'azure-openai', 'custom', MORE
+    '', 'openai-images', 'openai-chat', 'openai-responses', 'google-gemini', 'custom', MORE
   ]);
   assert.ok(optionValues(select).length <= 9, '默认渲染的 option 不能超过 9 条');
   assert.deepEqual(optionTexts(select), [
     '自动', 'OpenAI Images', 'OpenAI Chat Completions', 'OpenAI Responses',
-    'Google Gemini', 'Azure OpenAI', '自定义（自己填地址）', '更多协议…'
+    'Google Gemini', '自定义（自己填地址）', '更多协议…'
   ]);
   // 「自动」只是没选协议时的当前状态，不是可选项。
   assert.equal(optionNodes(select)[0].props.disabled, true);
 });
 
-test('点「更多协议…」展开全部 20 条并按组分段，且它不会变成选中的值', () => {
+test('点「更多协议…」展开全部 17 条并按组分段，且它不会变成选中的值', () => {
   const client = createHarness();
   client.setCatalog();
   const props = formProps(providerFixture());
@@ -233,7 +233,7 @@ test('点「更多协议…」展开全部 20 条并按组分段，且它不会�
   for (const id of ids) assert.ok(values.includes(id), '展开后要能看到 ' + id);
   assert.equal(values.filter((value) => value === '').length, 1, '只有一条「自动」占位');
   assert.ok(!values.includes(MORE), '展开后不再给「更多协议…」入口');
-  assert.equal(values.length, 22, '20 条协议 + 自动 + 自定义');
+  assert.equal(values.length, 19, '17 条协议 + 自动 + 自定义');
   assert.ok(values.includes('stability'), '长尾协议 stability 也在展开列表里');
   assert.equal(expanded.props.value, '', '「更多协议…」不能写进 draft');
   assert.deepEqual(optgroupLabels(expanded), ['通用', '兼容网关', '各家原生', '本地部署', '异步任务']);
@@ -308,6 +308,28 @@ test('识别协议：认得出具体协议 → 直接切过去，提示具体名
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'ok');
   assert.equal(textOf(noteOf(tree)).join(''), '已识别为 Google Gemini');
   assert.deepEqual(routeInputs(tree), {}, '不是自定义协议，就不该出现三条地址');
+});
+
+test('识别协议：已知主机连同协议级选项一起带回，面板直接显示那个取值', async () => {
+  // 宿主对已知的 OpenAI 兼容主机不再探测，直接判定 openai-images + 该主机的选项。
+  const client = createHarness({
+    detect: {
+      status: 200,
+      body: { ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { edit: 'same' } }
+    }
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3' }));
+  await detectButton(client.renderForm(props)).props.onClick();
+  const tree = client.renderForm(props);
+
+  assert.equal(protocolSelect(tree).props.value, 'openai-images');
+  const editOption = findAll(tree, (node) => node.type === 'select'
+    && node.props && node.props['data-mo-image-protocol-option'] === 'edit')[0];
+  assert.ok(editOption, 'openai-images 的协议级选项要出现在面板里');
+  assert.equal(editOption.props.value, 'same', '识别结论里的 edit 选项要写进 draft，不能重置成默认');
+  assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'ok');
+  assert.equal(textOf(noteOf(tree)).join(''), '已识别为 OpenAI Images');
 });
 
 test('识别协议：没有 API 地址时不发请求，直接提示', async () => {

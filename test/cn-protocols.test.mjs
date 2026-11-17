@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveAdapter, prepareGenerate, prepareEdit, fitSize, adapterSupportsKind } from '../lib/adapters.js';
+import { callImageApi } from '../lib/image-execution.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -62,13 +63,16 @@ test('zhipu omits n and response_format', async (t) => {
 
   const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'zhipu', key: 'k' };
   const adapter = resolveAdapter(provider, 'cogview-4');
-  assert.equal(adapter.id, 'zhipu');
+  // zhipu 已并进 openai-images（edit:'none'）：body 由通用 composeBody 产出。
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.endpoints.edit, '');
 
-  const result = await adapter.execute('generate', provider, {
+  const result = await callImageApi('generate', adapter, provider, {
     model: 'cogview-4', prompt: '一座山', fitted
   }, new AbortController().signal);
 
   assert.ok(result.bytes.length > 0);
+  assert.ok(captured.url.endsWith('/images/generations'));
   const body = JSON.parse(captured.init.body);
   assert.equal(body.n, undefined);
   assert.equal(body.response_format, undefined);

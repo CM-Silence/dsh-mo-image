@@ -1,15 +1,15 @@
 /**
- * 协议收敛：六条 OpenAI Images 家族协议 → 一条 openai-images + 协议级选项。
+ * 协议收敛：OpenAI Images 家族的七条协议 → 一条 openai-images + 协议级选项。
  *
  * 这里锁四件事：
  *
  *   1. **旧 id 的映射**：老配置里的 dall-e-3 / gpt-image / together / localai /
- *      siliconflow / volcengine-ark 升级成 openai-images + 对应的 `edit` 选项；
- *      幂等（已经是新值的不能再变），而且 presetId / modelOptions 原样保留。
+ *      siliconflow / volcengine-ark / azure-openai 升级成 openai-images + 对应选项
+ *      （`edit` / `auth`）；幂等（已经是新值的不能再变），而且 presetId / modelOptions 原样保留。
  *   2. **旧 id 与新 id 产出同一个请求体**：同一模型经旧 id（升级后）与新 id 发出的
  *      path / headers / body 逐字节一致——合并只许改名字，不许改线上请求。
  *   3. **选项本身**：`edit:'same' | 'none'` 的编辑地址与编码、`auth:'api-key'` 的鉴权头。
- *   4. 清单里不再有那六个 id（下拉少 6 项）。
+ *   4. 清单里不再有那七个 id。
  *
  * 基线层面的「旧协议 body 没变」由 test/adapter-body-regression.test.mjs 的 variants 段锁着。
  */
@@ -32,7 +32,13 @@ const LEGACY = {
   'together': { model: 'black-forest-labs/FLUX.1-schnell', baseUrl: 'https://api.together.xyz/v1', options: { edit: 'none' } },
   'localai': { model: 'localai-model', baseUrl: 'http://127.0.0.1:8080/v1', options: { edit: 'none' } },
   'siliconflow': { model: 'Qwen/Qwen-Image', baseUrl: 'https://api.siliconflow.cn/v1', options: { edit: 'same' } },
-  'volcengine-ark': { model: 'doubao-seedream-4-0-250828', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', options: { edit: 'same' } }
+  'volcengine-ark': { model: 'doubao-seedream-4-0-250828', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', options: { edit: 'same' } },
+  // Azure 与官方只差鉴权头形态：地址三元组 / 传输 / 字段模板都一样。
+  'azure-openai': { model: 'gpt-image-2.5-flare', baseUrl: 'https://example-resource.openai.azure.com/openai/v1', options: { auth: 'api-key' } },
+  // xAI / 智谱：地址三元组一样、没有编辑端点；body 全在规则表里（xai 的 response_format /
+  // resolution 由请求常量规则与尺寸规则给）。
+  'xai-imagine': { model: 'grok-imagine-image', baseUrl: 'https://api.x.ai/v1', options: { edit: 'none' } },
+  'zhipu': { model: 'cogview-4', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', options: { edit: 'none' } }
 };
 
 function providerOf(id, extra) {
@@ -125,19 +131,26 @@ test('provider.protocol 上的旧 id 也一起改掉', () => {
   assert.deepEqual(mapped.protocolOptions, { edit: 'same' });
 });
 
-test('映射表与实现一致：LEGACY_PROTOCOL_ALIASES 里就是这六条', () => {
+test('映射表与实现一致：LEGACY_PROTOCOL_ALIASES 的键与测试表一一对应', () => {
+  // 按实现动态比：再加一条映射时这里不会再红，只有在「实现漏了 / 测试表漏了」时才红。
   assert.deepEqual(Object.keys(LEGACY_PROTOCOL_ALIASES).sort(), Object.keys(LEGACY).sort());
   for (const [legacy, spec] of Object.entries(LEGACY)) {
     assert.equal(LEGACY_PROTOCOL_ALIASES[legacy].adapter, 'openai-images', legacy);
     const declared = LEGACY_PROTOCOL_ALIASES[legacy].protocolOptions;
     assert.deepEqual(declared, spec.options, legacy + ' 的迁移选项与测试表不一致');
   }
+  for (const [legacy, target] of Object.entries(LEGACY_PROTOCOL_ALIASES)) {
+    assert.equal(target.adapter, 'openai-images', legacy + ' 应该并进 openai-images');
+  }
 });
 
-test('清单里没有那六条协议了（下拉少 6 项）', () => {
+test('清单里没有那些老协议 id 了', () => {
   const ids = listAdapters().map((entry) => entry.id);
-  for (const legacy of Object.keys(LEGACY)) assert.equal(ids.includes(legacy), false, legacy + ' 还留在协议清单里');
-  assert.equal(ids.length, 20, '协议数变了');
+  const legacyIds = Object.keys(LEGACY_PROTOCOL_ALIASES);
+  for (const legacy of legacyIds) assert.equal(ids.includes(legacy), false, legacy + ' 还留在协议清单里');
+  // 剩下的协议数 = 现存清单；老 id 不可能再占位（上面逐条断言过），这里守住总数。
+  assert.equal(ids.length, 17, '协议数变了');
+  assert.equal(ids.length + legacyIds.length, 26, '老 26 条协议要能被「现存 + 迁移表」完全覆盖');
 });
 
 /* -------------------------------------------- 2. 旧 id 与新 id 的请求体一致 */

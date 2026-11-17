@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, mapQuality, filterImageModels } from '../lib/adapters.js';
+import { callImageApi } from '../lib/image-execution.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -96,8 +97,12 @@ test('xai imagine leaves the aspect ratio out while the size is Auto', async (t)
     calls.push({ url: String(url), init });
     return jsonResponse({ data: [{ b64_json: PNG_1PX }] });
   };
+  // xai 已并进 openai-images（edit:'none'）：body 由通用 composeBody 产出，
+  // aspect_ratio / resolution 由 api.x.ai 的尺寸规则给。
   const provider = { baseUrl: 'https://api.x.ai/v1', adapter: 'xai-imagine', key: 'k' };
-  await resolveAdapter(provider, 'grok-imagine-1').execute('generate', provider, {
+  const adapter = resolveAdapter(provider, 'grok-imagine-1');
+  assert.equal(adapter.id, 'openai-images');
+  await callImageApi('generate', adapter, provider, {
     model: 'grok-imagine-1', prompt: 'a cat', fitted: { omit: true, size: 'none' }
   }, new AbortController().signal);
   const body = JSON.parse(calls.at(-1).init.body);
@@ -106,7 +111,10 @@ test('xai imagine leaves the aspect ratio out while the size is Auto', async (t)
 });
 
 test('host-specific adapters win over model-only matches', () => {
-  assert.equal(resolveAdapter({ baseUrl: 'https://res.openai.azure.com/openai/v1' }, 'gpt-image-2.5-flare').id, 'azure-openai');
+  // Azure 并进 openai-images（只差 auth 选项），所以这里比的不再是协议 id 而是鉴权头形态。
+  const azure = resolveAdapter({ baseUrl: 'https://res.openai.azure.com/openai/v1' }, 'gpt-image-2.5-flare');
+  assert.equal(azure.id, 'openai-images');
+  assert.equal(azure.authHeader, 'api-key');
   assert.equal(resolveAdapter({ baseUrl: 'https://openrouter.ai/api/v1' }, 'openai/gpt-image-2.5-flare').id, 'openrouter-images');
   // GPT-Image / DALL·E 3 不再各占一条协议：官方端点与中转站都落到合并后的 openai-images。
   assert.equal(resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare').id, 'openai-images');
@@ -152,7 +160,8 @@ test('provider manifests include hot image providers and native capabilities', (
   assert.ok(presets.find((preset) => preset.id === 'gemini').models.includes('gemini-2.5-flash-image'));
   assert.ok(presets.find((preset) => preset.id === 'xai').models.includes('grok-imagine-image'));
   assert.ok(adapters.some((adapter) => adapter.id === 'google-gemini' && adapter.supportsModels));
-  assert.ok(adapters.some((adapter) => adapter.id === 'xai-imagine' && adapter.supportsModels));
+  // xAI 并进 openai-images 了：模型清单改由通用 /models 提供（按图片关键词过滤）。
+  assert.ok(adapters.some((adapter) => adapter.id === 'openai-images' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'recraft' && adapter.supportsModels));
   assert.ok(adapters.some((adapter) => adapter.id === 'ideogram' && adapter.supportsModels));
   for (const preset of presets) {
@@ -308,9 +317,11 @@ test('xAI Grok Imagine sends aspect/resolution and decodes image output', async 
     captured = { url: String(url), init };
     return jsonResponse({ data: [{ b64_json: PNG_1PX }] });
   };
+  // 合并后由 api.x.ai 的尺寸规则给 aspect_ratio + resolution，response_format 来自请求常量规则。
   const provider = { baseUrl: 'https://api.x.ai/v1', adapter: 'xai-imagine', key: 'test-key' };
   const adapter = resolveAdapter(provider, 'grok-imagine-image');
-  const result = await adapter.execute('generate', provider, {
+  assert.equal(adapter.id, 'openai-images');
+  const result = await callImageApi('generate', adapter, provider, {
     model: 'grok-imagine-image', prompt: 'a robot',
     fitted: { width: 1024, height: 1024, size: '1024x1024', aspect: '1:1', tier: '1k' }
   }, new AbortController().signal);
@@ -319,6 +330,8 @@ test('xAI Grok Imagine sends aspect/resolution and decodes image output', async 
   const body = JSON.parse(captured.init.body);
   assert.equal(body.aspect_ratio, '1:1');
   assert.equal(body.resolution, '1k');
+  assert.equal(body.response_format, 'url', 'xai 要 url 形态（合并前写在 execute 里）');
+  assert.equal(body.model, 'grok-imagine-image');
 });
 
 test('Recraft uses the OpenAI-shaped generation endpoint', async (t) => {

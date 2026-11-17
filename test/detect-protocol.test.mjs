@@ -1,8 +1,12 @@
 /**
  * 「识别协议」按钮的宿主半边（detectProtocolOf）。
  *
- * 规矩只有一条：能靠地址/模型名认出来的，**一次请求都不发**；只落到兜底的 openai-images
- * 才允许探测一次 GET /models——而且只读，绝不能碰 /images/generations（会花钱、耗配额）。
+ * 规矩只有两条：
+ *   1. 能靠地址/模型名认出来的，**一次请求都不发**——包括「已知的 OpenAI 兼容主机」
+ *      （官方 / Azure / Together / 硅基流动 / 火山方舟 …）：这些地址直接判定为
+ *      openai-images，并带上该主机的协议级选项；
+ *   2. 只有主机完全不在表里（中转站 / 自建网关）才探测一次 GET /models——而且只读，
+ *      绝不能碰 /images/generations（会花钱、耗配额）。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,13 +33,10 @@ test('认得出具体协议时一次探测都不发', async (t) => {
   const calls = stubFetch(t, () => { throw new Error('本地匹配不该发请求'); });
   const cases = [
     ['https://generativelanguage.googleapis.com/v1beta', 'gemini-2.5-flash-image', 'google-gemini'],
-    ['https://api.x.ai/v1', 'grok-imagine-image', 'xai-imagine'],
     ['https://external.api.recraft.ai/v1', 'recraftv4', 'recraft'],
-    ['https://api.openai.azure.com/openai/v1', 'gpt-image-2.5-flare', 'azure-openai'],
     ['https://openrouter.ai/api/v1', 'google/gemini-3.1-flash-image', 'openrouter-images'],
     ['https://api.bfl.ai/v1', 'flux-pro-1.1', 'bfl'],
     ['https://api.replicate.com/v1', 'black-forest-labs/flux', 'replicate'],
-    ['https://open.bigmodel.cn/api/paas/v4', 'cogview-4', 'zhipu'],
     ['https://dashscope.aliyuncs.com/api/v1', 'qwen-image-3.0-pro', 'dashscope-qwen-image'],
     ['https://dashscope.aliyuncs.com/api/v1', 'wanx2.1-t2i-turbo', 'dashscope-wanx']
   ];
@@ -44,6 +45,32 @@ test('认得出具体协议时一次探测都不发', async (t) => {
     assert.deepEqual(result, { protocol: protocol, matched: true, probed: false }, baseUrl + ' → ' + protocol);
   }
   assert.deepEqual(calls, [], '本地匹配阶段不该发任何请求');
+});
+
+test('已知的 OpenAI 兼容主机：直接判定 openai-images，零探测', async (t) => {
+  const calls = stubFetch(t, () => { throw new Error('已知主机不该探测 /models'); });
+  const cases = [
+    // 方舟 Agent Plan 的完整地址：/api/plan/v3/models 是 404，靠探测永远认不出来。
+    ['https://ark.cn-beijing.volces.com/api/plan/v3', { edit: 'same' }],
+    ['https://ark.cn-beijing.volces.com/api/v3', { edit: 'same' }],
+    ['https://api.together.xyz/v1', { edit: 'none' }],
+    ['https://api.siliconflow.cn/v1', { edit: 'same' }],
+    // Azure 并进 openai-images 之后，鉴权形态靠选项带回来。
+    ['https://res.openai.azure.com/openai/v1', { auth: 'api-key' }],
+    ['https://api.openai.com/v1', {}],
+    ['https://api.fireworks.ai/inference/v1', {}],
+    ['https://api.novita.ai/v3/openai', {}],
+    // xAI / 智谱也并进来了：没有编辑端点。
+    ['https://api.x.ai/v1', { edit: 'none' }],
+    ['https://open.bigmodel.cn/api/paas/v4', { edit: 'none' }]
+  ];
+  for (const [baseUrl, expectedOptions] of cases) {
+    const result = await detectProtocolOf({ baseUrl: baseUrl, key: 'k' }, 'some-image-model');
+    const expected = { protocol: 'openai-images', matched: true, probed: false };
+    if (Object.keys(expectedOptions).length) expected.protocolOptions = expectedOptions;
+    assert.deepEqual(result, expected, baseUrl);
+  }
+  assert.deepEqual(calls, [], '已知主机一个探测请求都不该发');
 });
 
 test('只落到兜底时探测一次 GET /models：200 + JSON → OpenAI 兼容网关', async (t) => {

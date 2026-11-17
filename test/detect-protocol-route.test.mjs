@@ -83,6 +83,31 @@ test('known host: answers from the local match without probing anything', async 
   assert.deepEqual(calls, [], '认出协议时不该探测上游');
 });
 
+test('已知主机：火山方舟 Agent Plan 的完整地址 → openai-images + edit:same，零探测', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', key: 'draft-key', model: 'doubao-seedream-4-0-250828'
+  }), res);
+  assert.equal(res.status, 200);
+  // /api/plan/v3/models 是 404，探测一定失败；所以这条路必须是「本地就认出来」。
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { edit: 'same' }
+  });
+  assert.deepEqual(calls, [], '已知主机一个请求都不该发');
+});
+
+test('known host: azure carries the api-key option through the route', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://res.openai.azure.com/openai/v1', key: 'draft-key', model: 'gpt-image-2.5-flare' }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, protocol: 'openai-images', matched: true, probed: false, protocolOptions: { auth: 'api-key' }
+  });
+  assert.deepEqual(calls, []);
+});
+
 test('unknown host: one read-only /models probe decides openai-images vs custom', async (t) => {
   const { route, calls, setRespond } = await setup(t);
   const ok = makeRes();

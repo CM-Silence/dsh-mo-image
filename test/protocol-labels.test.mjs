@@ -2,7 +2,7 @@
  * 协议下拉的文案与顺序。
  *
  * 对话模型设置页的「API 协议」只有三项，句式统一（厂商 + 接口名）、不带括号解释。图像这边
- * 有 20 条协议，同样的观感靠两件事：**短名字**（i18n key protocol.<id>，八语言都在 CSV 里）
+ * 有 17 条协议，同样的观感靠两件事：**短名字**（i18n key protocol.<id>，八语言都在 CSV 里）
  * 与**有逻辑的顺序**（通用 / 官方 → 兼容网关 → 各家原生 → 本地部署 → 异步任务）。
  * 这一组用例守住这两条，顺带守住「分组表覆盖全部协议」——漏一条，它就会掉到下拉最后。
  */
@@ -17,7 +17,7 @@ const BRACKETS = /[(（)）\[\]【】]/;
 
 test('every protocol label is an i18n key of the form protocol.<id>', () => {
   const manifest = adapterManifest();
-  assert.equal(manifest.length, 20, '协议数量变了：带括号的长文案例子是按 20 条写的');
+  assert.equal(manifest.length, 17, '协议数量变了：带括号的长文案例子是按 17 条写的');
   for (const adapter of manifest) {
     assert.equal(adapter.label, 'protocol.' + adapter.id, adapter.id + ' 的 label 要指到自己的文案键');
     assert.ok(parsed.keys.includes(adapter.label), 'locale/messages.csv 缺少 ' + adapter.label);

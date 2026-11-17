@@ -467,13 +467,13 @@ test('a sync-only adapter that receives a task envelope points at the async prot
   globalThis.fetch = async () => jsonResponse({ task_id: 'task-9', task_status: 'PENDING' });
 
   // 用一条没有 autoAsync 的协议：合并后的 openai-images 认任务包络（autoAsync，会转轮询，
-  // 见 test/generic-async.test.mjs），所以这里挑 azure —— 它的路径是同步的。
-  const providerDef = { baseUrl: 'https://res.openai.azure.com/openai/v1', key: 'k' };
-  const adapter = resolveAdapter(providerDef, 'gpt-image-2.5-flare');
-  assert.equal(adapter.id, 'azure-openai');
+  // 见 test/generic-async.test.mjs），所以这里挑 stability —— 它的路径是同步的。
+  const providerDef = { baseUrl: 'https://api.stability.ai', key: 'k' };
+  const adapter = resolveAdapter(providerDef, 'core');
+  assert.equal(adapter.id, 'stability');
   await assert.rejects(
     () => callImageApi('generate', adapter, providerDef, {
-      model: 'gpt-image-2.5-flare', prompt: 'hi', fitted
+      model: 'core', prompt: 'hi', fitted
     }, new AbortController().signal),
     /异步任务[\s\S]*自动识别/
   );
