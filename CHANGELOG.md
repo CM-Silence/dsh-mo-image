@@ -4,8 +4,9 @@
 
 1. **结果图下载统一鉴权**：走 `execute()` 的 12 条协议不再用裸 fetch 下载结果图，全部改为 `fetchResultImage()`——同源带 Key、跨源默认不带、适配器声明过的 `resultAuthOrigins` 才带。同一个 `data[0].url` 在同步 / 异步 / 通用三条路径上产出的请求头现在完全一致，也不会再把 Key 发给响应里伪造的第三方域名。
 2. **协议进一步收敛（17 条）**：`azure-openai`（`auth:'api-key'`）、`xai-imagine` 与 `zhipu`（`edit:'none'`）并进 `openai-images`；老配置读取时自动映射，`presetId` / `modelOptions` 原样保留。xai 的 `response_format` 与 `resolution`、azure 的 `output_format` 改为按主机的请求常量 / 尺寸规则，线上 body 逐字节不变（基线 `variants` 段继续锁死）。
-3. **「识别协议」不再误判已知主机**：官方 / Azure / Together / 硅基流动 / 火山方舟（含 `/api/plan/v3`）/ xAI / 智谱等 OpenAI 兼容主机直接判定为 `openai-images` 并带回协议级选项，**零探测请求**；只有主机不在表里时才 `GET /models`，失败再退到自定义。
-4. **一张参数表，两种绑定**：「常规」的参数表同时支持 HTTP 行（`name` 是请求体路径，A1111 的 sdapi 字段名也走这条）与工作流行（`node` + `input` 指向 ComfyUI 工作流里的落点），判据只有形状，坏行逐条丢。A1111 的采样参数从硬编码列表迁成表行（带默认值与说明）；ComfyUI 折叠区新增「解析参数」，把工作流里所有原始值输入列成可勾选候选，勾中即变成表行（默认值 = 当前值、类型按值推断）。两处暴露口径统一成「行的 expose 或老的开关表」，暴露的项会出现在给对话模型的参数清单里，工具 `note` 只在真的用不上时才回报。
+3. **「识别协议」不再误判已知主机**：官方 / Azure / Together / 硅基流动 / 火山方舟（含 `/api/plan/v3`）/ xAI / 智谱等 OpenAI 兼容主机直接判定为 `openai-images` 并带回协议级选项，**零探测请求**；只有主机不在表里时才走探测表，全不中再退到自定义。
+4. **「识别协议」改成按协议探测的探测表，认得出本地部署**：老实现只探一次 `GET /models`，于是 `http://127.0.0.1:8188` 上的 ComfyUI 永远认不出来（它没有 `/models`），用户实测只能掉进「自定义」。现在探测表**由协议的 `routes.models` 驱动**、一条协议一行、命中即停：内网地址先问 ComfyUI `/object_info`（JSON 对象）、A1111 `/sdapi/v1/sd-models`（数组）、SwarmUI `/API/ListModels`（JSON），公网地址问 `/models` 并用形状区分 `{data:[…]}`（OpenAI 兼容 → `openai-images`）与 `{models:[…]}`（Gemini）；同一地址只探一次，单探针 3 秒、整轮 8 秒封顶，只发 GET、绝不触发生成，认证失败 / 超时 / 非 JSON 都不抛异常。命中结果带回命中的探针路径与形状，提示写成「已识别为 ComfyUI（/object_info 返回 JSON 对象）」。另外，**用户手选了协议时按钮只校验不改写**：回答里给 `verified`，没通过时只提示「地址不像 X；看起来像 Y」，协议与协议级选项一律不动。
+5. **一张参数表，两种绑定**：「常规」的参数表同时支持 HTTP 行（`name` 是请求体路径，A1111 的 sdapi 字段名也走这条）与工作流行（`node` + `input` 指向 ComfyUI 工作流里的落点），判据只有形状，坏行逐条丢。A1111 的采样参数从硬编码列表迁成表行（带默认值与说明）；ComfyUI 折叠区新增「解析参数」，把工作流里所有原始值输入列成可勾选候选，勾中即变成表行（默认值 = 当前值、类型按值推断）。两处暴露口径统一成「行的 expose 或老的开关表」，暴露的项会出现在给对话模型的参数清单里，工具 `note` 只在真的用不上时才回报。
 
 ## v0.7.0
 

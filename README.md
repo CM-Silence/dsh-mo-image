@@ -418,7 +418,11 @@ $DSH_HOME/.credentials.yaml
 - **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate、魔搭五家的提交与状态词都收在适配器的 `async` 描述符里
 - **通用兜底自动识别**：自定义 API 和不认识的域名走 `openai-images`，它会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
 
-选择规则：设置页的「API 协议」下拉可直接指定适配器；点「识别协议」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → 已知 OpenAI 兼容主机表（官方 / Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 … ）→ 一次只读 `GET /models` 探测 → 自定义」匹配。命中已知主机时**一次请求都不发**（这些网关的 `/models` 常常是 404，探测只会把能用的地址误判成自定义），并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。
+选择规则：设置页的「API 协议」下拉可直接指定适配器；点「识别协议」时按「`provider.adapter` 显式值 → API 域名 → 模型 ID → 已知 OpenAI 兼容主机表（官方 / Azure / Together / 硅基流动 / 火山方舟 / xAI / 智谱 … ）→ **探测表** → 自定义」匹配。命中已知主机时**一次请求都不发**（这些网关的 `/models` 常常是 404，探测只会把能用的地址误判成自定义），并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。
+
+探测表**由协议自己的 `routes.models` 驱动**（不在探测逻辑里另抄一份路径），一条协议一行、命中即停：内网地址（回环 / `10.*` / `192.168.*` / `172.16-31.*` / `.local` / 单标签主机名）先问本地那三条——ComfyUI `GET /object_info`（200 + JSON 对象）、A1111 `GET /sdapi/v1/sd-models`（200 + 数组）、SwarmUI `GET /API/ListModels`（200 + JSON）；公网地址问 `GET /models`，用返回形状区分 `{data:[…]}`（OpenAI 兼容网关 / LocalAI / sd-server → `openai-images`）与 `{models:[…]}`（Gemini）。同一地址只探一次，单个探针 3 秒、整轮 8 秒封顶，**只发 GET、绝不触发生成**；认证失败、超时、非 JSON 都只当「不是它」，不会打断识别。全都没命中才落到「自定义」，并把三条相对地址预填好。
+
+如果用户已经在协议下拉里**手选了某条协议**，这个按钮改成**只校验不改写**：宿主只回答「这个地址像不像它」（`verified`），通过了提示「已确认」，没通过就说「地址不像 X；看起来像 Y」（`suggested`，采纳与否由用户自己点下拉决定）——协议与协议级选项一律保持原样，绝不会因为一次误判把能用的本地配置改成别的协议。
 
 ## 已知限制
 

@@ -87,6 +87,20 @@ test('ComfyUI：/object_info 200 + JSON 对象 → comfyui，只发一次 GET', 
   assert.equal(calls[0].method, 'GET');
 });
 
+test('装了很多节点的 ComfyUI：超大 /object_info（超过 1MB 上限）照样认得出', async (t) => {
+  // 装了几百个自定义节点的 ComfyUI，/object_info 能到 20MB+；探针只读前缀，不整份解析。
+  const huge = '{"CheckpointLoaderSimple":{"input":{}},"Pad":"' + 'x'.repeat(1200 * 1024) + '"}';
+  const calls = stubFetch(t, routeOf('/object_info', () => new Response(huge, {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  })));
+  const result = await detectProtocolOf({ baseUrl: 'http://127.0.0.1:8188' }, '');
+  assert.equal(result.protocol, 'comfyui');
+  assert.equal(result.probe, '/object_info');
+  assert.equal(result.shape, 'object');
+  assert.deepEqual(urls(calls), ['http://127.0.0.1:8188/object_info']);
+});
+
 test('A1111：/sdapi/v1/sd-models 200 + 数组 → a1111，先问 ComfyUI 的端点', async (t) => {
   const calls = stubFetch(t, routeOf('/sdapi/v1/sd-models', () => json([{ title: 'sd_xl_base_1.0' }])));
   const result = await detectProtocolOf({ baseUrl: 'http://127.0.0.1:7860' }, '');
@@ -210,8 +224,8 @@ test('超时（默认 3 秒）也不抛：挂住的地址退回自定义', async
 
 test('总预算封顶：一个地址挂住时不会把设置页卡在那里', async (t) => {
   const calls = stubFetch(t, (url, init) => hangUntilAborted(t, url, init));
-  // 预算 1ms、单探针 1000ms：第一个探针用掉预算后就不该再发。
-  const result = await detectProtocolOf({ baseUrl: 'http://127.0.0.1:8188' }, '', { budgetMs: 1, probeTimeoutMs: 1000 });
+  // 预算 30ms、单探针 5000ms：第一个探针按预算掐掉之后就不该再发第二个。
+  const result = await detectProtocolOf({ baseUrl: 'http://127.0.0.1:8188' }, '', { budgetMs: 30, probeTimeoutMs: 5000 });
   assert.deepEqual(result, { protocol: 'custom', matched: false, probed: true });
   assert.equal(calls.length, 1, '预算用尽就停，不再问后面的候选');
 });
