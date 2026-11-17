@@ -636,10 +636,11 @@ test('opening a provider flips the viewport into the slide state', () => {
   );
   const viewport = collectClass(tree, 'cmes-viewport')[0];
   assert.match(viewport.props.className, /view2/);
+  assert.equal(viewport.props.style.transition, 'height .3s cubic-bezier(.32,.72,.28,1)');
   const pages = collectClass(tree, 'cmes-page');
   assert.equal(pages.length, 2);
-  assert.equal(pages[0].props.style, undefined, 'the slide easing comes from codex CSS, not an inline ease');
-  assert.equal(pages[1].props.style, undefined);
+  assert.equal(pages[0].props.style.transition, 'transform .3s cubic-bezier(.32,.72,.28,1)');
+  assert.equal(pages[1].props.style.transition, 'transform .3s cubic-bezier(.32,.72,.28,1)');
   const text = collectText(tree).join(' ');
   assert.match(text, /OpenAI/);
   assert.match(text, /gpt-image-2\.5-flare/);
