@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 import { normalizeConfig } from '../lib/config-store.js';
+import { applyFields, multipartFields, promptParts, resolveFields } from '../lib/field-templates.js';
 
 const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
@@ -1393,4 +1394,158 @@ test('自动检测与全部解锁挪进「高级」这一行的右端', async ()
     '自动检测照旧发起请求');
   assert.equal(calls.prevented, 2);
   assert.equal(calls.stopped, 2);
+});
+
+/* ───────── 参考图「传法」：先选传法、后填字段名，不用回来重选 ───────── */
+
+/** 参考图方框里的两个控件：字段名输入、传法下拉。 */
+const imageFieldInput = (tree) => paramRow(tree, 'image:field').children[1];
+const imageAsSelect = (tree) => paramRow(tree, 'image:as').children[1];
+
+/** 保存后落进配置的那条模型选项（CLOUD_CONFIG 的模型）。 */
+async function savedImageEntry(harness) {
+  const config = await saveAndPosted(harness);
+  const provider = config.providers.find((item) => item.id === 'p2');
+  const options = provider && provider.modelOptions;
+  return options ? options['gpt-image-2.5-flare'] : undefined;
+}
+
+/** 选传法：下拉的 onChange 就够，不用整张表单。 */
+function pickAs(harness, value) {
+  imageAsSelect(harness.renderRoot()).props.onChange({ target: { value: value } });
+  return harness.renderRoot();
+}
+
+/** 填字段名（空串 = 清空）。 */
+function typeFieldName(harness, value) {
+  imageFieldInput(harness.renderRoot()).props.onChange({ target: { value: value } });
+  return harness.renderRoot();
+}
+
+test('字段名为空时选传法立刻生效：值进了配置，但不造任何模板', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  let panel = openModelPanel(harness);
+  assert.equal(imageFieldInput(panel).props.value, '', '一开始没有字段名');
+  assert.equal(imageAsSelect(panel).props.value, '', '也就没有传法');
+
+  panel = pickAs(harness, 'base64');
+  assert.equal(imageAsSelect(panel).props.value, 'base64', '没有字段名也能选，选完就显示选中的值');
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.fieldsAs.image, 'base64', '选择真的进了配置');
+  assert.equal(entry.fields, undefined, '没有字段名就不造模板：空 path 的模板会把请求写坏');
+});
+
+test('先选传法再填字段名：合成出来的模板带着 as，一次都不用回来重选', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  openModelPanel(harness);
+  pickAs(harness, 'base64');
+  const panel = typeFieldName(harness, 'image');
+  assert.equal(imageAsSelect(panel).props.value, 'base64', '填完字段名，传法还在');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'image', as: 'base64' });
+  assert.equal(entry.fieldsAs, undefined, '传法已经并进模板，配置里不再留暂存');
+  // 合成出来的模板是真能用的：field-templates 照着它把图写成 base64。
+  const body = applyFields({}, entry.fields, { image: { buffer: Buffer.from('hi'), contentType: 'image/png' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(body)), { image: 'aGk=' }, '选过的传法真的生效');
+});
+
+test('先填字段名再改传法也一样：只换 as，不动字段名', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  openModelPanel(harness);
+  typeFieldName(harness, 'image_url');
+  const panel = pickAs(harness, 'url');
+  assert.equal(imageFieldInput(panel).props.value, 'image_url', '字段名没被传法改动');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'image_url', as: 'url' });
+});
+
+test('清空字段名再填回来，传法不丢', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  openModelPanel(harness);
+  typeFieldName(harness, 'image');
+  pickAs(harness, 'base64');
+  // 清空字段名 = 去掉这条覆盖，但传法留着（否则重填名字还得再选一次）。
+  let panel = typeFieldName(harness, '');
+  assert.equal(imageAsSelect(panel).props.value, 'base64', '清空字段名不会把传法一起清掉');
+  panel = typeFieldName(harness, 'input_image');
+  assert.equal(imageAsSelect(panel).props.value, 'base64');
+
+  const entry = await savedImageEntry(harness);
+  assert.deepEqual(entry.fields.image, { path: 'input_image', as: 'base64' });
+});
+
+test('字段名为空时不会产出空 path 的模板：field-templates 编译不抛错', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  openModelPanel(harness);
+  for (const value of ['dataUrl', 'base64', 'url']) pickAs(harness, value);
+
+  const entry = await savedImageEntry(harness);
+  assert.equal(entry.fieldsAs.image, 'url', '最后一次选择被记住');
+  // 配置里只有「暂存的传法」，没有模板：三层合并之后是无字段可发。
+  const fields = resolveFields({ override: entry.fields });
+  assert.deepEqual(JSON.parse(JSON.stringify(fields)), {}, '没有模板可选，也就不会有空 path');
+  assert.doesNotThrow(() => applyFields({}, fields, {}), '编译不抛错');
+  assert.doesNotThrow(() => promptParts(fields, { prompt: 'hi' }));
+  assert.doesNotThrow(() => multipartFields(fields, {}));
+  for (const spec of Object.values(entry.fields || {})) {
+    if (spec && typeof spec === 'object' && 'path' in spec) {
+      assert.ok(String(spec.path).trim().length > 0, '任何模板的 path 都必须非空');
+    }
+  }
+});
+
+test('fieldTemplateOf 在字段名为空时返回 null，不会造出 { path: "" }', () => {
+  const { api } = createHarness({ config: CLOUD_CONFIG });
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.equal(api.__test.fieldTemplateOf('path', '', 'base64'), null, '空字段名 → 没有模板');
+  assert.equal(api.__test.fieldTemplateOf('path', '   ', 'base64'), null, '只有空白也算空');
+  assert.deepEqual(plain(api.__test.fieldTemplateOf('path', 'image', 'base64')),
+    { path: 'image', as: 'base64' });
+  assert.deepEqual(plain(api.__test.fieldTemplateOf('path', 'image', '')), { path: 'image' });
+  // multipart 的模板形状不认 as（field-templates 那里没有这个键），别硬塞。
+  assert.deepEqual(plain(api.__test.fieldTemplateOf('multipart', 'image[]', 'base64')),
+    { multipart: 'image[]' });
+  assert.deepEqual(plain(api.__test.fieldTemplateOf('numbered', 'input_image', 'base64')),
+    { numbered: 'input_image', as: 'base64' });
+});
+
+test('传法暂存只认三种编码，别的东西不会被记成模板的一部分', () => {
+  const { api } = createHarness({ config: CLOUD_CONFIG });
+  const pending = (value) => api.__test.pendingFieldAsOf({ fieldsAs: { image: value } }, 'image');
+  for (const value of ['dataUrl', 'base64', 'url']) assert.equal(pending(value), value, value + ' 认得');
+  assert.equal(pending('bogus'), '', '不认识的传法当作没选：别让它跟着字段名混进模板');
+  assert.equal(api.__test.pendingFieldAsOf({}, 'image'), '', '没暂存就是空');
+  assert.equal(api.__test.pendingFieldAsOf(null, 'image'), '');
+});
+
+/* ───────── 「一键配置」只给规则表能管的协议 ───────── */
+
+/** 只换 adapter 的本地提供商：一键配置该不该出现就看它。 */
+function adapterOnlyConfig(adapter) {
+  return {
+    providers: [{
+      id: 'pz', name: 'Local ' + (adapter || 'auto'), baseUrl: 'http://127.0.0.1:9999',
+      key: '', hasKey: false, adapter: adapter, protocol: 'openai-images', optionalKey: true,
+      models: ['m1'], names: {}
+    }],
+    active: { providerId: 'pz', model: 'm1' },
+    defaults: {}
+  };
+}
+
+test('「一键配置」不出现在只认工作流参数的协议上，OpenAI 兼容的本地协议照样有', async () => {
+  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure all/i.test(textOf(node).join(''))));
+  // 这三种的尺寸与质量走工作流参数，规则表里根本没有它们：按钮只会写噪音。
+  for (const adapter of ['a1111', 'comfyui', 'swarmui']) {
+    const { tree } = await openEditor(adapterOnlyConfig(adapter));
+    assert.ok(!hasBulk(tree), adapter + ' 不该出现一键配置');
+  }
+  // localai 与 sd-server 走 OpenAI 兼容参数，规则照样管用；adapter 为空的中转站同理。
+  for (const adapter of ['localai', 'openai-images', '']) {
+    const { tree } = await openEditor(adapterOnlyConfig(adapter));
+    assert.ok(hasBulk(tree), (adapter || '(空 adapter)') + ' 必须保留一键配置');
+  }
 });

@@ -46,7 +46,7 @@ test('routes never advertise an unsupported edit endpoint', () => {
   }
 });
 
-// 没有专用 listModels 的协议（Together 这类）按 routes.models 拉一次
+// 没有专用 listModels 的协议（智谱这类）按 routes.models 拉一次
 test('adapters without listModels fall back to routes.models', async () => {
   const server = createServer((req, res) => {
     assert.equal(req.url, '/v1/models');
@@ -56,7 +56,7 @@ test('adapters without listModels fall back to routes.models', async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = 'http://127.0.0.1:' + server.address().port + '/v1';
   try {
-    const adapter = resolveAdapter({ protocol: 'together' }, '');
+    const adapter = resolveAdapter({ protocol: 'zhipu' }, '');
     assert.equal(adapter.listModels, undefined);
     assert.deepEqual(await listProviderModels(adapter, { baseUrl }, undefined), ['flux-1', 'flux-pro']);
   } finally {
@@ -67,7 +67,7 @@ test('adapters without listModels fall back to routes.models', async () => {
 // stability 既没有 listModels 也没有 routes.models，必须继续明确报不支持
 test('supportsModels follows routes.models', async () => {
   const manifest = adapterManifest();
-  assert.equal(manifest.find((item) => item.id === 'together').supportsModels, true);
+  assert.equal(manifest.find((item) => item.id === 'zhipu').supportsModels, true);
   assert.equal(manifest.find((item) => item.id === 'stability').supportsModels, false);
   const adapter = resolveAdapter({ protocol: 'stability' }, '');
   await assert.rejects(() => listProviderModels(adapter, { baseUrl: 'https://api.stability.ai' }, undefined), /不支持/);

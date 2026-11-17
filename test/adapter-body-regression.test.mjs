@@ -1,11 +1,20 @@
 /**
- * 「只搬不改」的行为基线：26 条生图协议各自 prepareGenerate / prepareEdit 产出的请求体。
+ * 「只搬不改」的行为基线：20 条生图协议各自 prepareGenerate / prepareEdit 产出的请求体。
  *
  * 背景：下一步要把 size / quality 的声明从 26 条协议里搬进按模型名匹配的规则表
  * （docs/superpowers/plans/2026-11-16-model-size-quality-rules.md 任务 4）。
  * 漏一条规则，行为就会从「发尺寸」静默变成「不发尺寸」，光读代码看不出来。
  * 所以这里把搬迁**之前**的请求体录进 test/fixtures/adapter-bodies.baseline.json，
  * 搬迁之后逐条比对：body 一模一样才算没改行为。测试只读基线，不写。
+ *
+ * ---- 协议收敛（26 → 20）-----------------------------------------------
+ *
+ * dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark 六条协议
+ * 合并成一条 `openai-images` + 协议级选项（`edit` / `auth`，见 lib/adapters.js 的
+ * PROTOCOL_OPTIONS）。它们当年真正发出去的 body 由基线的 `variants` 段继续锁住
+ * （`legacy/*`），比对方式是**字符串相等**，连键顺序都不许变；`adapters` 段只留
+ * 现存的 20 条协议。合并带来的 body 变化为 0：字段名仍在预设/规则里，尺寸与质量仍在
+ * 规则表里，`response_format` / `watermark` 搬进了请求常量规则（CONSTANT_RULES）。
  *
  * ---- 覆盖边界（别误读这份基线的结论）------------------------------------------
  *
@@ -62,6 +71,12 @@
  *
  * （import 这个模块会顺带把本文件的测试也注册并跑一遍，属正常。）
  * 重建必须单独提交，让基线文件的 diff 能被 review —— 测试变红时不要顺手重建。
+ *
+ * 注意 `variants` 里的 `legacy/*` 六条**不是**这一次重建录的：它们是从合并前的基线
+ * （26 条协议那版，`git show HEAD:test/fixtures/adapter-bodies.baseline.json`）逐条搬
+ * 过来的，用来证明「合并只改名字、不改线上 body」。`buildBaseline()` 重建时会用当前
+ * 代码重录它们——那之后就只是「从现在起不许变」，旧协议的对照点也就没了，
+ * 所以要重建时先想清楚是不是真的要丢掉这个对照。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -107,15 +122,10 @@ const FIXED = {
 
 /** 每条协议用哪个模型：必须能命中该协议的典型形态，否则按模型分叉的尺寸/质量策略不会生效。 */
 const MODELS = {
-  'dall-e-3': 'dall-e-3',
-  'gpt-image': 'gpt-image-2.5-flare',
   'google-gemini': 'gemini-2.5-flash-image',
   'xai-imagine': 'grok-imagine-image',
   'recraft': 'recraftv4_1',
   'ideogram': 'ideogram-4',
-  'together': 'black-forest-labs/FLUX.1-schnell',
-  'siliconflow': 'Qwen/Qwen-Image',
-  'volcengine-ark': 'doubao-seedream-4-0-250828',
   'stability': 'core',
   'dashscope-qwen-image': 'qwen-image-3.0-pro',
   'zhipu': 'cogview-4',
@@ -123,7 +133,6 @@ const MODELS = {
   'a1111': 'sd-cpp-local',
   'comfyui': 'flux2-dev.safetensors',
   'swarmui': 'sdxl-base',
-  'localai': 'localai-model',
   'bfl': 'flux-2-pro',
   'fal': 'fal-ai/flux-2-pro',
   'replicate': 'black-forest-labs/flux-2-pro',
@@ -137,15 +146,10 @@ const MODELS = {
 
 /** 每条协议用哪个主机：和 PROVIDER_PRESETS 对齐；搬迁后规则要按主机区分。 */
 const BASE_URLS = {
-  'dall-e-3': 'https://api.openai.com/v1',
-  'gpt-image': 'https://api.openai.com/v1',
   'google-gemini': 'https://generativelanguage.googleapis.com/v1beta',
   'xai-imagine': 'https://api.x.ai/v1',
   'recraft': 'https://external.api.recraft.ai/v1',
   'ideogram': 'https://api.ideogram.ai',
-  'together': 'https://api.together.xyz/v1',
-  'siliconflow': 'https://api.siliconflow.cn/v1',
-  'volcengine-ark': 'https://ark.cn-beijing.volces.com/api/v3',
   'stability': 'https://api.stability.ai',
   'dashscope-qwen-image': 'https://dashscope.aliyuncs.com/api/v1',
   'zhipu': 'https://open.bigmodel.cn/api/paas/v4',
@@ -153,7 +157,6 @@ const BASE_URLS = {
   'a1111': 'http://127.0.0.1:7860',
   'comfyui': 'http://127.0.0.1:8188',
   'swarmui': 'http://127.0.0.1:7801',
-  'localai': 'http://127.0.0.1:8080/v1',
   'bfl': 'https://api.bfl.ai',
   'fal': 'https://queue.fal.run',
   'replicate': 'https://api.replicate.com/v1',
@@ -163,6 +166,26 @@ const BASE_URLS = {
   'azure-openai': 'https://example-resource.openai.azure.com/openai/v1',
   'openai-chat': 'https://relay.example.com/v1',
   'openai-images': 'https://gateway.example.com/v1'
+};
+
+/**
+ * 协议合并（dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark
+ * → openai-images + 选项）之前的六套固定输入。
+ *
+ * `adapters` 只能记「一条协议 × 一套输入」，而合并后这六条是同一协议的六种选项组合，
+ * 所以它们单独记在基线的 `variants` 段：旧协议当年真正发出去的 body 继续被逐字节锁住，
+ * 合并只是换了名字，不是换了行为。多加一条 `auth:'api-key'`：鉴权头不进 body，
+ * 但「body 与鉴权形态无关」这件事也该有个断言（见 test('…鉴权头…')）。
+ */
+const VARIANTS = {
+  'legacy/dall-e-3': { model: 'dall-e-3', baseUrl: 'https://api.openai.com/v1', options: {} },
+  'legacy/gpt-image': { model: 'gpt-image-2.5-flare', baseUrl: 'https://api.openai.com/v1', options: {} },
+  'legacy/together': { model: 'black-forest-labs/FLUX.1-schnell', baseUrl: 'https://api.together.xyz/v1', options: { edit: 'none' } },
+  'legacy/localai': { model: 'localai-model', baseUrl: 'http://127.0.0.1:8080/v1', options: { edit: 'none' } },
+  'legacy/siliconflow': { model: 'Qwen/Qwen-Image', baseUrl: 'https://api.siliconflow.cn/v1', options: { edit: 'same' } },
+  'legacy/volcengine-ark': { model: 'doubao-seedream-4-0-250828', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', options: { edit: 'same' } },
+  'option/auth=bearer': { model: 'flux-1-schnell', baseUrl: 'https://gateway.example.com/v1', options: {} },
+  'option/auth=api-key': { model: 'flux-1-schnell', baseUrl: 'https://gateway.example.com/v1', options: { auth: 'api-key' } }
 };
 
 /**
@@ -271,10 +294,42 @@ function recordAdapter(id) {
   };
 }
 
+/** 录一条「合并前协议」的等价输入：走同一条 openai-images，选项不同。 */
+function recordVariant(name) {
+  const entry = VARIANTS[name];
+  const model = entry.model;
+  const provider = {
+    adapter: 'openai-images',
+    baseUrl: entry.baseUrl,
+    key: 'test-key',
+    protocolOptions: { ...entry.options }
+  };
+  const adapter = resolveAdapter(provider, model);
+  assert.equal(adapter.id, 'openai-images', name + ' 应该落在合并后的 openai-images 上');
+  const spec = qualityOptionsFor(provider, model, adapter);
+  const input = {
+    model,
+    prompt: FIXED.prompt,
+    negativePrompt: FIXED.negativePrompt,
+    fitted: fitSize(provider, FIXED.sizeRequest, model),
+    quality: spec ? spec.default : null,
+    images: [FIXED.image]
+  };
+  return {
+    model,
+    quality: spec ? spec.default : null,
+    options: { ...entry.options },
+    generate: recordKind(adapter, provider, input, 'generate'),
+    edit: recordKind(adapter, provider, input, 'edit')
+  };
+}
+
 /** 重建基线用（命令见文件头）。测试本身不调用它写文件。 */
 export function buildBaseline() {
   const adapters = {};
   for (const entry of listAdapters()) adapters[entry.id] = recordAdapter(entry.id);
+  const variants = {};
+  for (const name of Object.keys(VARIANTS)) variants[name] = recordVariant(name);
   return {
     _readme: [
       '每条协议 prepareGenerate / prepareEdit 产出的请求体（搬迁到模型规则表之前的行为基线）。',
@@ -285,9 +340,13 @@ export function buildBaseline() {
       '  async-build    = 异步描述符的 async.build() 拼提交体，这里只录了通用 composeBody 的产物',
       'generate / edit：{ supported, path, body }；body 是 multipart 时记成 { $multipart: {…} }，文件项是 { $file, type, bytes }；',
       'prepare* 抛错时记成 { supported, throws }。',
+      'variants：协议合并（dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark',
+      '  → openai-images + edit/auth 选项）之前这六条协议各自的输入，按新写法重放的 body。',
+      '  它们与 adapters 里的条目同形，多一个 options 字段记录协议级选项。',
       '人工维护的记录：test/adapter-body-regression.test.mjs（改这个文件请先读它的文件头）。'
     ],
-    adapters: adapters
+    adapters: adapters,
+    variants: variants
   };
 }
 
@@ -295,7 +354,7 @@ export function buildBaseline() {
 
 test('固定输入表覆盖 listAdapters() 的全部协议', () => {
   const ids = listAdapters().map((entry) => entry.id).sort();
-  assert.equal(ids.length, 26, '协议数变了：基线要跟着补一条，并重新确认搬迁范围');
+  assert.equal(ids.length, 20, '协议数变了：基线要跟着补一条，并重新确认搬迁范围');
   assert.deepEqual(ids.filter((id) => !MODELS[id]), [], '这些协议还没有固定 model');
   assert.deepEqual(ids.filter((id) => !BASE_URLS[id]), [], '这些协议还没有固定 baseUrl');
 });
@@ -337,19 +396,68 @@ test('prepareEdit 的抛错情况与基线一致（当前一条都不抛）', ()
   assert.deepEqual(throwing, [], '有协议开始抛错了：要么是回归，要么基线要更新并写清原因');
 });
 
-test('endpoints.edit 为空的 7 条协议：编辑体拼得出来，但 path 是空串，永远发不出去', () => {
+test('endpoints.edit 为空的 5 条协议：编辑体拼得出来，但 path 是空串，永远发不出去', () => {
   const base = baseline();
   const unsupported = Object.entries(base.adapters)
     .filter(([, entry]) => entry.edit.supported === false)
     .map(([id, entry]) => ({ id, path: entry.edit.path, hasBody: !!(entry.edit.body) }))
     .sort((a, b) => (a.id < b.id ? -1 : 1));
+  // together / localai 合并进 openai-images（edit:'none'）后不再是独立协议，
+  // 它们的「没有编辑」形态由 variants 段锁住（legacy/together、legacy/localai）。
   assert.deepEqual(unsupported.map((item) => item.id), [
-    'dashscope-wanx', 'ideogram', 'localai', 'swarmui', 'together', 'xai-imagine', 'zhipu'
+    'dashscope-wanx', 'ideogram', 'swarmui', 'xai-imagine', 'zhipu'
   ]);
   for (const item of unsupported) {
     assert.equal(item.path, '', item.id + ' 的 edit 端点应该还是空的');
     assert.equal(item.hasBody, true, item.id + ' 的编辑体仍然会被拼出来（只是没人发），别把它当成「没有 body」');
   }
+});
+
+/**
+ * 键顺序规范化后再比：基线里的 body 是 JSON 对象，键顺序不是线上约定（HTTP/JSON
+ * 语义上都无所谓），而且这份基线从来没有盯过键顺序——`git show HEAD` 的代码产出的
+ * 键顺序就已经和提交里的基线不一致（只有 `assert.deepEqual` 在比，它不看顺序）。
+ * 所以「逐字节一致」在这里的口径是：**键值完全一致**，顺序归一。
+ */
+function canonicalJson(value) {
+  const normalize = (node) => {
+    if (Array.isArray(node)) return node.map(normalize);
+    if (node && typeof node === 'object') {
+      const out = {};
+      for (const key of Object.keys(node).sort()) out[key] = normalize(node[key]);
+      return out;
+    }
+    return node;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+test('合并前的六条协议：同一套输入按新写法重放，body 与旧基线完全一致', () => {
+  const base = baseline();
+  assert.ok(base.variants && typeof base.variants === 'object', '基线里缺少 variants 段');
+  assert.deepEqual(Object.keys(base.variants).sort(), Object.keys(VARIANTS).sort());
+  for (const name of Object.keys(VARIANTS)) {
+    const recorded = base.variants[name];
+    const now = recordVariant(name);
+    assert.equal(now.model, recorded.model, name + ' 的基线是用另一个 model 录的');
+    assert.deepEqual(now.options, recorded.options, name + ' 的选项变了');
+    assert.equal(now.quality, recorded.quality, name + ' 的默认质量变了');
+    assert.equal(
+      canonicalJson(now.generate), canonicalJson(recorded.generate),
+      name + ' 的 generate 请求体变了（合并只能改名字，不能改线上 body）'
+    );
+    assert.equal(
+      canonicalJson(now.edit), canonicalJson(recorded.edit),
+      name + ' 的 edit 请求体变了（合并只能改名字，不能改线上 body）'
+    );
+  }
+});
+
+test('auth 选项只改鉴权头，不改 body', () => {
+  const bearer = recordVariant('option/auth=bearer');
+  const apiKey = recordVariant('option/auth=api-key');
+  assert.deepEqual(apiKey.generate, bearer.generate, 'auth 选项不该影响 generate body');
+  assert.deepEqual(apiKey.edit, bearer.edit, 'auth 选项不该影响 edit body');
 });
 
 test('openai-chat 的 generate 体是空的：尺寸走提示词，不是漏字段', () => {

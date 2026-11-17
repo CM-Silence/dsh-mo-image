@@ -23,8 +23,9 @@ test('resolves the prompt profile by model family', () => {
 });
 
 test('falls back to the adapter when the model id is unknown', () => {
-  assert.equal(resolvePromptProfile('mystery-model', { id: 'gpt-image' }).id, 'gpt-image');
-  assert.equal(resolvePromptProfile('mystery-model', { id: 'dall-e-3' }).id, 'dall-e-3');
+  // 兜底只认**还存在的**协议 id：gpt-image / dall-e-3 / volcengine-ark 已经合并进
+  // openai-images（同一条协议下两个模型族要的写法还相反），那两族的兜底交给模型名匹配。
+  assert.equal(resolvePromptProfile('mystery-model', { id: 'openai-images' }).id, 'generic');
   assert.equal(resolvePromptProfile('mystery-model', { id: 'stability' }).id, 'stable-diffusion');
   assert.equal(resolvePromptProfile('mystery-model', { id: 'dashscope-wanx' }).id, 'wanx');
 });

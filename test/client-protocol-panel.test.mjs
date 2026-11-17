@@ -10,13 +10,42 @@ const T = {
   'form.routeUnsupported': '不支持',
   'form.protocolRoutes': '协议地址',
   'form.routeHint': '地址由上面的服务地址拼出',
-  'form.customProtocol': '自定义（自己填地址）'
+  'form.customProtocol': '自定义（自己填地址）',
+  'form.protocolOption.edit': '编辑端点',
+  'form.protocolOption.edit.edits': '单独的 /images/edits',
+  'form.protocolOption.edit.same': '同一个 /images/generations',
+  'form.protocolOption.edit.none': '不支持图生图',
+  'form.protocolOption.editHint': '编辑请求发到哪个地址',
+  'form.protocolOption.auth': '鉴权方式',
+  'form.protocolOption.auth.bearer': 'Authorization: Bearer',
+  'form.protocolOption.auth.api-key': 'api-key 头',
+  'form.protocolOption.authHint': '鉴权头形态'
 };
 const t = (key) => T[key] || key;
 
+/** 协议清单的片段：带选项的那条（openai-images）与不带选项的那条（comfyui）各一。 */
 const ADAPTERS = [
   { id: 'comfyui', label: 'ComfyUI', local: true, supportsModels: true, routes: { generate: '/prompt', edit: '/prompt', models: '/object_info' } },
-  { id: 'together', label: 'Together AI', local: false, supportsModels: true, routes: { generate: '/images/generations', edit: '', models: '/models' } }
+  {
+    id: 'openai-images',
+    label: 'OpenAI Images 兼容',
+    local: false,
+    supportsModels: true,
+    routes: { generate: '/images/generations', edit: '/images/edits', models: '/models' },
+    options: [
+      {
+        name: 'edit',
+        values: ['edits', 'same', 'none'],
+        default: 'edits',
+        routes: {
+          edits: { generate: '/images/generations', edit: '/images/edits', models: '/models' },
+          same: { generate: '/images/generations', edit: '/images/generations', models: '/models' },
+          none: { generate: '/images/generations', edit: '', models: '/models' }
+        }
+      },
+      { name: 'auth', values: ['bearer', 'api-key'], default: 'bearer' }
+    ]
+  }
 ];
 
 // 组件内部的 hook 顺序会随实现变化，所以按「初始值是 'catalog' 的那个 state」定位模式开关。
@@ -167,13 +196,66 @@ test('问号里不支持的项写成占位符，而不是整行消失', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
-    id: 'p1', name: 'Together', baseUrl: 'https://api.together.xyz/v1', adapter: 'together', models: [], names: {}
+    id: 'p1', name: 'LocalAI', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images',
+    protocolOptions: { edit: 'none' }, models: [], names: {}
   });
   const help = routeHelpOf(node);
   assert.ok(help);
-  assert.match(help.props['aria-description'], /文生图：https:\/\/api\.together\.xyz\/v1\/images\/generations/);
+  assert.match(help.props['aria-description'], /文生图：http:\/\/127\.0\.0\.1:8080\/v1\/images\/generations/);
   assert.match(help.props['aria-description'], /图生图：不支持/);
-  assert.match(help.props['aria-description'], /获取模型列表：https:\/\/api\.together\.xyz\/v1\/models/);
+  assert.match(help.props['aria-description'], /获取模型列表：http:\/\/127\.0\.0\.1:8080\/v1\/models/);
+});
+
+test('协议选项改了地址：问号跟着当前取值走', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const render = (protocolOptions) => routeHelpOf(renderForm(client, {
+    id: 'p1', name: 'SiliconFlow', baseUrl: 'https://api.siliconflow.cn/v1', adapter: 'openai-images',
+    protocolOptions: protocolOptions, models: [], names: {}
+  })).props['aria-description'];
+  // 默认 edits → /images/edits
+  assert.match(render({}), /图生图：https:\/\/api\.siliconflow\.cn\/v1\/images\/edits/);
+  // same → 同一个 generations
+  assert.match(render({ edit: 'same' }), /图生图：https:\/\/api\.siliconflow\.cn\/v1\/images\/generations/);
+  assert.match(render({ edit: 'none' }), /图生图：不支持/);
+});
+
+test('协议有选项时，协议下拉下面给出选择项（取值与默认值来自宿主清单）', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  }, false);
+  const selects = collect(node, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
+  assert.deepEqual(
+    selects.map((item) => item.props['data-mo-image-protocol-option']),
+    ['edit', 'auth'],
+    '两个协议级选项都要有下拉'
+  );
+  const edit = selects[0];
+  assert.equal(edit.props.value, 'edits', '没选过就显示默认值');
+  const editOptions = collect(edit, (item) => item.type === 'option');
+  assert.deepEqual(editOptions.map((option) => option.props.value), ['edits', 'same', 'none']);
+  assert.deepEqual(editOptions.map((option) => text(option).join('')), ['单独的 /images/edits', '同一个 /images/generations', '不支持图生图']);
+  assert.equal(selects[1].props.value, 'bearer');
+
+  // 选过的值要回显。
+  const picked = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    protocolOptions: { edit: 'same', auth: 'api-key' }, models: [], names: {}
+  }, false);
+  const pickedSelects = collect(picked, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
+  assert.deepEqual(pickedSelects.map((item) => item.props.value), ['same', 'api-key']);
+});
+
+test('没有声明选项的协议不渲染选项下拉', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Comfy', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', models: [], names: {}
+  });
+  const selects = collect(node, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
+  assert.deepEqual(selects, []);
 });
 
 test('选中自定义时给出三个输入框', () => {

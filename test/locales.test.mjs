@@ -11,7 +11,7 @@ import {
   BEGIN_MARKER,
   END_MARKER
 } from '../scripts/build-locales.mjs';
-import { LOCAL_PRESETS } from '../lib/adapters.js';
+import { LOCAL_PRESETS, adapterManifest } from '../lib/adapters.js';
 import { SERVER_ERROR_CODES, NETWORK_HINT_CODES } from '../lib/localized-error.js';
 
 const csv = readFileSync(new URL('../locale/messages.csv', import.meta.url), 'utf8');
@@ -65,6 +65,26 @@ test('dynamic quality and local-preset keys exist in the CSV', () => {
   for (const preset of LOCAL_PRESETS) {
     assert.ok(keys.has(`localPreset.${preset.id}.hint`), `missing localPreset.${preset.id}.hint`);
     assert.ok(keys.has(`localPreset.${preset.id}.urlHint`), `missing localPreset.${preset.id}.urlHint`);
+  }
+});
+
+// 协议级选项的文案键是客户端拼出来的（form.protocolOption <name> / <value> / Hint），
+// 字面量扫描看不见它们，所以这里按宿主清单（adapterManifest().options）逐项核对。
+test('dynamic protocol option keys exist in the CSV', () => {
+  const keys = new Set(parsed.keys);
+  const withOptions = adapterManifest().filter((adapter) => Array.isArray(adapter.options) && adapter.options.length);
+  assert.ok(withOptions.length > 0, '一条带选项的协议都没有：清单是不是退回旧样子了');
+  for (const adapter of withOptions) {
+    for (const option of adapter.options) {
+      assert.ok(keys.has(`form.protocolOption.${option.name}`), `missing form.protocolOption.${option.name}`);
+      assert.ok(keys.has(`form.protocolOption.${option.name}Hint`), `missing form.protocolOption.${option.name}Hint`);
+      for (const value of option.values) {
+        assert.ok(
+          keys.has(`form.protocolOption.${option.name}.${value}`),
+          `missing form.protocolOption.${option.name}.${value}`
+        );
+      }
+    }
   }
 });
 

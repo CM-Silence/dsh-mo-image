@@ -79,7 +79,9 @@ test('zhipu omits n and response_format', async (t) => {
 test('ark sends preset sizes and puts reference images in the image field', () => {
   const provider = { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', adapter: 'volcengine-ark', key: 'k' };
   const adapter = resolveAdapter(provider, 'doubao-seedream-4-0-250828');
-  assert.equal(adapter.id, 'volcengine-ark');
+  // volcengine-ark 合并进 openai-images，编辑也走 /images/generations（edit:'same'）。
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.endpoints.edit, '/images/generations');
 
   const big = prepareGenerate(adapter, provider, {
     model: 'doubao-seedream-4-0-250828', prompt: 'x',

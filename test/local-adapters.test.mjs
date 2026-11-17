@@ -507,11 +507,15 @@ test('ComfyUI surfaces the execution error instead of claiming no image', async 
 
 test('LocalAI preset declares generation only and never posts to a missing edit route', () => {
   const preset = localPresetManifest().find((item) => item.id === 'localai');
-  assert.equal(preset.adapter, 'localai');
-  const adapter = resolveAdapter({ baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'localai', optionalKey: true }, '');
-  assert.equal(adapter.id, 'localai');
+  // LocalAI 合并进 openai-images，用 edit:'none' 表达「没有 /images/edits」。
+  assert.equal(preset.adapter, 'openai-images');
+  assert.deepEqual(preset.protocolOptions, { edit: 'none' });
+  const provider = { baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images', protocolOptions: preset.protocolOptions, optionalKey: true };
+  const adapter = resolveAdapter(provider, '');
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.endpoints.edit, '');
   assert.equal(adapterSupportsKind(adapter, 'generate'), true);
   assert.equal(adapterSupportsKind(adapter, 'edit'), false);
-  assert.ok(adapterManifest().some((item) => item.id === 'localai' && item.supportsModels));
+  assert.ok(adapterManifest().some((item) => item.id === 'openai-images' && item.supportsModels));
 });
 

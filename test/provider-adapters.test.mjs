@@ -108,7 +108,9 @@ test('xai imagine leaves the aspect ratio out while the size is Auto', async (t)
 test('host-specific adapters win over model-only matches', () => {
   assert.equal(resolveAdapter({ baseUrl: 'https://res.openai.azure.com/openai/v1' }, 'gpt-image-2.5-flare').id, 'azure-openai');
   assert.equal(resolveAdapter({ baseUrl: 'https://openrouter.ai/api/v1' }, 'openai/gpt-image-2.5-flare').id, 'openrouter-images');
-  assert.equal(resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare').id, 'gpt-image');
+  // GPT-Image / DALL·E 3 不再各占一条协议：官方端点与中转站都落到合并后的 openai-images。
+  assert.equal(resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'gpt-image-2.5-flare').id, 'openai-images');
+  assert.equal(resolveAdapter({ baseUrl: 'https://api.openai.com/v1' }, 'dall-e-3').id, 'openai-images');
 });
 
 test('xhigh stays a first-class quality value', () => {
@@ -129,14 +131,16 @@ test('recraft routes edits to imageToImage', () => {
   assert.equal(built.body.get('strength'), '0.5');
 });
 
-test('volcengine agent plan preset uses the ark adapter', () => {
+test('volcengine agent plan preset uses the merged openai-images protocol', () => {
   const preset = providerPresetManifest().find((item) => item.id === 'volcengine-plan');
   assert.ok(preset, 'expected the volcengine-plan preset');
   assert.equal(preset.name, '火山方舟 Agent Plan');
   assert.equal(preset.baseUrl, 'https://ark.cn-beijing.volces.com/api/plan/v3');
-  assert.equal(preset.adapter, '');
-  const adapter = resolveAdapter({ baseUrl: preset.baseUrl, adapter: preset.adapter }, 'doubao-seedream-4-0-250828');
-  assert.equal(adapter.id, 'volcengine-ark');
+  assert.equal(preset.adapter, 'openai-images');
+  assert.deepEqual(preset.protocolOptions, { edit: 'same' });
+  const adapter = resolveAdapter(preset, 'doubao-seedream-4-0-250828');
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.endpoints.edit, '/images/generations');
 });
 
 test('provider manifests include hot image providers and native capabilities', () => {

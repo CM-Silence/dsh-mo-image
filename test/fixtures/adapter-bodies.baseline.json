@@ -8,79 +8,12 @@
     "  async-build    = 异步描述符的 async.build() 拼提交体，这里只录了通用 composeBody 的产物",
     "generate / edit：{ supported, path, body }；body 是 multipart 时记成 { $multipart: {…} }，文件项是 { $file, type, bytes }；",
     "prepare* 抛错时记成 { supported, throws }。",
+    "variants：协议合并（dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark",
+    "  → openai-images + edit/auth 选项）之前这六条协议各自的输入，按新写法重放的 body。",
+    "  它们与 adapters 里的条目同形，多一个 options 字段记录协议级选项。",
     "人工维护的记录：test/adapter-body-regression.test.mjs（改这个文件请先读它的文件头）。"
   ],
   "adapters": {
-    "dall-e-3": {
-      "model": "dall-e-3",
-      "quality": "standard",
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "dall-e-3",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "quality": "standard",
-          "response_format": "b64_json",
-          "n": 1,
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": true,
-        "path": "/images/edits",
-        "body": {
-          "$multipart": {
-            "model": "dall-e-3",
-            "prompt": "a cat sitting on a windowsill, soft morning light",
-            "quality": "standard",
-            "response_format": "b64_json",
-            "n": "1",
-            "size": "1024x1024",
-            "image[]": {
-              "$file": "ref.png",
-              "type": "image/png",
-              "bytes": 68
-            }
-          }
-        }
-      }
-    },
-    "gpt-image": {
-      "model": "gpt-image-2.5-flare",
-      "quality": "high",
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "gpt-image-2.5-flare",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "quality": "high",
-          "n": 1,
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": true,
-        "path": "/images/edits",
-        "body": {
-          "$multipart": {
-            "model": "gpt-image-2.5-flare",
-            "prompt": "a cat sitting on a windowsill, soft morning light",
-            "quality": "high",
-            "n": "1",
-            "size": "1024x1024",
-            "image[]": {
-              "$file": "ref.png",
-              "type": "image/png",
-              "bytes": 68
-            }
-          }
-        }
-      }
-    },
     "google-gemini": {
       "model": "gemini-2.5-flash-image",
       "quality": null,
@@ -167,92 +100,6 @@
         }
       }
     },
-    "together": {
-      "model": "black-forest-labs/FLUX.1-schnell",
-      "quality": null,
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "black-forest-labs/FLUX.1-schnell",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "n": 1,
-          "response_format": "url",
-          "width": 1024,
-          "height": 1024
-        }
-      },
-      "edit": {
-        "supported": false,
-        "path": "",
-        "body": {
-          "model": "black-forest-labs/FLUX.1-schnell",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "n": 1,
-          "response_format": "url",
-          "width": 1024,
-          "height": 1024,
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "siliconflow": {
-      "model": "Qwen/Qwen-Image",
-      "quality": null,
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "Qwen/Qwen-Image",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "negative_prompt": "blurry, watermark, text",
-          "image_size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "Qwen/Qwen-Image",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "negative_prompt": "blurry, watermark, text",
-          "image_size": "1024x1024",
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "volcengine-ark": {
-      "model": "doubao-seedream-4-0-250828",
-      "quality": null,
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "doubao-seedream-4-0-250828",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "response_format": "url",
-          "watermark": false,
-          "n": 1,
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "doubao-seedream-4-0-250828",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "response_format": "url",
-          "watermark": false,
-          "n": 1,
-          "size": "1024x1024",
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
     "stability": {
       "model": "core",
       "quality": null,
@@ -264,8 +111,8 @@
           "$multipart": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text",
-            "output_format": "png",
             "model": "core",
+            "output_format": "png",
             "aspect_ratio": "1:1"
           }
         }
@@ -277,8 +124,8 @@
           "$multipart": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text",
-            "output_format": "png",
             "model": "core",
+            "output_format": "png",
             "aspect_ratio": "1:1",
             "image": {
               "$file": "ref.png",
@@ -337,14 +184,14 @@
         "supported": true,
         "path": "/services/aigc/text2image/image-synthesis",
         "body": {
-          "model": "wan2.6-t2i",
           "input": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text"
           },
+          "model": "wan2.6-t2i",
           "parameters": {
-            "size": "1024*1024",
-            "n": 1
+            "n": 1,
+            "size": "1024*1024"
           }
         }
       },
@@ -352,14 +199,14 @@
         "supported": false,
         "path": "",
         "body": {
-          "model": "wan2.6-t2i",
           "input": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text"
           },
+          "model": "wan2.6-t2i",
           "parameters": {
-            "size": "1024*1024",
-            "n": 1
+            "n": 1,
+            "size": "1024*1024"
           },
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
@@ -420,34 +267,6 @@
         "supported": false,
         "path": "",
         "body": {
-          "size": "1024x1024",
-          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-        }
-      }
-    },
-    "localai": {
-      "model": "localai-model",
-      "quality": null,
-      "covers": "prepare",
-      "generate": {
-        "supported": true,
-        "path": "/images/generations",
-        "body": {
-          "model": "localai-model",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "negative_prompt": "blurry, watermark, text",
-          "n": 1,
-          "size": "1024x1024"
-        }
-      },
-      "edit": {
-        "supported": false,
-        "path": "",
-        "body": {
-          "model": "localai-model",
-          "prompt": "a cat sitting on a windowsill, soft morning light",
-          "negative_prompt": "blurry, watermark, text",
-          "n": 1,
           "size": "1024x1024",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
@@ -583,10 +402,10 @@
         "supported": true,
         "path": "/images/generations",
         "body": {
-          "model": "gpt-image-2.5-flare",
           "prompt": "a cat sitting on a windowsill, soft morning light",
-          "quality": "high",
+          "model": "gpt-image-2.5-flare",
           "n": 1,
+          "quality": "high",
           "output_format": "png",
           "size": "1024x1024"
         }
@@ -596,10 +415,10 @@
         "path": "/images/edits",
         "body": {
           "$multipart": {
-            "model": "gpt-image-2.5-flare",
             "prompt": "a cat sitting on a windowsill, soft morning light",
-            "quality": "high",
+            "model": "gpt-image-2.5-flare",
             "n": "1",
+            "quality": "high",
             "output_format": "png",
             "size": "1024x1024",
             "image[]": {
@@ -636,9 +455,9 @@
         "supported": true,
         "path": "/images/generations",
         "body": {
-          "model": "flux-1-schnell",
           "prompt": "a cat sitting on a windowsill, soft morning light",
           "negative_prompt": "blurry, watermark, text",
+          "model": "flux-1-schnell",
           "n": 1,
           "size": "1024x1024"
         }
@@ -648,9 +467,273 @@
         "path": "/images/edits",
         "body": {
           "$multipart": {
-            "model": "flux-1-schnell",
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text",
+            "model": "flux-1-schnell",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    }
+  },
+  "variants": {
+    "legacy/dall-e-3": {
+      "model": "dall-e-3",
+      "quality": "standard",
+      "options": {},
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "dall-e-3",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "quality": "standard",
+          "response_format": "b64_json",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "dall-e-3",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "quality": "standard",
+            "response_format": "b64_json",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "legacy/gpt-image": {
+      "model": "gpt-image-2.5-flare",
+      "quality": "high",
+      "options": {},
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "gpt-image-2.5-flare",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "quality": "high",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "model": "gpt-image-2.5-flare",
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "quality": "high",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "legacy/together": {
+      "model": "black-forest-labs/FLUX.1-schnell",
+      "quality": null,
+      "options": {
+        "edit": "none"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "black-forest-labs/FLUX.1-schnell",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "n": 1,
+          "response_format": "url",
+          "width": 1024,
+          "height": 1024
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "model": "black-forest-labs/FLUX.1-schnell",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "n": 1,
+          "response_format": "url",
+          "width": 1024,
+          "height": 1024,
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "legacy/localai": {
+      "model": "localai-model",
+      "quality": null,
+      "options": {
+        "edit": "none"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "localai-model",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": false,
+        "path": "",
+        "body": {
+          "model": "localai-model",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "n": 1,
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "legacy/siliconflow": {
+      "model": "Qwen/Qwen-Image",
+      "quality": null,
+      "options": {
+        "edit": "same"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "Qwen/Qwen-Image",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "image_size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "Qwen/Qwen-Image",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "image_size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "legacy/volcengine-ark": {
+      "model": "doubao-seedream-4-0-250828",
+      "quality": null,
+      "options": {
+        "edit": "same"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "doubao-seedream-4-0-250828",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "response_format": "url",
+          "watermark": false,
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "model": "doubao-seedream-4-0-250828",
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "response_format": "url",
+          "watermark": false,
+          "n": 1,
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
+    "option/auth=bearer": {
+      "model": "flux-1-schnell",
+      "quality": null,
+      "options": {},
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "model": "flux-1-schnell",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text",
+            "model": "flux-1-schnell",
+            "n": "1",
+            "size": "1024x1024",
+            "image[]": {
+              "$file": "ref.png",
+              "type": "image/png",
+              "bytes": 68
+            }
+          }
+        }
+      }
+    },
+    "option/auth=api-key": {
+      "model": "flux-1-schnell",
+      "quality": null,
+      "options": {
+        "auth": "api-key"
+      },
+      "generate": {
+        "supported": true,
+        "path": "/images/generations",
+        "body": {
+          "prompt": "a cat sitting on a windowsill, soft morning light",
+          "negative_prompt": "blurry, watermark, text",
+          "model": "flux-1-schnell",
+          "n": 1,
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/images/edits",
+        "body": {
+          "$multipart": {
+            "prompt": "a cat sitting on a windowsill, soft morning light",
+            "negative_prompt": "blurry, watermark, text",
+            "model": "flux-1-schnell",
             "n": "1",
             "size": "1024x1024",
             "image[]": {

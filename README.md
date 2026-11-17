@@ -261,7 +261,7 @@ $DSH_HOME/.credentials.yaml
 | 提供商 | 适配器 | 默认模型 | 说明 |
 |---|---|---|---|
 | **Google Gemini / Nano Banana** | `google-gemini` | `gemini-nano-banana-2.1`、`gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-2.5-flash-image` | 原生 `generateContent`；生成 + 参考图编辑，新模型最多 14 张、2.5 只有 3 张 |
-| OpenAI | `dall-e-3` / `gpt-image` / `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
+| OpenAI | `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
 | **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在高级设置里填「调度模型」 |
 | **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
 | **Azure OpenAI** | `azure-openai` | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
@@ -273,15 +273,15 @@ $DSH_HOME/.credentials.yaml
 | **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
 | **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4`、`ideogram-4-5`、`ideogram-4-transparent` | 生成；模型写在路径里，4 收 JSON+像素枚举，4-5 只收 `size`，3/transparent 收字母 `x` 的比例 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
-| **Together AI** | `together` | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
+| **Together AI** | `openai-images`（`edit:'none'`） | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
 | **Fireworks AI** | `openai-images` | `accounts/fireworks/models/flux-1-schnell` | OpenAI Images 兼容网关 |
 | **Novita AI** | `openai-images` | `flux-1-schnell` | OpenAI Images 兼容网关 |
 | 自定义 / 新网关 | `openai-images` | 手动/获取 | 同步或异步自动识别（见下文） |
-| 火山方舟 | `volcengine-ark` | 手动/获取 | 生成；档位按模型分（5.x 是 `1K/1.5K/2K`，lite 是 `2K/3K/4K`，4.5 是 `2K/4K`），也收任意宽高 |
-| 火山方舟 Agent Plan | `volcengine-ark` | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
+| 火山方舟 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成；档位按模型分（5.x 是 `1K/1.5K/2K`，lite 是 `2K/3K/4K`，4.5 是 `2K/4K`），也收任意宽高 |
+| 火山方舟 Agent Plan | `openai-images`（`edit:'same'`） | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
 | 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 异步入队任务；只有 wan2.7 认 `1K/2K/4K` 档位 |
-| 硅基流动 | `siliconflow` | 手动/获取 | 生成 + 单图编辑 |
+| 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
 | 智谱 BigModel | `zhipu` | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 
 说明：
@@ -317,7 +317,7 @@ $DSH_HOME/.credentials.yaml
 | 部署方式 | 适配器 | 默认地址（服务根地址） | 获取模型 | 生成 / 编辑 |
 |---|---|---|---|---|
 | stable-diffusion.cpp `sd-server` | `openai-images` | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成 + `/images/edits` |
-| LocalAI | `openai-images` | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成；编辑取决于后端 |
+| LocalAI | `openai-images`（`edit:'none'`） | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成；没有 `/images/edits` |
 | AUTOMATIC1111 / Forge / SD.Next / Draw Things | `a1111` | `http://127.0.0.1:7860` | `/sdapi/v1/sd-models` | 生成 + `/sdapi/v1/img2img` |
 | ComfyUI | `comfyui` | `http://127.0.0.1:8188` | `/object_info`（CheckpointLoaderSimple） | 生成；原生编辑暂不支持 |
 | SwarmUI | `swarmui` | `http://127.0.0.1:7801` | `/API/ListModels` | 生成；原生编辑暂不支持 |
@@ -408,7 +408,9 @@ $DSH_HOME/.credentials.yaml
 | `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置适配器：`openai-images`（通用兜底，自动同步/异步）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`gpt-image`、`dall-e-3`、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`together`、`siliconflow`、`volcengine-ark`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`、`localai`。
+内置适配器：`openai-images`（通用兜底，自动同步/异步；`edit` / `auth` 两个协议级选项）、`openai-responses`、`openrouter-images`、`azure-openai`、`openai-chat`（中转）、`google-gemini`、`xai-imagine`、`recraft`、`ideogram`、`stability`、`dashscope-qwen-image`、`dashscope-wanx`、`zhipu`、`bfl`、`fal`、`replicate`、`modelscope`、`a1111`、`comfyui`、`swarmui`。
+
+> 协议收敛（0.8）：原来按厂家分叉的 `dall-e-3`、`gpt-image`、`together`、`localai`、`siliconflow`、`volcengine-ark` 地址与组装本来就一样，现在合并成一条 `openai-images` + 两个选项：`edit`（`edits` / `same` / `none`，编辑走 `/images/edits`、走同一个 generations、或没有编辑）与 `auth`（`bearer` / `api-key`）。老配置里的旧 id 会在读取时自动改写，模型规则、尺寸/质量、锁与预设都不受影响。
 
 交互形态都覆盖：
 
