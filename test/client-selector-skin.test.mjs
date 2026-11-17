@@ -476,7 +476,9 @@ test('the open codex quality pane renders one tick per quality level', () => {
     seed({ open: true, pane: 'quality' })
   );
   assert.equal(collectClass(tree, 'cmes-rail').length, 1);
-  assert.equal(collectClass(tree, 'cmes-dot').length, 5);
+  assert.equal(collectClass(tree, 'cmes-dot').length, 10);
+  assert.equal(collectClass(tree, 'cmes-tickOverlay').length, 1);
+  assert.equal(collectClass(tree, 'cmes-tickMotion').length, 1);
   const text = collectText(tree).join(' ');
   assert.match(text, /更快消耗/);
 });
@@ -604,6 +606,32 @@ test('the highest quality stop reads Ultra even when its backend id is high', ()
   const text = collectText(tree).join(' ');
   assert.match(text, /Ultra/);
   assert.doesNotMatch(text, /最高/);
+});
+
+test('the codex rail hue climbs toward violet with the quality stop', () => {
+  const client = loadClient();
+  const expected = {
+    off: '#8a8a8f',
+    low: '#3a83f7',
+    medium: '#4a72f2',
+    high: '#5f5ce8',
+    max: '#914ef6'
+  };
+  for (const [quality, fill] of Object.entries(expected)) {
+    const tree = client.render(
+      client.h(client.__test.CodexImageSeat, {
+        t: ct,
+        store: storeFixture({
+          defaults: { quality, auto: true, width: 1024, height: 1024, promptOptimization: true }
+        }),
+        setStore() {},
+        qualitySpec: railSpec
+      }),
+      seed({ open: true, pane: 'quality' })
+    );
+    const rail = collectClass(tree, 'cmes-rail')[0];
+    assert.equal(rail.props.style['--cmes-fill'], fill, `${quality} uses the codex fill`);
+  }
 });
 
 test('the highest quality stop reads Ultra in the codex peak ink', () => {
