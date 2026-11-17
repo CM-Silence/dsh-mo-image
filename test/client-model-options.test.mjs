@@ -280,6 +280,41 @@ const PARAM_TABLE_CONFIG = {
   defaults: {}
 };
 
+/**
+ * 带 enum 参数的云端配置（p2 / gpt-image-2.5-flare）：
+ * 行序是提示词 → 负面词（enum）→ 模型 → 张数 → 采样器（enum），两个 enum 行前后分开摆，
+ * 用来锁「每个 enum 一个方框、顺序按表里」和「常规表只留 text / number / boolean」。
+ * 质量也开着，好把挡位表和选项表放在同一棵树里比 grid。
+ */
+const ENUM_CONFIG = {
+  providers: [{
+    ...CLOUD_CONFIG.providers[0],
+    modelOptions: {
+      'gpt-image-2.5-flare': {
+        quality: {
+          supported: true, field: 'quality',
+          options: [{ label: 'Low', value: 'low', default: true }]
+        },
+        params: [
+          { role: 'prompt', name: 'prompt', type: 'text', default: '', description: 'Image prompt', expose: true },
+          {
+            role: 'negative', name: 'negative_prompt', type: 'enum', default: 'blurry',
+            description: 'What to avoid', expose: false, options: ['blurry', 'low quality']
+          },
+          { role: 'model', name: 'model', type: 'text', default: '', description: 'Model name', expose: false },
+          { role: 'n', name: 'n', type: 'number', default: '1', description: 'Images per request', expose: false },
+          {
+            name: 'sampler', type: 'enum', default: 'euler', description: 'Sampler',
+            expose: true, options: ['euler', 'ddim']
+          }
+        ]
+      }
+    }
+  }],
+  active: CLOUD_CONFIG.active,
+  defaults: {}
+};
+
 test('the model options toggle is enabled for the local ComfyUI deployment', async () => {
   const { tree } = await openEditor();
   const toggle = optionsToggle(tree);
@@ -467,15 +502,16 @@ test('checking a candidate turns it into a table row with node/input, default an
   assert.ok(box, 'expected the steps candidate');
   box.props.onChange();
   opened = harness.renderRoot();
-  const bind = findAll(opened, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps');
-  assert.equal(bind.length, 1, 'the row shows where it lands in the workflow');
+  assert.deepEqual(findAll(opened, (node) => node.props && node.props['data-param-bind-target']), [],
+    '落点不再渲染：node/input 只留在数据里');
   const stepsRow = findAll(opened, (node) => node.props && node.props['data-param-grid'] === 'params:row')
-    .find((row) => findAll(row, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps').length);
+    .find((row) => findAll(row, (node) => node.type === 'input'
+      && node.props['data-param-field'] === 'name' && node.props.value === 'steps').length);
   const nameCell = findAll(stepsRow, (node) => node.props && node.props['data-param-cell'] === 'name')[0];
   assert.ok(nameCell, '参数名单元格在');
-  assert.equal(findAll(nameCell, (node) => node.props
-    && node.props['data-param-bind-target'] === '18:7.steps').length, 1, '落点是参数名单元格里的第二行');
-  assert.equal(stepsRow.children.length, 5, '落点小字不再自占一整行');
+  assert.equal(nameCell.children.length, 1, '参数名格子里只剩输入框，没有第二行小字');
+  assert.equal(stepsRow.children.length, 5, '每行仍是五格');
+  assert.equal(findAll(stepsRow, (node) => node.type === 'summary').length, 0, '工作流行里没有折叠的选项小字');
   assert.equal(stepsRow.props.style.minHeight, 48, '工作流行与别的行一样高');
   assert.equal(findAll(opened, (node) => node.type === 'input'
     && node.props['data-param-candidate'] === '18:7.steps')[0].props.checked, true,
@@ -485,8 +521,9 @@ test('checking a candidate turns it into a table row with node/input, default an
   findAll(opened, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
     .props.onChange();
   let cleared = harness.renderRoot();
-  assert.equal(findAll(cleared, (node) => node.props && node.props['data-param-bind-target'] === '18:7.steps').length, 0,
-    'unchecking removes the row');
+  assert.equal(commonRows(cleared).some((row) => findAll(row, (node) => node.type === 'input'
+    && node.props['data-param-field'] === 'name' && node.props.value === 'steps').length), false,
+  'unchecking removes the row');
   findAll(cleared, (node) => node.type === 'input' && node.props['data-param-candidate'] === '18:7.steps')[0]
     .props.onChange();
   opened = harness.renderRoot();
@@ -511,6 +548,31 @@ test('a parse failure shows the host error instead of failing silently', async (
   const text = textOf(harness.renderRoot()).join(' ');
   assert.match(text, /Parameter parsing failed/, 'the panel says what failed');
   assert.match(text, /Unexpected token n/, 'and repeats the readable reason');
+});
+
+test('工作流的 enum 参数也单独成框：ComfyUI 折叠区走的是同一套渲染', async () => {
+  const harness = await openParsedParams({
+    ok: true,
+    format: 'api',
+    count: 1,
+    params: [{
+      node: '18:7', input: 'sampler_name', name: 'sampler_name', classType: 'KSampler',
+      type: 'enum', value: 'euler', display: 'euler', options: ['euler', 'ddim']
+    }]
+  });
+  let opened = harness.renderRoot();
+  const candidate = findAll(opened, (node) => node.type === 'input'
+    && node.props['data-param-candidate'] === '18:7.sampler_name')[0];
+  assert.ok(candidate, '候选清单里有这一项');
+  candidate.props.onChange();
+  opened = harness.renderRoot();
+  assert.equal(commonRows(opened).length, 0, 'enum 行不进「常规」表');
+  const box = enumBoxNamed(opened, 'sampler_name');
+  assert.ok(box, 'enum 行在自己的方框里');
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.label', at).props.value),
+    ['euler', 'ddim'], '候选带来的选项原样呈现');
+  assert.deepEqual(findAll(opened, (node) => node.props && node.props['data-param-bind-target']), [],
+    '工作流的落点也不渲染');
 });
 
 test('parsing keeps the mapping when the same analyze response also carries params', async () => {
@@ -1210,6 +1272,33 @@ const savedTableEntry = async (harness) => {
   return config.providers.find((item) => item.id === 'p2').modelOptions['gpt-image-2.5-flare'];
 };
 
+/* ─────────────── enum 参数：一个参数一个方框（和「质量」方框同构） ─────────────── */
+
+/** enum 方框：`data-param-box="enum:<行号>"`，每个 enum 参数一个。 */
+const enumBoxes = (tree) => findAll(tree, (node) => node.props
+  && /^enum:\d+$/.test(String(node.props['data-param-box'] || '')));
+/** 按参数名找那个 enum 方框（标题与参数名输入都是它）。 */
+const enumBoxNamed = (tree, name) => enumBoxes(tree).find((box) => {
+  const input = enumCell(box, 'name');
+  return Boolean(input) && input.props.value === name;
+}) || null;
+const enumKeyOf = (box) => String(box.props['data-param-box']);
+/** 选项表的表头 / 表体行：grid 键带方框号，多个 enum 参数也不会互相串。 */
+const enumHead = (box) => findAll(box, (node) => node.props
+  && node.props['data-param-grid'] === enumKeyOf(box) + ':head')[0] || null;
+const enumOptions = (box) => findAll(box, (node) => node.props
+  && node.props['data-param-grid'] === enumKeyOf(box) + ':option');
+/** 方框里的某个控件：field 是键后缀（option.label / option.default …）或 data-param-field，index 是选项行号。 */
+const enumCell = (box, field, index) => {
+  const scope = index === undefined ? box : enumOptions(box)[index];
+  if (!scope) return null;
+  if (field.startsWith('option.')) {
+    const key = enumKeyOf(box) + '.' + field;
+    return findAll(scope, (node) => node.props && node.props['data-param-key'] === key)[0] || null;
+  }
+  return findAll(scope, (node) => node.props && node.props['data-param-field'] === field)[0] || null;
+};
+
 test('「常规」是一张离散参数表：表头用 data-param-grid，表体一行一个参数', async () => {
   const { harness } = await openEditor(PARAM_TABLE_CONFIG);
   const opened = openModelPanel(harness);
@@ -1240,9 +1329,11 @@ test('「常规」是一张离散参数表：表头用 data-param-grid，表体�
       assert.ok(paramCell(row, field), row.props['data-param-role'] + ' 缺 ' + field + ' 单元格');
     }
     assert.equal(paramCell(row, 'name').props.style.textAlign, undefined, '表体不居中');
+    assert.equal(findAll(paramCell(row, 'description'), (node) => node.type === 'details').length, 0,
+      '描述格里不再挂 enum 选项的折叠小字：enum 行整行搬去了自己的方框');
   }
   assert.equal(findAll(box, (node) => node.props && node.props['data-param-bind-target']).length, 0,
-    'HTTP 行没有落点，就不显示第二行小字');
+    '落点不再渲染：参数名格子只有一行');
 });
 
 test('提示词是固定第一行：不可删、暴露固定、类型固定 text、默认空，只有名字能改', async () => {
@@ -1357,43 +1448,185 @@ test('删用户行只动参数表，不动字段模板', async () => {
   assert.equal(entry.fields.model.path, 'model', '删用户行不动字段模板');
 });
 
-test('type 选 enum 时选项收在描述列里，默认折叠，逗号分隔落盘', async () => {
+test('enum 行搬出「常规」表：每个 enum 参数一个方框，标题是参数名', async () => {
   const { harness } = await openEditor(PARAM_TABLE_CONFIG);
   let opened = openModelPanel(harness);
-  assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '非 enum 不显示选项');
+  assert.equal(enumBoxes(opened).length, 0, '没有 enum 行时没有 enum 方框');
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'type').props.value, 'text', '负面词一开始是 text');
 
   paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'enum' } });
   opened = harness.renderRoot();
-  let row = commonRow(opened, 'negative');
-  const descriptionCell = findAll(row, (node) => node.props['data-param-cell'] === 'description')[0];
-  assert.ok(descriptionCell, '描述单元格在');
-  const details = findAll(descriptionCell, (node) => node.type === 'details')[0];
-  assert.ok(details, '选项是描述格里的一段折叠内容');
-  assert.equal(details.props.open, undefined, '默认折叠：不占整行，也不把每行撑高');
-  const summary = findAll(details, (node) => node.type === 'summary')[0];
-  assert.equal(textOf(summary).join(''), 'Options: —', '没有选项时显示占位');
-  const options = paramCell(row, 'options');
-  assert.ok(options, '展开后是同一个描述格里的输入');
-  assert.equal(findAll(descriptionCell, (node) => node.props['data-param-field'] === 'options').length, 1,
-    '选项输入在描述格内，不再是整行子项');
-  assert.equal(row.children.some((child) => child && child.props
-    && child.props['data-param-field'] === 'options'), false, '选项不占参数行的整行');
-  options.props.onChange({ target: { value: 'euler, ddim' } });
+  // ① 「常规」表里不再有这一行：只剩 text / number / boolean。
+  assert.equal(commonRow(opened, 'negative'), null, 'enum 行不在「常规」表里');
+  assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']), ['prompt', 'model', 'n'],
+    '「常规」只留 text / number / boolean 的行');
+  // ② 它成了自己的一个方框，标题是参数名。
+  const boxes = enumBoxes(opened);
+  assert.equal(boxes.length, 1, '一个 enum 参数一个方框');
+  const box = boxes[0];
+  assert.equal(textOf(box.children[0].children[0]).join(''), 'negative_prompt', '标题用参数名');
+  const name = enumCell(box, 'name');
+  assert.ok(name, '框内还有参数名输入');
+  assert.equal(name.props.value, 'negative_prompt');
+  assert.equal(name.props['data-param-key'], 'negative', '参数名沿用行键，旧查询仍可用');
+  // ③ 框里是选项表，不是散装输入框。
+  assert.ok(enumHead(box), '选项表有表头');
+  assert.deepEqual(textOf(enumHead(box)), ['Option name', 'Value', 'Default'],
+    '表头：选项名 / 值 / 是否默认');
+  assert.equal(enumOptions(box).length, 0, '刚切成 enum 时没有选项行');
+  assert.ok(enumCell(box, 'option.add'), '框里有「添加选项」');
+  assert.ok(enumCell(box, 'remove'), '行级删除也跟过来：enum 行仍能被去掉');
+
+  // ④ 标题跟着用户改过的名字走。
+  enumCell(box, 'name').props.onChange({ target: { value: 'sampling' } });
   opened = harness.renderRoot();
-  row = commonRow(opened, 'negative');
-  assert.equal(paramCell(row, 'options').props.value, 'euler, ddim');
-  assert.equal(textOf(findAll(row, (node) => node.type === 'summary')[0]).join(''), 'Options: euler, ddim',
-    '折叠时用一行小字给出当前选项');
-  assert.equal(row.props.style.minHeight, 48, 'enum 行与别的行一样高');
+  assert.equal(textOf(enumBoxes(opened)[0].children[0].children[0]).join(''), 'sampling', '标题跟着参数名');
 
   const entry = await savedTableEntry(harness);
-  const negative = entry.params.find((item) => item.role === 'negative');
-  assert.equal(negative.type, 'enum');
-  assert.deepEqual(negative.options, ['euler', 'ddim']);
+  assert.equal(entry.params.find((row) => row.role === 'negative').type, 'enum');
+  assert.equal(entry.params.find((row) => row.role === 'negative').name, 'sampling');
+});
 
-  paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'text' } });
+test('选项表：添加 / 改名 / 单选默认 / 删除，按编辑结果落盘', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  let opened = openModelPanel(harness);
+  // 回读：两个选项按配置顺序；值列是真正发出去的字符串；default 命中哪个就勾哪个。
+  let box = enumBoxNamed(opened, 'negative_prompt');
+  assert.ok(box, '负面词的 enum 方框在');
+  assert.equal(enumOptions(box).length, 2);
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.label', at).props.value),
+    ['blurry', 'low quality']);
+  assert.deepEqual(enumOptions(box).map((_row, at) => textOf(enumCell(box, 'option.value', at)).join('')),
+    ['blurry', 'low quality'], 'enum 的选项名就是值，两列看到的是同一个字符串');
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.default', at).props.checked),
+    [true, false], 'default 命中哪个选项就勾哪个');
+
+  // 添加一条、写上值、设为默认。
+  enumCell(box, 'option.add').props.onClick();
   opened = harness.renderRoot();
-  assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '切回 text 后选项收起');
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.equal(enumOptions(box).length, 3, '加一行空的选项');
+  assert.equal(enumCell(box, 'option.label', 2).props.value, '', '新选项等着填');
+  enumCell(box, 'option.label', 2).props.onChange({ target: { value: 'euler' } });
+  opened = harness.renderRoot();
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.equal(textOf(enumCell(box, 'option.value', 2)).join(''), 'euler', '值列跟着选项名走');
+  enumCell(box, 'option.default', 2).props.onChange();
+  opened = harness.renderRoot();
+
+  // 删掉原来默认的那条：单选随之清空（默认值不能指向已经不存在的选项）。
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.default', at).props.checked),
+    [false, false, true]);
+  enumCell(box, 'option.remove', 0).props.onClick();
+  opened = harness.renderRoot();
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.label', at).props.value),
+    ['low quality', 'euler'], '删除只去掉那一行');
+  assert.deepEqual(enumOptions(box).map((_row, at) => enumCell(box, 'option.default', at).props.checked),
+    [false, true], '默认档删掉后单选落到剩下的那条');
+
+  const entry = await savedTableEntry(harness);
+  const negative = entry.params.find((row) => row.role === 'negative');
+  assert.equal(negative.type, 'enum');
+  assert.deepEqual(negative.options, ['low quality', 'euler'], '增删选项落盘');
+  assert.equal(negative.default, 'euler', '默认值跟着单选走');
+});
+
+test('enum 方框标题行保留行级操作：暴露与行锁都写回 params', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  let opened = openModelPanel(harness);
+  let box = enumBoxNamed(opened, 'negative_prompt');
+  assert.equal(enumCell(box, 'expose').props['aria-pressed'], 'false', '默认不暴露');
+  enumCell(box, 'expose').props.onClick();
+  opened = harness.renderRoot();
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.equal(enumCell(box, 'expose').props['aria-pressed'], 'true', '暴露是行级的，点一下就开');
+
+  const lock = findAll(box, (node) => node.type === 'button'
+    && node.props['data-lock-key'] === enumKeyOf(box))[0];
+  assert.ok(lock, '标题行有行级锁（data-lock-key 仍在）');
+  assert.equal(lock.props['aria-pressed'], 'false', '默认不锁');
+  lock.props.onClick(fakeEvent());
+  opened = harness.renderRoot();
+  box = enumBoxNamed(opened, 'negative_prompt');
+  assert.equal(findAll(box, (node) => node.type === 'button'
+    && node.props['data-lock-key'] === enumKeyOf(box))[0].props['aria-pressed'], 'true');
+
+  const entry = await savedTableEntry(harness);
+  const negative = entry.params.find((row) => row.role === 'negative');
+  assert.equal(negative.expose, true, '暴露写进 params');
+  assert.equal(negative.locked, true, '行级锁也写进 params（只存 true）');
+});
+
+test('enum 方框的删除：第一次只变成确认，第二次才真删', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  let opened = openModelPanel(harness);
+  enumCell(enumBoxNamed(opened, 'sampler'), 'remove').props.onClick();
+  opened = harness.renderRoot();
+  assert.ok(enumBoxNamed(opened, 'sampler'), '第一次点击不删');
+  assert.equal(textOf(enumCell(enumBoxNamed(opened, 'sampler'), 'remove')).join(''), 'Confirm delete?',
+    '按钮变成确认文案');
+  enumCell(enumBoxNamed(opened, 'sampler'), 'remove').props.onClick();
+  opened = harness.renderRoot();
+  assert.equal(enumBoxNamed(opened, 'sampler'), null, '第二次点击才真删');
+
+  const entry = await savedTableEntry(harness);
+  assert.equal(entry.params.some((row) => row.name === 'sampler'), false, '删掉的 enum 行不再落盘');
+  assert.equal(entry.params.filter((row) => row.type === 'enum').length, 1, '别的 enum 行不受影响');
+});
+
+test('选项表与参数表同一套 grid：列宽固定 / 表头居中 / 超长截断 / 行等高', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = enumBoxNamed(opened, 'negative_prompt');
+  const paramsHead = paramGrid(opened, 'params:head')[0];
+  const paramsRow = commonRows(opened)[0];
+  const head = enumHead(box);
+  const row = enumOptions(box)[0];
+
+  // 同一套 grid：同一个 display / 列间距 / 行高，列宽是一份固定模板（含 px 列）。
+  assert.equal(head.props.style.display, paramsHead.props.style.display, '表头用 grid');
+  assert.equal(row.props.style.display, paramsRow.props.style.display, '表体也用 grid');
+  assert.equal(head.props.style.columnGap, paramsHead.props.style.columnGap, '列间距与参数表一致');
+  assert.equal(row.props.style.columnGap, paramsRow.props.style.columnGap);
+  assert.equal(row.props.style.minHeight, paramsRow.props.style.minHeight, '行等高：选项行和参数行一样高');
+  assert.equal(row.props.style.gridTemplateColumns, head.props.style.gridTemplateColumns,
+    '表头与表体共用一份列宽');
+  assert.match(String(head.props.style.gridTemplateColumns), /\d+px/, '有固定像素列：长内容撑不开列宽');
+  for (const cell of head.children) {
+    if (!textOf(cell).length) continue; // 删除列没有表头文字
+    assert.equal(cell.props.style.textAlign, 'center', '表头文字居中');
+  }
+  // 值列是只读文本，超长截断（三件套与参数表的格子一致）。
+  const valueCell = enumCell(box, 'option.value', 0);
+  assert.equal(textOf(valueCell).join(''), 'blurry');
+  for (const style of ['overflow', 'textOverflow', 'whiteSpace', 'minWidth']) {
+    assert.equal(valueCell.props.style[style], paramCell(paramsRow, 'name').props.style[style],
+      '截断样式与参数表一致：' + style);
+  }
+
+  // 质量挡位表也搬进了同一套 grid：列宽 / 列间距 / 行高都一样，表头也居中。
+  const ladderHead = qualityHead(opened);
+  assert.ok(ladderHead, '质量挡位表在');
+  assert.equal(ladderHead.props.style.gridTemplateColumns, head.props.style.gridTemplateColumns,
+    '质量挡位表与 enum 选项表共用同一份列宽');
+  assert.equal(ladderHead.props.style.columnGap, head.props.style.columnGap);
+  assert.equal(qualityOptions(opened)[0].props.style.minHeight, row.props.style.minHeight, '挡位行与选项行等高');
+  for (const cell of ladderHead.children) {
+    if (!textOf(cell).length) continue;
+    assert.equal(cell.props.style.textAlign, 'center', '挡位表表头也居中');
+  }
+});
+
+test('方框顺序：常规 → 各 enum 方框（按表里的顺序）→ 尺寸 → 质量 → 参考图', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  const opened = openModelPanel(harness);
+  const body = findAll(opened, (node) => hasClass(node, 'customizedBody'))[0];
+  assert.deepEqual(findAll(body, (node) => node.props && node.props['data-param-box'])
+    .map((node) => node.props['data-param-box']),
+  ['common', 'enum:1', 'enum:4', 'size', 'quality', 'image'],
+  '普通参数在前；enum 各自成框、按表里顺序跟在后面；尺寸 / 质量 / 参考图照旧在最后');
 });
 
 test('操作列：暴露 / 行级锁 / 删除三个按钮，说明走即时气泡而不是原生 title', async () => {
@@ -1513,8 +1746,8 @@ test('删掉旧的种子/模型映射下拉后，两行仍在参数表里可编�
   const model = rowWith('model');
   assert.ok(seed, '种子是参数表里的普通行');
   assert.ok(model, '模型是参数表里的普通行');
-  assert.equal(findAll(seed, (node) => node.props['data-param-bind-target'] === '18:7.seed').length, 1);
-  assert.equal(findAll(model, (node) => node.props['data-param-bind-target'] === '18:1.unet_name').length, 1);
+  assert.equal(findAll(tree, (node) => node.props && node.props['data-param-bind-target']).length, 0,
+    '落点不再渲染：node/input 只留在数据里，不占参数名格子');
   const name = paramCell(model, 'name');
   assert.notEqual(name.props.disabled, true, '模型行仍可编辑');
   assert.equal(typeof name.props.onChange, 'function', '改名照旧走行内输入');
@@ -1584,14 +1817,17 @@ test('params 回读：类型 / 默认值 / 描述 / 暴露按落盘的来', asyn
   const { harness } = await openEditor(stored);
   const opened = openModelPanel(harness);
   assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']),
-    ['prompt', 'negative', undefined], '内置行在前，用户行在后');
-  const negative = commonRow(opened, 'negative');
-  assert.equal(paramCell(negative, 'type').props.value, 'enum');
-  assert.equal(paramCell(negative, 'default').props.value, 'blurry');
-  assert.equal(paramCell(negative, 'description').props.value, 'avoid');
-  assert.equal(paramCell(negative, 'expose').props['aria-pressed'], 'false');
-  assert.equal(paramCell(negative, 'options').props.value, 'blurry, low quality');
-  const custom = commonRows(opened)[2];
+    ['prompt', undefined], 'enum 行搬出「常规」表，剩下的内置行在前、用户行在后');
+  const negative = enumBoxNamed(opened, 'negative_prompt');
+  assert.ok(negative, 'enum 行在自己的方框里');
+  assert.equal(enumCell(negative, 'name').props.value, 'negative_prompt');
+  assert.equal(enumCell(negative, 'description').props.value, 'avoid');
+  assert.equal(enumCell(negative, 'expose').props['aria-pressed'], 'false');
+  assert.deepEqual(enumOptions(negative).map((_row, at) => enumCell(negative, 'option.label', at).props.value),
+    ['blurry', 'low quality'], '选项按落盘的顺序');
+  assert.deepEqual(enumOptions(negative).map((_row, at) => enumCell(negative, 'option.default', at).props.checked),
+    [true, false], '默认值命中哪一项就勾哪一项');
+  const custom = commonRows(opened)[1];
   assert.equal(paramCell(custom, 'name').props.value, 'seed');
   assert.equal(paramCell(custom, 'expose').props['aria-pressed'], 'true');
   assert.equal(paramCell(commonRow(opened, 'prompt'), 'description').props.value, 'custom prompt doc');
