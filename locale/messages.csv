@@ -273,6 +273,22 @@ form.unlockAll,"全部解锁","Unlock all","すべてロック解除","Desbloque
 form.advancedParams,"高级（手填字段名）","Advanced (field names)","詳細（項目名の手入力）","Avanzado (nombres de campo)","Avancé (noms de champs)","Erweitert (Feldnamen)","Дополнительно (имена полей)","Avançado (nomes de campos)"
 form.paramsCommon,"常规","General","一般","General","Général","Allgemein","Общие","Geral"
 form.paramsHint,"上锁的键不会被一键配置与自动检测改动；解锁后可以手填。","Locked keys survive bulk and single detection; unlock one to edit it by hand.","ロックした項目は一括設定と自動検出では変更されません。手入力するにはロックを解除してください。","Las claves bloqueadas no las cambia la configuración ni la detección; desbloquea una para editarla a mano.","Les clés verrouillées ne sont jamais modifiées ; déverrouillez-en une pour la saisir à la main.","Gesperrte Schlüssel werden nicht überschrieben; zum Bearbeiten entsperren.","Заблокированные ключи не изменяются; разблокируйте чтобы править вручную.","Chaves bloqueadas não são alteradas; desbloqueie para editar à mão."
+form.paramName,参数名,Parameter name,パラメータ名,Nombre del parámetro,Nom du paramètre,Parametername,Имя параметра,Nome do parâmetro
+form.paramType,类型,Type,型,Tipo,Type,Typ,Тип,Tipo
+form.paramDefault,默认值,Default,既定値,Valor predeterminado,Valeur par défaut,Standardwert,По умолчанию,Valor padrão
+form.paramDescription,描述,Description,説明,Descripción,Description,Beschreibung,Описание,Descrição
+form.paramExpose,暴露,Expose,公開,Exponer,Exposer,Bereitstellen,Показывать,Expor
+form.paramOptions,选项,Options,選択肢,Opciones,Options,Optionen,Варианты,Opções
+form.paramNameHint,发到请求体里的字段名；提示词行只能改名,Field name sent in the request body; the prompt row can only be renamed,リクエスト本文に送る項目名。プロンプト行は名前だけ変更できます,Nombre del campo que se envía en el cuerpo; la fila del prompt solo se puede renombrar,Nom du champ envoyé dans le corps ; la ligne du prompt peut seulement être renommée,Feldname im Anfrage-Body; die Prompt-Zeile lässt sich nur umbenennen,Имя поля в теле запроса; строку промпта можно только переименовать,Nome do campo enviado no corpo; a linha do prompt só pode ser renomeada
+form.paramDescriptionHint,给对话模型看的说明,Shown to the chat model,対話モデルに表示される説明,Se muestra al modelo de chat,Affiché au modèle de conversation,Wird dem Chat-Modell angezeigt,Показывается чат-модели,Mostrado ao modelo de conversa
+form.paramExposeHint,是否把该参数暴露给对话模型,Whether the chat model may pass this parameter,対話モデルにこのパラメータを渡せるか,Si el modelo de chat puede pasar este parámetro,Si le modèle de conversation peut transmettre ce paramètre,Ob das Chat-Modell diesen Parameter übergeben darf,Может ли чат-модель передавать этот параметр,Se o modelo de conversa pode passar este parâmetro
+form.paramOptionsHint,"逗号分隔，例如 euler、ddim","Comma-separated, e.g. euler, ddim","カンマ区切り（例：euler、ddim）","Separadas por comas, p. ej. euler, ddim","Séparées par des virgules, ex. euler, ddim","Durch Kommas getrennt, z. B. euler, ddim","Через запятую, например euler, ddim","Separadas por vírgulas, ex. euler, ddim"
+form.paramAdd,添加参数,Add parameter,パラメータを追加,Añadir parámetro,Ajouter un paramètre,Parameter hinzufügen,Добавить параметр,Adicionar parâmetro
+form.paramRemove,删除参数,Remove parameter,パラメータを削除,Eliminar parámetro,Supprimer le paramètre,Parameter entfernen,Удалить параметр,Remover parâmetro
+form.paramDescPrompt,生图提示词,Image prompt,画像生成プロンプト,Prompt de imagen,Prompt d'image,Bild-Prompt,Промпт изображения,Prompt da imagem
+form.paramDescNegative,不想出现的内容,What to avoid,避けたい内容,Lo que se debe evitar,Ce qu'il faut éviter,Was vermieden werden soll,Чего не должно быть,O que deve ser evitado
+form.paramDescModel,请求里发送的模型名,Model name sent in the request,リクエストで送るモデル名,Nombre del modelo enviado en la petición,Nom du modèle envoyé dans la requête,Im Request gesendeter Modellname,Имя модели в запросе,Nome do modelo enviado na requisição
+form.paramDescN,一次生成的张数,Images per request,1回に生成する枚数,Imágenes por petición,Images par requête,Bilder pro Anfrage,Изображений за запрос,Imagens por requisição
 form.qualitySupported,"支持质量参数","Supports quality","品質パラメータ対応","Admite calidad","Gère la qualité","Unterstützt Qualität","Поддерживает качество","Aceita qualidade"
 form.qualityField,"参数名","Parameter name","パラメータ名","Nombre del parámetro","Nom du paramètre","Parametername","Имя параметра","Nome do parâmetro"
 form.qualityOptionLabel,"挡位名","Level name","段階名","Nombre del nivel","Nom du palier","Stufenname","Название ступени","Nome do nível"

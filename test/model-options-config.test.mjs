@@ -256,3 +256,120 @@ test('normalizeModelOptions 保留尺寸覆盖里的 control（面板控件）',
   assert.equal(normalizeModelOptions({ m: { size: { control: 'nonsense' } } }, ['m']).m, undefined,
     '认不出的 control 不算有效覆盖');
 });
+
+/* ------------------------------------------- 「常规」离散参数表（params） */
+
+const PARAM_TABLE = [
+  { role: 'prompt', name: 'prompt', type: 'text', default: '', description: '生图提示词', expose: true },
+  { role: 'negative', name: 'negative_prompt', type: 'text', default: '', description: '不想出现的内容', expose: false },
+  { name: 'seed', type: 'number', default: '42', description: '随机种子', expose: true }
+];
+
+test('normalizeModelOptions 原样保存离散参数表', () => {
+  const out = normalizeModelOptions({ m: { params: PARAM_TABLE } }, ['m'], 'openai-images');
+  assert.deepEqual(out.m.params, PARAM_TABLE);
+});
+
+test('normalizeConfig 让云端适配器也存得住离散参数表', () => {
+  // 参数表不是 ComfyUI 的工作流参数：以前 non-comfy 适配器会被整段删掉。
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'relay', baseUrl: 'https://relay.example.com/v1', adapter: 'openai-images',
+      models: ['flux-1-schnell'],
+      modelOptions: { 'flux-1-schnell': { params: PARAM_TABLE } }
+    }],
+    active: { providerId: 'p1', model: 'flux-1-schnell' }
+  });
+  assert.deepEqual(config.providers[0].modelOptions['flux-1-schnell'].params, PARAM_TABLE);
+});
+
+test('只有离散参数表的模型条目不会被 normalizeConfig 丢掉', () => {
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'relay', baseUrl: 'https://relay.example.com/v1', adapter: 'openai-images',
+      models: ['m'], modelOptions: { m: { params: [PARAM_TABLE[0]] } }
+    }],
+    active: { providerId: 'p1', model: 'm' }
+  });
+  assert.ok(config.providers[0].modelOptions.m, '参数表本身就是一条配置');
+});
+
+test('离散参数表校验 role / type / 长度与 expose', () => {
+  const out = normalizeModelOptions({
+    m: {
+      params: [
+        { role: 'prompt', name: '  prompt  ', type: 'number', default: '9', description: 'p', expose: false },
+        { role: 'unknown', name: 'x'.repeat(80), type: 'date', default: 42, description: 'd'.repeat(260), expose: 'yes' },
+        { name: '', type: 'text' },
+        { name: 'seed', type: 'NUMBER', default: 7, expose: true }
+      ]
+    }
+  }, ['m'], 'openai-images');
+  const rows = out.m.params;
+  assert.equal(rows.length, 3, '空名字的行丢掉，其余留下');
+  assert.deepEqual(rows[0], {
+    role: 'prompt', name: 'prompt', type: 'text', default: '', description: 'p',
+    expose: true
+  }, '提示词行固定 text / 空默认 / 暴露');
+  assert.equal(rows[1].role, undefined, '不认识的 role 不是内置行');
+  assert.equal(rows[1].name.length, 64, 'name 截到上限');
+  assert.equal(rows[1].type, 'text', '不认识的 type 回落到 text');
+  assert.equal(rows[1].default, '42', '默认值统一成字符串');
+  assert.equal(rows[1].description.length, 200, 'description 截到上限');
+  assert.equal(rows[1].expose, false, 'expose 只认 true');
+  assert.deepEqual(rows[2], {
+    name: 'seed', type: 'number', default: '7', description: '', expose: true
+  }, 'type 按小写认；缺省字段补空');
+});
+
+test('离散参数表把提示词永远排在第一行', () => {
+  const out = normalizeModelOptions({
+    m: {
+      params: [
+        { name: 'seed', type: 'number' },
+        { role: 'negative', name: 'negative_prompt', type: 'text' },
+        { role: 'prompt', name: 'prompt', type: 'text' }
+      ]
+    }
+  }, ['m'], 'openai-images');
+  assert.deepEqual(out.m.params.map((row) => row.role || row.name), ['prompt', 'negative', 'seed']);
+});
+
+test('离散参数表支持 enum 选项：字符串与数组都收，去重、限量', () => {
+  const out = normalizeModelOptions({
+    m: {
+      params: [
+        { name: 'sampler', type: 'enum', options: 'euler, ddim，euler' },
+        { name: 'scheduler', type: 'enum', options: ['karras', ' normal ', 'karras'] },
+        { name: 'text_only', type: 'text', options: ['ignored'] }
+      ]
+    }
+  }, ['m'], 'openai-images');
+  assert.deepEqual(out.m.params[0].options, ['euler', 'ddim']);
+  assert.deepEqual(out.m.params[1].options, ['karras', 'normal']);
+  assert.deepEqual(out.m.params[2].options, ['ignored'], '选项跟着行走，type 不拦');
+});
+
+test('空的离散参数表不落盘', () => {
+  assert.equal(normalizeModelOptions({ m: { params: [] } }, ['m']).m, undefined);
+  assert.equal(normalizeModelOptions({ m: { params: [{ name: '' }] } }, ['m']).m, undefined);
+});
+
+test('云端适配器仍然丢掉 ComfyUI 的工作流参数形状', () => {
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: 'relay', baseUrl: 'https://relay.example.com/v1', adapter: 'openai-images',
+      models: ['m'],
+      modelOptions: {
+        m: {
+          params: [{ name: 'steps', node: '18:7', input: 'steps', type: 'INT', expose: false }]
+        }
+      }
+    }],
+    active: { providerId: 'p1', model: 'm' }
+  });
+  assert.equal(config.providers[0].modelOptions, undefined, 'node/input 形状只属于工作流协议');
+});

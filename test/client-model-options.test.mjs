@@ -251,6 +251,25 @@ const CLOUD_CONFIG = {
   defaults: {}
 };
 
+/** 「常规」参数表：云端模型，四个逻辑字段都有字段模板（老配置形状，没有 params）。 */
+const PARAM_TABLE_CONFIG = {
+  providers: [{
+    ...CLOUD_CONFIG.providers[0],
+    modelOptions: {
+      'gpt-image-2.5-flare': {
+        fields: {
+          prompt: { path: 'prompt' },
+          negative: { path: 'negative_prompt' },
+          model: { path: 'model' },
+          n: { path: 'n' }
+        }
+      }
+    }
+  }],
+  active: CLOUD_CONFIG.active,
+  defaults: {}
+};
+
 test('the model options toggle is enabled for the local ComfyUI deployment', async () => {
   const { tree } = await openEditor();
   const toggle = optionsToggle(tree);
@@ -269,11 +288,12 @@ test('the model options toggle opens the size panel for a cloud provider', async
   assert.ok(panel, 'the panel opens');
   assert.equal(findAll(panel, (node) => node.type === 'textarea').length, 0,
     'a cloud provider has no workflow to edit');
-  const select = findAll(panel, (node) => node.type === 'select')[0];
+  const select = findAll(panel, (node) => node.type === 'select'
+    && node.props['data-param-key'] === 'size')[0];
   assert.ok(select, 'the encoding select is there');
   assert.deepEqual(findAll(select, (node) => node.type === 'option').map((node) => String(node.props.value)),
     ['', 'wh-string', 'wh-fields', 'aspect', 'tier', 'prompt']);
-  const input = findAll(panel, (node) => node.type === 'input' && node.props.type === 'text')[0];
+  const input = findAll(panel, (node) => node.type === 'input' && node.props['data-param-key'] === 'size')[0];
   assert.ok(input, 'the parameter name is editable');
 });
 
@@ -817,14 +837,15 @@ test('点锁图标解锁后输入框变回可编辑，再点又锁上', async ()
   assert.equal(paramInput(opened, 'size').props.disabled, true, '再点一次又锁上');
 });
 
-test('「全部解锁」把预设提供商的七个键一次解锁', async () => {
+test('「全部解锁」把预设提供商的锁一次全解开', async () => {
   const { harness } = await openEditor(PRESET_CONFIG);
   let opened = openModelPanel(harness);
   const unlock = findButton(opened, (node) => /Unlock all/i.test(textOf(node).join('')));
   assert.ok(unlock, '「高级」里要有全部解锁');
   unlock.props.onClick(fakeEvent());
   opened = harness.renderRoot();
-  for (const key of ['size', 'quality', 'prompt', 'negative', 'model', 'n', 'image']) {
+  // 「常规」现在是参数表：prompt 行是代表键，其余三行按字段模板有没有出现。
+  for (const key of ['size', 'quality', 'prompt', 'image']) {
     assert.notEqual(paramInput(opened, key).props.disabled, true, key + ' 应该已解锁');
   }
 });
@@ -852,8 +873,8 @@ test('手填的输入框收在默认折叠的「高级」里', async () => {
   assert.equal(details.length, 1, '恰好一个「高级」折叠区');
   assert.notEqual(details[0].props.open, true, '默认折叠');
   assert.match(textOf(findAll(details[0], (node) => node.type === 'summary')[0]).join(''), /Advanced/i);
-  // 七个键的输入都在折叠区里，锁图标与摘要留在外面。
-  for (const key of ['size', 'quality', 'prompt', 'negative', 'model', 'n', 'image']) {
+  // 现有参数的控件都在折叠区里（没有字段模板的行不渲染），锁图标与摘要留在外面。
+  for (const key of ['size', 'quality', 'prompt', 'image']) {
     assert.ok(findAll(details[0], (node) => node.props && node.props['data-param-key'] === key).length
       || findAll(details[0], (node) => node.props && node.props['data-lock-key'] === key).length,
       key + ' 的控件应该收在高级里');
@@ -1021,8 +1042,6 @@ test('拉模型列表后，新增的模型自动填未上锁的键（不锁）',
 /** 面板里的一行：单输入的参数一行，多输入的参数放进方框里。 */
 const paramRow = (tree, key) => findAll(tree, (node) => node.props && node.props['data-param-row'] === key)[0] || null;
 const paramBox = (tree, key) => findAll(tree, (node) => node.props && node.props['data-param-box'] === key)[0] || null;
-/** 行内可直接看到的控件（input / select / button）。 */
-const controlsOf = (node) => (node.children || []).filter((child) => child && ['input', 'select', 'button'].includes(child.type));
 
 /** 用 modelOptions 里的尺寸覆盖把面板摆成指定编码方式的样子。 */
 function sizedConfig(mode, extra = {}) {
@@ -1038,36 +1057,359 @@ function sizedConfig(mode, extra = {}) {
   };
 }
 
-test('单输入的参数渲染成一行：label 左、输入框中间、锁在行尾', async () => {
-  const { harness } = await openEditor(CLOUD_CONFIG);
-  const opened = openModelPanel(harness);
-  // 质量不在这批里：它有自己的方框（勾选 + 参数名 + 挡位表），见「质量方框」那一组用例。
-  for (const key of ['prompt', 'negative', 'model', 'n']) {
-    const row = paramRow(opened, key);
-    assert.ok(row, key + ' 应该是一行');
-    assert.equal(row.children[0].type, 'span', key + ' 的 label 在行首');
-    const input = row.children[1];
-    assert.equal(input.type, 'input', key + ' 的输入框紧跟在 label 后面');
-    assert.equal(input.props['data-param-key'], key);
-    const lock = row.children[2];
-    assert.equal(lock.type, 'button', key + ' 的锁在行尾');
-    assert.equal(lock.props['data-lock-key'], key);
-    assert.equal(controlsOf(row).filter((child) => child.type === 'input').length, 1, key + ' 一行只有一个输入框');
-    assert.equal(row.children.filter((child) => child && child.type === 'p').length, 0, key + ' 行内不再有说明段落');
-  }
-});
-
 test('单行用 flex 排版：label 不伸缩，输入框吃满剩余宽度，锁原地不动', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
-  const row = paramRow(opened, 'model');
+  const row = paramRow(opened, 'size:field');
   assert.equal(row.props.style.display, 'flex');
   assert.equal(row.props.style.minWidth, 0);
   assert.equal(row.children[0].props.style.flex, 'none', 'label 不参与伸缩：变长时挤的是输入框，右侧不变');
   const input = row.children[1];
   assert.equal(input.props.style.flex, '1 1 auto');
   assert.equal(input.props.style.minWidth, 0, 'min-width:0 才允许被长 label 挤窄');
-  assert.equal(row.children[2].props.style.flex, 'none');
+  assert.equal(row.children[2], null, '尺寸行没有行尾锁（锁在标题行）');
+});
+
+/* ───────────────────── 「常规」离散参数表：表头 / 行 / 单元格 ───────────────────── */
+
+const commonBox = (tree) => paramBox(tree, 'common');
+const paramGrid = (tree, key) => findAll(tree, (node) => node.props && node.props['data-param-grid'] === key);
+const commonRows = (tree) => findAll(commonBox(tree), (node) => node.props
+  && node.props['data-param-grid'] === 'params:row');
+const commonRow = (tree, role) => commonRows(tree)
+  .find((node) => node.props['data-param-role'] === role) || null;
+const paramCell = (row, field) => findAll(row, (node) => node.props
+  && node.props['data-param-field'] === field)[0] || null;
+const addParamButton = (tree) => findAll(commonBox(tree), (node) => node.props
+  && node.props['data-param-key'] === 'params:add')[0] || null;
+/** 保存后落进配置的那条模型选项（表格用例都是 CLOUD_CONFIG 的 p2）。 */
+const savedTableEntry = async (harness) => {
+  const config = await saveAndPosted(harness);
+  return config.providers.find((item) => item.id === 'p2').modelOptions['gpt-image-2.5-flare'];
+};
+
+test('「常规」是一张离散参数表：表头用 data-param-grid，表体一行一个参数', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  const opened = openModelPanel(harness);
+  const box = commonBox(opened);
+  assert.ok(box, '「常规」方框存在');
+  assert.equal(textOf(box.children[0].children[0]).join(''), 'General', '第一行仍是标题「常规」');
+
+  const head = paramGrid(opened, 'params:head')[0];
+  assert.ok(head, '表头行在');
+  assert.deepEqual(textOf(head).join('|').split('|'),
+    ['Parameter name', 'Type', 'Default', 'Description', 'Expose'],
+    '表头：参数名 / 类型 / 默认值 / 描述 / 暴露');
+  assert.equal(paramRow(box, 'prompt'), null, '表头不占用 data-param-row');
+  assert.equal(paramRow(box, 'negative'), null, '表体也不占用 data-param-row（label 不再固定 88px）');
+
+  const rows = commonRows(opened);
+  assert.deepEqual(rows.map((row) => row.props['data-param-role']),
+    ['prompt', 'negative', 'model', 'n'], '内置四行按固定顺序排列');
+  for (const row of rows) {
+    for (const field of ['name', 'type', 'default', 'description', 'expose']) {
+      assert.ok(paramCell(row, field), row.props['data-param-role'] + ' 缺 ' + field + ' 单元格');
+    }
+  }
+});
+
+test('提示词是固定第一行：不可删、暴露固定、类型固定 text、默认空，只有名字能改', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  const opened = openModelPanel(harness);
+  const row = commonRow(opened, 'prompt');
+  assert.ok(row, '提示词行在');
+  assert.equal(commonRows(opened)[0].props['data-param-role'], 'prompt', '固定第一行');
+  assert.equal(paramCell(row, 'remove'), null, '行尾没有删除按钮');
+
+  const type = paramCell(row, 'type');
+  assert.equal(type.props.value, 'text', '类型固定 text');
+  assert.equal(type.props.disabled, true, '类型不能改');
+  const def = paramCell(row, 'default');
+  assert.equal(def.props.value, '');
+  assert.equal(def.props.disabled, true, '默认值固定空');
+  const expose = paramCell(row, 'expose');
+  assert.equal(expose.props.checked, true, '暴露固定勾选');
+  assert.equal(expose.props.disabled, true, '暴露不能取消');
+  const name = paramCell(row, 'name');
+  assert.notEqual(name.props.disabled, true, '只有参数名能改');
+  assert.equal(name.props['data-param-key'], 'prompt', '参数名沿用内置键，旧的查询仍可用');
+
+  name.props.onChange({ target: { value: 'input.prompt' } });
+  const next = harness.renderRoot();
+  assert.equal(paramCell(commonRow(next, 'prompt'), 'name').props.value, 'input.prompt');
+  const entry = await savedTableEntry(harness);
+  assert.equal(entry.fields.prompt.path, 'input.prompt', '改名同步到字段模板');
+  assert.deepEqual(entry.params[0], {
+    role: 'prompt', name: 'input.prompt', type: 'text', default: '',
+    description: 'Image prompt', expose: true
+  }, '固定属性照旧，名字变了');
+});
+
+test('普通行可以新增 / 编辑 / 删除；删掉内置行会去掉对应的字段模板', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  assert.equal(commonRows(opened).length, 4);
+
+  // 删除内置的负面词行：参数表与字段模板一起清掉。
+  paramCell(commonRow(opened, 'negative'), 'remove').props.onClick();
+  opened = harness.renderRoot();
+  assert.equal(commonRow(opened, 'negative'), null, '负面词行没了');
+  assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']),
+    ['prompt', 'model', 'n']);
+
+  // 新增一行：用户行没有 role。
+  addParamButton(opened).props.onClick();
+  opened = harness.renderRoot();
+  let rows = commonRows(opened);
+  assert.equal(rows.length, 4, '新增的一行立刻出现');
+  const custom = rows[3];
+  assert.equal(custom.props['data-param-role'], undefined, '用户行没有 role');
+  assert.equal(paramCell(custom, 'name').props.value, '', '新行等着填名字');
+
+  const edit = (field, value) => {
+    paramCell(commonRows(harness.renderRoot())[3], field).props.onChange({ target: { value: value } });
+    return harness.renderRoot();
+  };
+  edit('name', 'seed');
+  edit('type', 'number');
+  edit('default', '42');
+  opened = edit('description', 'Seed value');
+  paramCell(commonRows(opened)[3], 'expose').props.onChange({ target: { checked: true } });
+  opened = harness.renderRoot();
+  assert.equal(paramCell(commonRows(opened)[3], 'expose').props.checked, true);
+
+  const entry = await savedTableEntry(harness);
+  assert.equal(entry.fields.negative, undefined, '删掉内置行 = 去掉字段模板覆盖');
+  assert.equal(entry.fields.model.path, 'model', '别的字段模板不动');
+  const seed = entry.params.find((row) => row.name === 'seed');
+  assert.deepEqual(seed, {
+    name: 'seed', type: 'number', default: '42', description: 'Seed value', expose: true
+  }, '用户行只进参数表，没有 role');
+});
+
+test('删用户行只动参数表，不动字段模板', async () => {
+  const stored = {
+    providers: [{
+      ...PARAM_TABLE_CONFIG.providers[0],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          fields: { prompt: { path: 'prompt' }, model: { path: 'model' } },
+          params: [
+            { role: 'prompt', name: 'prompt', type: 'text', default: '', description: 'p', expose: true },
+            { name: 'seed', type: 'number', default: '42', description: 's', expose: true }
+          ]
+        }
+      }
+    }],
+    active: PARAM_TABLE_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(stored);
+  let opened = openModelPanel(harness);
+  assert.equal(commonRows(opened).length, 3, '提示词 + 模型（来自 fields） + 用户行');
+  const seedRow = commonRows(opened).find((row) => !row.props['data-param-role']);
+  paramCell(seedRow, 'remove').props.onClick();
+  opened = harness.renderRoot();
+  assert.equal(commonRows(opened).some((row) => !row.props['data-param-role']), false, '用户行删掉了');
+  const entry = await savedTableEntry(harness);
+  assert.equal(entry.params.some((row) => row.name === 'seed'), false);
+  assert.equal(entry.fields.model.path, 'model', '删用户行不动字段模板');
+});
+
+test('type 选 enum 时行内多一个「选项」输入，逗号分隔落盘', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '非 enum 不显示选项');
+
+  paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'enum' } });
+  opened = harness.renderRoot();
+  const options = paramCell(commonRow(opened, 'negative'), 'options');
+  assert.ok(options, 'enum 行内出现选项输入');
+  options.props.onChange({ target: { value: 'euler, ddim' } });
+  opened = harness.renderRoot();
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'options').props.value, 'euler, ddim');
+
+  const entry = await savedTableEntry(harness);
+  const negative = entry.params.find((row) => row.role === 'negative');
+  assert.equal(negative.type, 'enum');
+  assert.deepEqual(negative.options, ['euler', 'ddim']);
+
+  paramCell(commonRow(opened, 'negative'), 'type').props.onChange({ target: { value: 'text' } });
+  opened = harness.renderRoot();
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'options'), null, '切回 text 后选项收起');
+});
+
+test('老配置没有 params 时从 fields 派生；没有的字段不显示行', async () => {
+  const migrated = {
+    providers: [{
+      ...PARAM_TABLE_CONFIG.providers[0],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          fields: {
+            prompt: { path: 'prompt' },
+            negative: { path: 'negative_prompt' },
+            model: { path: 'model' },
+            n: null
+          }
+        }
+      }
+    }],
+    active: PARAM_TABLE_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(migrated);
+  const opened = openModelPanel(harness);
+  assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']),
+    ['prompt', 'negative', 'model'], 'n 是显式不发，不显示行');
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'name').props.value, 'negative_prompt');
+  assert.equal(paramCell(commonRow(opened, 'negative'), 'description').props.value, 'What to avoid',
+    '描述默认值来自内置文案表');
+
+  // 第一次编辑就把派生行落成 params（不再依赖 fields）。
+  paramCell(commonRow(opened, 'model'), 'expose').props.onChange({ target: { checked: true } });
+  const entry = await savedTableEntry(harness);
+  assert.deepEqual(entry.params.map((row) => row.role), ['prompt', 'negative', 'model']);
+  assert.equal(entry.params[1].name, 'negative_prompt');
+  assert.equal(entry.params[2].expose, true);
+});
+
+test('没有 fields 也没有 params 的老配置只剩固定的提示词行', async () => {
+  const { harness } = await openEditor(CLOUD_CONFIG);
+  const opened = openModelPanel(harness);
+  assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']), ['prompt']);
+});
+
+test('params 回读：类型 / 默认值 / 描述 / 暴露按落盘的来', async () => {
+  const stored = {
+    providers: [{
+      ...PARAM_TABLE_CONFIG.providers[0],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          params: [
+            { role: 'prompt', name: 'prompt', type: 'text', default: '', description: 'custom prompt doc', expose: true },
+            {
+              role: 'negative', name: 'negative_prompt', type: 'enum', default: 'blurry',
+              description: 'avoid', expose: false, options: ['blurry', 'low quality']
+            },
+            { name: 'seed', type: 'number', default: '42', description: 'seed', expose: true }
+          ]
+        }
+      }
+    }],
+    active: PARAM_TABLE_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(stored);
+  const opened = openModelPanel(harness);
+  assert.deepEqual(commonRows(opened).map((row) => row.props['data-param-role']),
+    ['prompt', 'negative', undefined], '内置行在前，用户行在后');
+  const negative = commonRow(opened, 'negative');
+  assert.equal(paramCell(negative, 'type').props.value, 'enum');
+  assert.equal(paramCell(negative, 'default').props.value, 'blurry');
+  assert.equal(paramCell(negative, 'description').props.value, 'avoid');
+  assert.equal(paramCell(negative, 'expose').props.checked, false);
+  assert.equal(paramCell(negative, 'options').props.value, 'blurry, low quality');
+  const custom = commonRows(opened)[2];
+  assert.equal(paramCell(custom, 'name').props.value, 'seed');
+  assert.equal(paramCell(custom, 'expose').props.checked, true);
+  assert.equal(paramCell(commonRow(opened, 'prompt'), 'description').props.value, 'custom prompt doc');
+});
+
+test('params 落盘后能通过 config-store 回读（端到端）', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
+  let opened = openModelPanel(harness);
+  paramCell(commonRow(opened, 'prompt'), 'name').props.onChange({ target: { value: 'input.prompt' } });
+  opened = harness.renderRoot();
+  addParamButton(opened).props.onClick();
+  opened = harness.renderRoot();
+  const edit = (field, value) => {
+    paramCell(commonRows(harness.renderRoot())[4], field).props.onChange({ target: { value: value } });
+    return harness.renderRoot();
+  };
+  edit('name', 'seed');
+  edit('type', 'number');
+  edit('default', '42');
+  opened = edit('description', 'Random seed');
+  paramCell(commonRows(opened)[4], 'expose').props.onChange({ target: { checked: true } });
+  opened = harness.renderRoot();
+
+  const saved = await saveAndPosted(harness);
+  const normalized = normalizeConfig(saved).providers.find((item) => item.id === 'p2')
+    .modelOptions['gpt-image-2.5-flare'];
+  assert.equal(normalized.fields.prompt.path, 'input.prompt', '改名同步的字段模板也落盘了');
+  assert.deepEqual(normalized.params.map((row) => row.role || row.name),
+    ['prompt', 'negative', 'model', 'n', 'seed'], '内置行在前，用户行在后');
+  assert.equal(normalized.params[0].name, 'input.prompt');
+  assert.deepEqual(normalized.params[4], {
+    name: 'seed', type: 'number', default: '42', description: 'Random seed', expose: true
+  });
+});
+
+test('整块上锁：框内控件与增删按钮全部禁用，解锁后恢复', async () => {
+  const locked = {
+    providers: [{
+      ...PARAM_TABLE_CONFIG.providers[0],
+      modelOptions: {
+        'gpt-image-2.5-flare': {
+          fields: PARAM_TABLE_CONFIG.providers[0].modelOptions['gpt-image-2.5-flare'].fields,
+          locked: { prompt: true }
+        }
+      }
+    }],
+    active: PARAM_TABLE_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(locked);
+  let opened = openModelPanel(harness);
+  const lock = paramLock(opened, 'prompt');
+  assert.ok(lock, '锁挂在「常规」标题行（复用 prompt 这个键）');
+  assert.equal(lock.props['aria-pressed'], 'true');
+  for (const control of findAll(commonBox(opened),
+    (node) => ['input', 'select', 'button'].includes(node.type))) {
+    if (control.props['data-lock-key']) continue; // 锁按钮自己永远可点
+    assert.equal(control.props.disabled, true, '上锁后框里每个控件都禁用');
+  }
+  assert.equal(addParamButton(opened).props.disabled, true, '新增按钮也禁用');
+
+  lock.props.onClick(fakeEvent());
+  opened = harness.renderRoot();
+  assert.equal(paramLock(opened, 'prompt').props['aria-pressed'], 'false');
+  for (const row of commonRows(opened)) {
+    assert.notEqual(paramCell(row, 'name').props.disabled, true, '解锁后参数名可编辑');
+  }
+  const negative = commonRow(opened, 'negative');
+  assert.notEqual(paramCell(negative, 'expose').props.disabled, true);
+  assert.notEqual(addParamButton(opened).props.disabled, true, '新增按钮解禁');
+});
+
+test('一键配置改字段路径时，已存的参数表内置行名字跟着走', async () => {
+  const stored = {
+    providers: [{
+      ...CUSTOM_RELAY_CONFIG.providers[0],
+      modelOptions: {
+        'Qwen/Qwen-Image': {
+          params: [
+            { role: 'prompt', name: 'old_prompt', type: 'text', default: '', description: 'p', expose: true },
+            { role: 'negative', name: 'old_negative', type: 'text', default: '', description: 'n', expose: false },
+            { name: 'seed', type: 'number', default: '42', description: 's', expose: true }
+          ]
+        }
+      }
+    }],
+    active: CUSTOM_RELAY_CONFIG.active,
+    defaults: {}
+  };
+  const { harness } = await openEditor(stored, { detect: DETECTED_QWEN });
+  await configureAll(harness);
+  const config = await saveAndPosted(harness);
+  const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
+  assert.equal(entry.fields.prompt.path, 'prompt');
+  assert.equal(entry.params.find((row) => row.role === 'prompt').name, 'prompt',
+    '规则改过的字段路径要同步进参数表');
+  assert.equal(entry.params.find((row) => row.role === 'negative').name, 'negative_prompt');
+  assert.deepEqual(entry.params.find((row) => row.name === 'seed'), {
+    name: 'seed', type: 'number', default: '42', description: 's', expose: true
+  }, '用户行不动');
 });
 
 /* ───────────────────── 排版微调：标题字号 / 固定 label 宽度 / 即时气泡 ───────────────────── */
@@ -1098,15 +1440,13 @@ test('方框标题比正文大一号并加粗，锁仍在标题行原位', async
     assert.equal(title.props.style.fontSize, 14, key + ' 的标题比正文大一号');
     assert.equal(title.props.style.fontWeight, 600, key + ' 的标题加粗');
   }
-  // 尺寸 / 参考图的锁没挪位置：仍是标题行里紧跟标题的那个按钮。
-  for (const key of ['size', 'image']) {
+  // 三个方框的锁都在标题行；「常规」的锁复用 prompt 键，管的是整张参数表。
+  for (const [key, lockKey] of [['common', 'prompt'], ['size', 'size'], ['image', 'image']]) {
     const head = paramBox(opened, key).children[0];
     const last = head.children[head.children.length - 1];
     assert.equal(last.type, 'button', key + ' 的锁还在标题行');
-    assert.equal(last.props['data-lock-key'], key);
+    assert.equal(last.props['data-lock-key'], lockKey);
   }
-  assert.equal(findAll(paramBox(opened, 'common').children[0], (node) => node.type === 'button').length, 0,
-    '「常规」的标题行照旧不放锁');
 });
 
 test('参数行 label 固定 88px 并单行截断：长键名不再把输入框挤没', async () => {
@@ -1115,8 +1455,8 @@ test('参数行 label 固定 88px 并单行截断：长键名不再把输入框�
   }));
   const opened = openModelPanel(harness);
   const rows = findAll(opened, (node) => node.props && node.props['data-param-row']);
-  // 编码方式 / 比例 / 分辨率 / 常规五条 / 参考图两条。
-  assert.ok(rows.length >= 9, '三个方框里的行都在');
+  // 编码方式 / 比例 / 分辨率 / 质量勾选 / 参考图四条 ——「常规」已经是参数表，不在这批里。
+  assert.ok(rows.length >= 8, '三个方框里的行都在');
   for (const row of rows) {
     const label = row.children[0];
     const key = row.props['data-param-row'];
@@ -1154,7 +1494,7 @@ test('所有行的输入框左边缘严格对齐：同一个 x', async () => {
       starts.add(padLeft + label.props.style.width + Number(row.props.style.gap));
     }
   }
-  assert.ok(rows >= 9);
+  assert.ok(rows >= 7, '尺寸与参考图的行都在');
   // 每一行都是「内边距 10 + label 88 + 间距 6」：输入框的起点 x 完全一致。
   assert.deepEqual([...starts], [104], '所有行的输入框起点必须是同一个 x');
 });
@@ -1377,28 +1717,19 @@ test('参考图有两个输入，也用方框框起来：字段名 / 传法', as
   assert.equal(paramRow(opened, 'image'), null, '参考图不再挤成一整行');
 });
 
-test('四个单输入参数收进一个「常规」方框：提示词 / 负面词 / 模型 / 张数', async () => {
-  const { harness } = await openEditor(CLOUD_CONFIG);
+test('「常规」只装离散参数表：尺寸 / 质量 / 参考图各在自己的方框里', async () => {
+  const { harness } = await openEditor(PARAM_TABLE_CONFIG);
   const opened = openModelPanel(harness);
   const box = paramBox(opened, 'common');
   assert.ok(box, '「常规」方框存在');
   assert.equal(textOf(box.children[0].children[0]).join(''), 'General', '第一行是标题「常规」');
-  assert.equal(findAll(box.children[0], (node) => node.type === 'button').length, 0,
-    '标题行不放锁：这四个键各有各的锁');
+  assert.equal(findAll(box.children[0], (node) => node.props && node.props['data-lock-key'] === 'prompt').length, 1,
+    '标题行的锁管整张参数表');
 
-  const keys = ['prompt', 'negative', 'model', 'n'];
-  for (const key of keys) {
-    const row = paramRow(box, key);
-    assert.ok(row, key + ' 在「常规」方框里');
-    assert.equal(row.children[0].type, 'span', key + ' 的 label 在行首');
-    assert.equal(row.children[1].props['data-param-key'], key, key + ' 的输入紧随其后');
-    assert.equal(row.children[2].props['data-lock-key'], key, key + ' 的锁在行尾');
-    assert.equal(findAll(row, (node) => node.type === 'input').length, 1, key + ' 一行只有一个输入');
-  }
-  // 行序就是需求里的顺序。
-  const order = findAll(box, (node) => node.props && keys.includes(node.props['data-param-row']))
-    .map((row) => row.props['data-param-row']);
-  assert.deepEqual(order, keys);
+  // 表头与表体都用 data-param-grid：参数行的「label 固定 88px」约定只管单输入行。
+  assert.equal(findAll(box, (node) => node.props && node.props['data-param-row']).length, 0);
+  assert.equal(paramGrid(opened, 'params:head').length, 1);
+  assert.ok(commonRows(opened).length > 0);
 
   // 四个方框各管一摊：尺寸 / 质量 / 参考图都不在「常规」里。
   assert.equal(paramRow(box, 'size:mode'), null, '尺寸不进「常规」');
