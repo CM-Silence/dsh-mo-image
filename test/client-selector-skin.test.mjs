@@ -640,7 +640,9 @@ test('opening a provider flips the viewport into the slide state', () => {
   const pages = collectClass(tree, 'cmes-page');
   assert.equal(pages.length, 2);
   assert.equal(pages[0].props.style.transition, 'transform .3s cubic-bezier(.32,.72,.28,1)');
+  assert.equal(pages[0].props.style.transform, 'translateX(-100%)');
   assert.equal(pages[1].props.style.transition, 'transform .3s cubic-bezier(.32,.72,.28,1)');
+  assert.equal(pages[1].props.style.transform, 'translateX(0)');
   const text = collectText(tree).join(' ');
   assert.match(text, /OpenAI/);
   assert.match(text, /gpt-image-2\.5-flare/);
