@@ -36,7 +36,7 @@ test('描述符必填 maxBytes / emptyMessage，且拒绝 headers 与凭据字�
   const json = { kind: 'json', pick: [{ path: 'data.0.b64_json', as: 'base64' }] };
   assert.throws(() => validateOutputProfile({ ...json, emptyMessage: 'x' }), /maxBytes/, 'maxBytes 必填');
   assert.throws(() => validateOutputProfile({ ...json, maxBytes: 1024 }), /emptyMessage/, 'emptyMessage 必填');
-  assert.throws(() => validateOutputProfile({ kind: 'binary', maxBytes: 1024, emptyMessage: 'x' }), /kind/, 'kind 只认 json / task');
+  assert.throws(() => validateOutputProfile({ kind: 'xml', maxBytes: 1024, emptyMessage: 'x' }), /kind/, 'kind 只认 json / task / binary');
   assert.throws(
     () => validateOutputProfile({ ...json, maxBytes: 1024, emptyMessage: 'x', headers: { Authorization: 'k' } }),
     /凭据字段/,
@@ -51,7 +51,6 @@ test('描述符必填 maxBytes / emptyMessage，且拒绝 headers 与凭据字�
 
 test('尚未实现的字段在定义时就报错，不允许静默不生效', () => {
   const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
-  assert.throws(() => validateOutputProfile({ ...base, from: [] }), /from/, 'from 级联留给 openai-chat');
   assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', as: 'relative' }] }), /pick\.as/, 'relative 留给 comfy/swarmui');
   assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', select: 'last' }] }), /select/, 'select 留给 gemini');
   assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', where: [] }] }), /where/, 'where 留给 gemini');
@@ -293,4 +292,150 @@ test('ideogram 的 data.0.url 经 fetchResultImage 下载（同源带凭据）�
   assert.ok(download, 'URL 由 execute() 交给 fetchResultImage 下载');
   // ideogram 没有声明 authHeader，所以同源下载走默认 Bearer——迁移前就是这个形状，这一步不改它。
   assert.equal(download.init.headers.Authorization, 'Bearer k');
+});
+
+/* ------------------------------------------ binary（stability 迁移的新 kind） */
+
+test('binary 描述符：kind 认 binary，字段只有 kind / maxBytes / emptyMessage', () => {
+  assert.doesNotThrow(() => validateOutputProfile({ kind: 'binary', maxBytes: 1, emptyMessage: 'x' }));
+  assert.throws(
+    () => validateOutputProfile({ kind: 'binary', maxBytes: 1, emptyMessage: 'x', pick: [] }),
+    /不认识的字段 pick/,
+    'binary 没有 pick：拼错字段不能静默不生效'
+  );
+});
+
+test('readOutput kind:binary：响应头取 contentType、签名兜底，JSON {image} 也照吃', () => {
+  const profile = { kind: 'binary', maxBytes: 1, emptyMessage: 'stability 没有图' };
+  const bytes = Buffer.from(PNG_1PX, 'base64');
+  assert.deepEqual(
+    readOutput(null, profile, { binary: bytes, contentType: 'image/png' }),
+    { bytes: bytes, contentType: 'image/png' }
+  );
+  assert.deepEqual(
+    readOutput(null, profile, { binary: bytes, contentType: 'text/plain; charset=utf-8' }),
+    { bytes: bytes, contentType: 'image/png' },
+    '非图片响应头按图片签名兜底'
+  );
+  assert.deepEqual(
+    readOutput({ image: PNG_1PX }, profile, { binary: Buffer.from('not an image') }).bytes,
+    bytes,
+    'JSON 形态（stability 的 application/json 响应）仍然能读'
+  );
+  assert.throws(() => readOutput(null, profile, { binary: Buffer.from('not an image') }), /stability 没有图/);
+  assert.throws(
+    () => readOutput({ message: 'no image' }, profile, { binary: null }),
+    /格式不认识/,
+    'JSON 里没有图时保留 decodeImagePayload 的原文案，不被 emptyMessage 覆盖'
+  );
+});
+
+/* ------------------------------------- from 级联 + text 正则（openai-chat） */
+
+/** openai-chat 迁完后的形状：先 images[]、再 content 两级正则、最后兜底扫描。 */
+function chatProfile() {
+  return {
+    kind: 'json',
+    from: [
+      { path: 'choices.0.message.images[]', as: 'auto', any: ['image_url.url', 'url', ''] },
+      {
+        path: 'choices.0.message.content',
+        text: [
+          { regex: 'data:image/[a-z+]+;base64,[A-Za-z0-9+/=\\r\\n]+', as: 'base64' },
+          { regex: 'https?://[^\\s)"\'<>]+\\.(?:png|jpe?g|webp)(?:\\?[^\\s)"\'<>]*)?', as: 'url' }
+        ]
+      }
+    ],
+    scan: true,
+    maxBytes: 1024,
+    emptyMessage: '该中转没有返回图片'
+  };
+}
+
+test('from 的 images[] + any：元素可以是字符串 / image_url.url / url，按元素顺序判定', () => {
+  const profile = chatProfile();
+  assert.deepEqual(
+    readOutput({ choices: [{ message: { images: ['https://cdn.test/a.png'] } }] }, profile),
+    { url: 'https://cdn.test/a.png' },
+    '字符串元素走 any 的 ""（元素本身）'
+  );
+  assert.deepEqual(
+    readOutput({
+      choices: [{ message: { images: [
+        { image_url: { url: 'data:image/png;base64,' + PNG_1PX } },
+        { url: 'https://cdn.test/b.png' }
+      ] } }]
+    }, profile).bytes,
+    Buffer.from(PNG_1PX, 'base64'),
+    '带 image_url.url 的对象元素'
+  );
+  assert.deepEqual(
+    readOutput({ choices: [{ message: { images: [{ url: 'https://cdn.test/b.png' }] } }] }, profile),
+    { url: 'https://cdn.test/b.png' },
+    '带 url 的对象元素'
+  );
+});
+
+test('from 的 text：content 是字符串或 parts[].text，正则按「先 data URL、再 http」跨文本判定', () => {
+  const profile = chatProfile();
+  assert.deepEqual(
+    readOutput({
+      choices: [{ message: { content: [
+        { type: 'text', text: 'here:' },
+        { type: 'text', text: 'data:image/png;base64,' + PNG_1PX }
+      ] } }]
+    }, profile).bytes,
+    Buffer.from(PNG_1PX, 'base64'),
+    'parts[].text'
+  );
+  assert.deepEqual(
+    readOutput({ choices: [{ message: { content: 'see https://cdn.test/c.png' } }] }, profile),
+    { url: 'https://cdn.test/c.png' },
+    '字符串 content 里的 http 链接'
+  );
+  assert.deepEqual(
+    readOutput({ choices: [{ message: { content: 'data:image/png;base64,' + PNG_1PX } }] }, profile).bytes,
+    Buffer.from(PNG_1PX, 'base64'),
+    '字符串 content 里的 data URL'
+  );
+  // 文本顺序里 http 链接在前、data URL 在后：迁移前的代码是「先所有文本找 data URL」，
+  // 所以这里必须选 data URL；按「逐段文本依次试正则」会选错。
+  assert.deepEqual(
+    readOutput({ choices: [{ message: { content: [
+      { text: 'https://cdn.test/d.png' },
+      { text: 'data:image/png;base64,' + PNG_RED }
+    ] } }] }, profile).bytes,
+    Buffer.from(PNG_RED, 'base64'),
+    '正则级优先于文本顺序'
+  );
+});
+
+test('from 级联全部落空：scan 兜底；仍没有则抛 emptyMessage（不把 decode 文案透出去）', () => {
+  const profile = chatProfile();
+  assert.deepEqual(
+    readOutput({ data: [{ url: 'https://cdn.test/e.png' }] }, profile),
+    { url: 'https://cdn.test/e.png' }
+  );
+  assert.throws(
+    () => readOutput({ choices: [{ message: { content: '抱歉' } }] }, profile),
+    /该中转没有返回图片/,
+    'openai-chat 迁移前就是吞掉扫描错误再报自己的文案'
+  );
+});
+
+test('from / text 的字段白名单与取值：拼错的字段不静默生效', () => {
+  const base = { kind: 'json', maxBytes: 1, emptyMessage: 'x' };
+  assert.throws(() => validateOutputProfile({ ...base, from: [] }), /from/);
+  assert.throws(() => validateOutputProfile({ ...base, from: [{ path: 'a', text: [] }] }), /text/);
+  assert.throws(
+    () => validateOutputProfile({ ...base, from: [{ path: 'a', text: [{ regex: '(', as: 'base64' }] }] }),
+    /正则/
+  );
+  assert.throws(
+    () => validateOutputProfile({ ...base, from: [{ path: 'a', text: [{ regex: 'x', as: 'relative' }] }] }),
+    /as/
+  );
+  assert.throws(() => validateOutputProfile({ ...base, from: [{ path: 'a', any: 'url' }] }), /any/);
+  assert.throws(() => validateOutputProfile({ ...base, from: [{ path: 'a', unknown: 1 }] }), /不认识的字段 unknown/);
+  assert.doesNotThrow(() => validateOutputProfile({ ...base, from: [{ path: 'a', any: ['url', ''] }] }));
 });
