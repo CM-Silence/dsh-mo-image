@@ -69,7 +69,11 @@ async function setup(t) {
   const original = globalThis.fetch;
   let respond = () => json({ data: [] });
   globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: String((init && init.method) || 'GET') });
+    calls.push({
+      url: String(url),
+      method: String((init && init.method) || 'GET'),
+      headers: (init && init.headers) || {}
+    });
     return respond(url, init);
   };
   t.after(() => { globalThis.fetch = original; });
@@ -124,9 +128,11 @@ test('probe step: one request, returns hit + shape + protocols', async (t) => {
   await route.handler(jsonReq({ baseUrl: 'https://comfy.example.com', key: 'k', probe: '/object_info' }), res);
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    ok: true, done: false, probe: '/object_info', hit: true, shape: 'object', protocols: ['comfyui']
+    ok: true, done: false, probe: '/object_info', hit: true, shape: 'object', protocols: ['comfyui'], status: 200
   });
-  assert.deepEqual(calls, [{ url: 'https://comfy.example.com/object_info', method: 'GET' }]);
+  assert.deepEqual(calls.map(({ url, method }) => ({ url, method })), [
+    { url: 'https://comfy.example.com/object_info', method: 'GET' }
+  ]);
   assert.doesNotMatch(calls[0].url, /images\/(generations|edits)/, '绝不能发会生成图片的请求');
 });
 
@@ -137,9 +143,46 @@ test('probe miss: 404 answers hit:false (客户端继续下一条)', async (t) =
   await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', probe: '/models' }), res);
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), {
-    ok: true, done: false, probe: '/models', hit: false, shape: '', protocols: []
+    ok: true, done: false, probe: '/models', hit: false, shape: '', protocols: [], status: 404
   });
   assert.deepEqual(calls.map((call) => call.url), ['https://relay.example/v1/models']);
+});
+
+test('缺 Key 是独立状态：计划回复带 credential=missing，探针不带 Authorization', async (t) => {
+  const { route, calls } = await setup(t);
+  const plan = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1' }), plan);
+  assert.equal(plan.status, 200);
+  assert.deepEqual(JSON.parse(plan.body), {
+    ok: true, done: false,
+    probes: ['/models', '/object_info', '/sdapi/v1/sd-models', '/API/ListModels'],
+    credential: 'missing'
+  });
+
+  // 没 Key 也照发探针（本地 / 公开端点本来就可能不要鉴权），但请求里不能凭空多一个
+  // Authorization：那会让 401 变成「我们发了个空 Bearer」而不是「用户没填 Key」。
+  const probe = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', probe: '/models' }), probe);
+  assert.deepEqual(calls.map((call) => call.url), ['https://relay.example/v1/models']);
+  assert.ok(
+    !Object.keys(calls[0].headers || {}).some((name) => name.toLowerCase() === 'authorization'),
+    '缺 Key 时不该带 Authorization 头'
+  );
+});
+
+test('探针把 401 带回路由：hit:false + status:401，且响应里不回显 Key', async (t) => {
+  const { route, setRespond } = await setup(t);
+  setRespond(() => new Response(JSON.stringify({ error: { message: 'bad key: sk-secret' } }), {
+    status: 401,
+    headers: { 'content-type': 'application/json' }
+  }));
+  const res = makeRes();
+  await route.handler(jsonReq({ baseUrl: 'https://relay.example/v1', key: 'sk-secret', probe: '/models' }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: false, probe: '/models', hit: false, shape: '', protocols: [], status: 401
+  });
+  assert.ok(!res.body.includes('sk-secret'), '响应体里绝不能出现 Key');
 });
 
 test('probe outside the plan: 400 with a translatable code, and zero requests', async (t) => {

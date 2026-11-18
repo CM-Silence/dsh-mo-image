@@ -100,7 +100,8 @@ test('expectedProtocol 校验：手选协议的探针排在计划最前面，且
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), {
     ok: true, done: false,
-    probes: ['/sdapi/v1/sd-models', '/object_info', '/API/ListModels', '/models']
+    probes: ['/sdapi/v1/sd-models', '/object_info', '/API/ListModels', '/models'],
+    credential: 'missing'
   });
   assert.deepEqual(calls, []);
 });

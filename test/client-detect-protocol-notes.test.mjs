@@ -228,6 +228,103 @@ const detectStub = (probes, hits = {}) => (asked) => {
   };
 };
 
+/**
+ * 带「失败原因」的探针桩：计划回复可以带 `credential`，单条探针按 `steps` 回 status / reason。
+ * 宿主的形状→协议翻译在 test/detect-protocol-local.test.mjs 钉；HTTP 状态怎么进回答在
+ * test/detect-protocol-route.test.mjs 钉。这里只模拟回答，验客户端的提示。
+ */
+const detectFailureStub = (probes, steps = {}, options = {}) => (asked) => {
+  if (!asked.probe) {
+    const body = { ok: true, done: false, probes: probes };
+    if (options.credential) body.credential = options.credential;
+    return { status: 200, body: body };
+  }
+  const step = steps[asked.probe] || {};
+  return {
+    status: 200,
+    body: Object.assign(
+      { ok: true, done: false, probe: asked.probe, hit: false, shape: '', protocols: [] },
+      step
+    )
+  };
+};
+
+test('无 Key + 401：提示「没有可用的 API Key」，不是笼统的「没认出协议」', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models'], { '/models': { status: 401 } }, { credential: 'missing' })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(protocolSelect(tree).props.value, 'custom', '没命中照样落自定义');
+  assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'warn');
+  assert.equal(
+    noteTextOf(tree),
+    '没有可用的 API Key（未填写或凭据解析失败），/models 无法鉴权；已切到自定义并预填地址'
+  );
+});
+
+test('有 Key 但 401：提示鉴权失败，指针指向 Key 而不是地址', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models'], { '/models': { status: 401 } })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(
+    noteTextOf(tree),
+    '鉴权失败（/models 返回 401）：Key 无效、未填写或没有权限；已切到自定义并预填地址'
+  );
+});
+
+test('404：提示「这个地址没有该接口」，而不是 Key 问题', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models'], { '/models': { status: 404 } })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(noteTextOf(tree), '这个地址没有该接口（/models 返回 404）；已切到自定义并预填地址');
+});
+
+test('超时：提示请求超时（status 0 + reason timeout，不是 404）', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models'], { '/models': { status: 0, reason: 'timeout' } })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(noteTextOf(tree), '请求超时（/models）：请检查网络或代理；已切到自定义并预填地址');
+});
+
+test('连不上：提示连不上这个地址（status 0 + reason network）', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models'], { '/models': { status: 0, reason: 'network' } })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(noteTextOf(tree), '连不上这个地址（/models）：请检查 API 地址；已切到自定义并预填地址');
+});
+
+test('校验模式遇到 401：协议与选项不动，在「不像」后面写明鉴权失败', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(['/models', '/object_info'], {
+      '/models': { status: 401 },
+      '/object_info': { status: 401 }
+    })
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ adapter: 'openai-images', baseUrl: 'https://relay.example/v1' }));
+  const tree = await clickDetect(client, props);
+  assert.equal(protocolSelect(tree).props.value, 'openai-images', '校验模式不许改写用户选择');
+  assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'warn');
+  assert.equal(
+    noteTextOf(tree),
+    '地址不像 OpenAI Images，未改动当前选择；鉴权失败（/models 返回 401）：Key 无效、未填写或没有权限'
+  );
+});
+
 test('自动：先要计划，再按顺序逐条探；命中后切协议并写清路径与形状', async () => {
   const client = createHarness({
     detect: detectStub(['/models', '/object_info'], {

@@ -117,7 +117,7 @@ test('探测顺序：内网本地三条优先，公网 /models 优先；只给�
 test('内网 ComfyUI：/object_info 200 + JSON 对象 → comfyui，只发一次 GET', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/object_info') ? json({ CheckpointLoaderSimple: {}, UNETLoader: {} }) : miss()));
   const run = await runPlan({ baseUrl: 'http://127.0.0.1:8188', key: 'k' }, '');
-  assert.deepEqual(run.hit, { probe: '/object_info', shape: 'object', protocols: ['comfyui'] });
+  assert.deepEqual(run.hit, { probe: '/object_info', shape: 'object', protocols: ['comfyui'], status: 200, reason: '' });
   assert.deepEqual(urls(calls), ['http://127.0.0.1:8188/object_info'], '命中就停，不该再问别的端点');
   assert.equal(calls[0].method, 'GET');
 });
@@ -139,7 +139,7 @@ test('装了很多节点的 ComfyUI：超大 /object_info（超过 1MB 上限）
 test('内网 A1111：/sdapi/v1/sd-models 200 + 数组 → a1111，先问 ComfyUI 的端点', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/sdapi/v1/sd-models') ? json([{ title: 'sd_xl_base_1.0' }]) : miss()));
   const run = await runPlan({ baseUrl: 'http://127.0.0.1:7860' }, '');
-  assert.deepEqual(run.hit, { probe: '/sdapi/v1/sd-models', shape: 'array', protocols: ['a1111'] });
+  assert.deepEqual(run.hit, { probe: '/sdapi/v1/sd-models', shape: 'array', protocols: ['a1111'], status: 200, reason: '' });
   assert.deepEqual(urls(calls), [
     'http://127.0.0.1:7860/object_info',
     'http://127.0.0.1:7860/sdapi/v1/sd-models'
@@ -149,7 +149,7 @@ test('内网 A1111：/sdapi/v1/sd-models 200 + 数组 → a1111，先问 ComfyUI
 test('内网 SwarmUI：/API/ListModels 200 + JSON → swarmui', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/API/ListModels') ? json({ files: [{ name: 'sdxl' }] }) : miss()));
   const run = await runPlan({ baseUrl: 'http://127.0.0.1:7801' }, '');
-  assert.deepEqual(run.hit, { probe: '/API/ListModels', shape: 'object', protocols: ['swarmui'] });
+  assert.deepEqual(run.hit, { probe: '/API/ListModels', shape: 'object', protocols: ['swarmui'], status: 200, reason: '' });
   assert.deepEqual(urls(calls), [
     'http://127.0.0.1:7801/object_info',
     'http://127.0.0.1:7801/sdapi/v1/sd-models',
@@ -173,7 +173,7 @@ test('本地 OpenAI 兼容（sd-server / LocalAI）：本地三条都不中，�
 test('公网自托管 ComfyUI：/models 404 之后照样认得出（本次放宽的正是这条）', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/object_info') ? json({ CheckpointLoaderSimple: {} }) : miss()));
   const run = await runPlan({ baseUrl: 'https://comfy.example.com', key: 'k' }, '');
-  assert.deepEqual(run.hit, { probe: '/object_info', shape: 'object', protocols: ['comfyui'] });
+  assert.deepEqual(run.hit, { probe: '/object_info', shape: 'object', protocols: ['comfyui'], status: 200, reason: '' });
   assert.deepEqual(urls(calls), [
     'https://comfy.example.com/models',
     'https://comfy.example.com/object_info'
@@ -183,7 +183,7 @@ test('公网自托管 ComfyUI：/models 404 之后照样认得出（本次放宽
 test('公网自托管 A1111：/models 与 /object_info 都不中，看 /sdapi/v1/sd-models', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/sdapi/v1/sd-models') ? json([{ title: 'sdxl' }]) : miss()));
   const run = await runPlan({ baseUrl: 'https://a1111.example.com' }, '');
-  assert.deepEqual(run.hit, { probe: '/sdapi/v1/sd-models', shape: 'array', protocols: ['a1111'] });
+  assert.deepEqual(run.hit, { probe: '/sdapi/v1/sd-models', shape: 'array', protocols: ['a1111'], status: 200, reason: '' });
   assert.deepEqual(urls(calls), [
     'https://a1111.example.com/models',
     'https://a1111.example.com/object_info',
@@ -258,6 +258,54 @@ test('单探针超时也不抛：挂住的地址照样把四条都问完（每�
   assert.ok(Date.now() - startedAt < 2000, '用的是 25ms 的测试超时，不是默认 15 秒');
 });
 
+/**
+ * 失败也要分得清：401/403 是「Key 的事」，404 是「这个地址没有该接口」，
+ * 超时 / 连不上是另一类。以前它们都是 `shape: ''`，界面上只能合成一句「没认出协议」。
+ */
+test('探针带回 HTTP 状态：401 / 404 各是各的，且 401 绝不算命中', async (t) => {
+  let status = 401;
+  stubFetch(t, () => new Response('{"error":{"message":"bad key"}}', { status: status }));
+  const unauthorized = await probeProtocolPath({ baseUrl: 'https://relay.example/v1', key: 'k' }, '/models');
+  assert.deepEqual(unauthorized, { probe: '/models', shape: '', protocols: [], status: 401, reason: '' });
+  assert.deepEqual(unauthorized.protocols, [], '401 不能被当成命中');
+
+  status = 404;
+  const notFound = await probeProtocolPath({ baseUrl: 'https://relay.example/v1', key: 'k' }, '/models');
+  assert.deepEqual(notFound, { probe: '/models', shape: '', protocols: [], status: 404, reason: '' });
+});
+
+test('探针超时：status 0 + reason timeout（客户端据此说「超时」）', async (t) => {
+  stubFetch(t, (url, init) => hangUntilAborted(t, url, init));
+  const step = await probeProtocolPath({ baseUrl: 'https://relay.example.com/v1' }, '/models', { probeTimeoutMs: 25 });
+  assert.deepEqual(step, { probe: '/models', shape: '', protocols: [], status: 0, reason: 'timeout' });
+});
+
+test('连不上：status 0 + reason network（和 404 的「没有该接口」分开）', async (t) => {
+  stubFetch(t, () => { throw new Error('ECONNREFUSED'); });
+  const step = await probeProtocolPath({ baseUrl: 'https://relay.example.com/v1' }, '/models');
+  assert.deepEqual(step, { probe: '/models', shape: '', protocols: [], status: 0, reason: 'network' });
+});
+
+test('200 但不像模型列表：status 200 + reason invalid，仍然不命中', async (t) => {
+  stubFetch(t, () => new Response('<html>not json</html>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' }
+  }));
+  const step = await probeProtocolPath({ baseUrl: 'https://relay.example.com/v1' }, '/models');
+  assert.deepEqual(step, { probe: '/models', shape: '', protocols: [], status: 200, reason: 'invalid' });
+});
+
+test('探针不带响应体摘要：上游把 Key 回显在错误里也不会进返回值', async (t) => {
+  const key = 'sk-live-do-not-leak';
+  stubFetch(t, () => new Response(JSON.stringify({ error: { message: 'bad Authorization: Bearer ' + key } }), {
+    status: 401,
+    headers: { 'content-type': 'application/json' }
+  }));
+  const step = await probeProtocolPath({ baseUrl: 'https://relay.example/v1', key: key }, '/models');
+  assert.equal(step.status, 401);
+  assert.ok(!JSON.stringify(step).includes(key), '返回值里绝不能出现 Key');
+});
+
 test('probeProtocolPath 只认计划里的路径：计划外的路径一个请求都不发', async (t) => {
   const calls = stubFetch(t, () => json({ data: [] }));
   const step = await probeProtocolPath({ baseUrl: 'https://comfy.example.com' }, '/admin/secret');
@@ -269,7 +317,7 @@ test('形状 → 协议：/models 的 {data:[…]} 是通用兜底，{models:[�
   let respond = () => json({ models: [{ name: 'models/gemini-3-pro-image' }] });
   stubFetch(t, (url) => (url.endsWith('/models') ? respond() : miss()));
   const gemini = await probeProtocolPath({ baseUrl: 'https://relay.example/v1' }, '/models');
-  assert.deepEqual(gemini, { probe: '/models', shape: 'gemini-models', protocols: ['google-gemini'] });
+  assert.deepEqual(gemini, { probe: '/models', shape: 'gemini-models', protocols: ['google-gemini'], status: 200, reason: '' });
 
   respond = () => json({ data: [{ id: 'flux' }] });
   const openai = await probeProtocolPath({ baseUrl: 'https://relay.example/v1' }, '/models');
