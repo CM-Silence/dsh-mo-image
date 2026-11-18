@@ -29,7 +29,8 @@ const T = {
   'form.authHint': '鉴权头形态',
   'form.authHeader': '请求头名称',
   'form.authPrefix': '前缀',
-  'form.advanced': '自定义设置',
+  'form.advanced': '返回值设置',
+  'form.outputPreset.auto': '跟随协议',
   'form.outputPreset.customLegacy': '自定义（来自旧配置）',
   'form.outputPreset.customLegacyHint': '当前值是以前手写的返回配置，原样保留；上面的预设选一个即可覆盖它。'
 };
@@ -622,8 +623,8 @@ test('自定义操作预览使用实际端点，返回预设可直接写入草�
   assert.deepEqual(JSON.parse(json.props.value).generate, { path: 'v1/render', method: 'POST', output: 'binary' });
 });
 
-/** 高级区：内置协议的返回格式面板（预设下拉所在的那个 details）。 */
-function advancedOf(node, label = '自定义设置') {
+/** 返回值设置区：内置协议的返回格式面板（预设下拉所在的那个 details）。 */
+function advancedOf(node, label = '返回值设置') {
   return collect(node, (item) => item.type === 'details'
     && collect(item, (child) => child.type === 'summary' && text(child).join('') === label).length > 0)[0];
 }
@@ -648,6 +649,11 @@ test('内置协议的返回格式只剩预设下拉：手写 JSON 输入框与�
     '文生图与图生图两个预设下拉都在'
   );
   assert.equal(selects.find((item) => item.props['data-mo-image-output-preset'] === 'generate').props.value, 'binary');
+  // 「跟随协议」只换文案：选项值仍是 auto（协议自带描述符），两个下拉共用这一份文案。
+  const autoOption = (select) => collect(select, (item) => item.type === 'option'
+    && item.props && item.props.value === 'auto')[0];
+  assert.deepEqual(selects.map((select) => text(autoOption(select)).join('')), ['跟随协议', '跟随协议'],
+    '两个下拉的 auto 项都显示「跟随协议」，不露出裸值 auto');
   assert.equal(collect(node, (item) => item.type === 'textarea').length, 0, '手写 JSON 的输入框已不存在');
   assert.equal(collect(node, (item) => item.type === 'textarea'
     && item.props['aria-label'] === '返回格式覆盖').length, 0, '旧的 JSON 入口（aria-label）也不存在');
