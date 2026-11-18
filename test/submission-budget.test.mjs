@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { sleepWithSignal, parseRetryAfter, retryDelayMs, isAbortError, isTimeoutError } from '../lib/retry.js';
 import { pollRequestHeaders, downloadRequestHeaders, fetchResultImage } from '../lib/request-auth.js';
 import { callImageApi } from '../lib/index.js';
+import { resolveAdapter } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -389,12 +390,12 @@ test('polling a cross-origin task URL never carries the provider key', async (t)
     throw new Error('unexpected url ' + target);
   };
 
-  const adapter = {
-    id: 'gateway', label: 'Gateway',
-    endpoints: { generate: '/images/generations', edit: '/images/edits' },
-    transport: { generate: 'json', edit: 'json' },
-    maxN: 1, autoAsync: true
-  };
+  // 用真的 openai-images 协议，不再手搓一个 `{autoAsync:true}` 的空壳适配器：
+  // 「认任务包络」现在全在 `adapter.output` 候选列表里（描述符数据），手搓的空壳没有它，
+  // 就等于关掉了通用网关的任务识别。这条测的是**轮询凭据**，与协议形状无关。
+  const adapter = resolveAdapter({ id: 'gateway', name: 'Gateway', baseUrl: 'https://gateway.test/v1' }, 'm');
+  assert.equal(adapter.id, 'openai-images');
+  assert.equal(adapter.autoAsync, true);
   const provider = gatewayProvider('https://gateway.test/v1', 'super-secret');
 
   const result = await callImageApi('generate', adapter, provider, {
