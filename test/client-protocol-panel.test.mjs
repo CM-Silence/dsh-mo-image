@@ -485,16 +485,10 @@ test('协议设置：默认收起的折叠区，协议 / 鉴权 / 图生图端�
   let node = renderForm(client, provider);
   const settings = detailsOf(node, '协议设置');
   assert.ok(settings, '协议设置折叠区在');
-  assert.equal(settings.props.open, false, '默认收起：预设来源的提供商开箱即用');
+  assert.equal(settings.props.open, false, '默认收起：多数人打开面板只改密钥 / 地址 / 模型目录');
 
   // 五个控件：API 协议、鉴权方式、图生图端点、文生图返回格式、图生图返回格式。
-  const controls = () => ({
-    'API 协议': collect(node, (n) => n.type === 'select' && n.props['data-mo-image-protocol'] !== undefined)[0],
-    '鉴权方式': collect(node, (n) => n.type === 'select' && n.props['data-mo-image-auth-mode'] !== undefined)[0],
-    '图生图端点': collect(node, (n) => n.type === 'select' && n.props['data-mo-image-protocol-option'] === 'edit')[0],
-    '文生图返回格式': collect(node, (n) => n.type === 'select' && n.props['data-mo-image-output-preset'] === 'generate')[0],
-    '图生图返回格式': collect(node, (n) => n.type === 'select' && n.props['data-mo-image-output-preset'] === 'edit')[0]
-  });
+  const controls = () => protocolPanelControls(node);
   assert.deepEqual(Object.keys(controls()),
     ['API 协议', '鉴权方式', '图生图端点', '文生图返回格式', '图生图返回格式']);
   for (const [label, control] of Object.entries(controls())) {
@@ -524,6 +518,120 @@ test('协议设置：默认收起的折叠区，协议 / 鉴权 / 图生图端�
   for (const [label, control] of Object.entries(controls())) {
     assert.ok(insideOf(opened, control), label + ' 展开后还在原地');
   }
+});
+
+/** 协议设置里的五个控件，按他们出现的顺序命名；缺就是 undefined。 */
+function protocolPanelControls(node) {
+  const pick = (predicate) => collect(node, (n) => n.type === 'select' && predicate(n.props))[0];
+  return {
+    'API 协议': pick((props) => props['data-mo-image-protocol'] !== undefined),
+    '鉴权方式': pick((props) => props['data-mo-image-auth-mode'] !== undefined),
+    '图生图端点': pick((props) => props['data-mo-image-protocol-option'] === 'edit'),
+    '文生图返回格式': pick((props) => props['data-mo-image-output-preset'] === 'generate'),
+    '图生图返回格式': pick((props) => props['data-mo-image-output-preset'] === 'edit')
+  };
+}
+
+test('预设来源的提供商不渲染「协议设置」：协议 / 鉴权 / 图生图端点 / 返回格式一个都不出现', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: [], names: {}
+  });
+  // 判据就是来源（provider.presetId）：预设里协议 / 鉴权 / 返回格式都写好了，
+  // 用户零配置就该能用，所以整块不渲染——不是藏起来留个空壳。
+  assert.equal(detailsOf(node, '协议设置'), undefined, '预设来源不该有「协议设置」折叠区');
+  for (const [label, control] of Object.entries(protocolPanelControls(node))) {
+    assert.equal(control, undefined, label + ' 不该出现');
+  }
+  // 「识别协议」是协议设置里的动作：协议已知，连按钮一起不显示。
+  assert.equal(collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined).length, 0,
+    '预设来源不需要识别协议');
+  // 常显的三段与「自定义设置」照旧：藏起来的只是协议那一块。
+  const name = collect(node, (n) => n.type === 'input' && n.props.value === 'OpenAI')[0];
+  const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://api.openai.com/v1')[0];
+  const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  for (const [label, control] of [['显示名称', name], ['API 地址', url], ['API 密钥', key]]) {
+    assert.ok(control, label + ' 还在');
+    assert.equal(insideAnyDetails(node, control), false, label + ' 仍然常显');
+  }
+  assert.ok(detailsOf(node, '自定义设置'), '「自定义设置」还在');
+});
+
+test('判据只看 presetId：同一份配置去掉它，就是自己填的网关，协议设置照旧渲染', () => {
+  // 对照组：地址和协议一模一样，只差来源。不能靠 baseUrl 猜「是不是内置的」。
+  const provider = {
+    id: 'p1', name: 'Relay', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], names: {}
+  };
+  const custom = loadClient();
+  custom.setCatalog();
+  const customNode = renderForm(custom, provider);
+  const customSettings = detailsOf(customNode, '协议设置');
+  assert.ok(customSettings, '没有 presetId 的提供商仍然有「协议设置」');
+  for (const [label, control] of Object.entries(protocolPanelControls(customNode))) {
+    assert.ok(control, label + ' 在');
+    assert.ok(insideOf(customSettings, control), label + ' 收在协议设置里');
+  }
+  assert.equal(collect(customNode, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined).length, 1,
+    '识别协议按钮在（协议未知，这正是它派上用场的地方）');
+
+  const preset = loadClient();
+  preset.setCatalog();
+  const presetNode = renderForm(preset, { ...provider, presetId: 'openai' });
+  assert.equal(detailsOf(presetNode, '协议设置'), undefined, '加上 presetId 就变回预设来源，整块不渲染');
+});
+
+test('手改 API 地址就不再算预设来源：协议设置重新出现（判据跟着 draft.presetId 走）', () => {
+  // 预设的地址被换掉 = 换成另一家网关：形状未知了，这时候正需要这一块开关。
+  // 判据不是「地址像不像预设」，而是来源有没有被清掉——urlField 改地址时会把 presetId 清掉。
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: [], names: {}
+  };
+  let node = renderForm(client, provider);
+  assert.equal(detailsOf(node, '协议设置'), undefined, '预设来源：先是藏着的');
+  const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://api.openai.com/v1')[0];
+  assert.ok(url, 'API 地址输入框在');
+  url.props.onChange({ target: { value: 'https://relay.example/v1' } });
+  node = renderForm(client, provider);
+  assert.ok(detailsOf(node, '协议设置'), '换了地址就是自己填的网关：协议设置回来');
+  assert.equal(collect(node, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 1,
+    '协议下拉也跟着回来');
+});
+
+test('隐藏协议设置不清值：预设来源存在里面的协议 / 鉴权 / 返回格式保存时原样带回', async () => {
+  const client = loadClient();
+  client.setCatalog();
+  const operations = { version: 1, generate: { output: 'binary' } };
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai',
+    // 用户以前在这块里手动改过的三样：现在看不见了，但一个都不能丢。
+    protocolOptions: { edit: 'same' },
+    auth: { mode: 'api-key' },
+    operations: operations,
+    models: [], names: {}
+  };
+  let saved = null;
+  const tree = client.render(client.h(client.form(), {
+    provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t
+  }));
+  const save = collect(tree, (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+  assert.ok(save, '保存按钮要存在');
+  await save.props.onClick();
+
+  // 跨 vm 边界的对象走一趟 JSON：deepEqual 会比对原型，vm 里的 Object 与本进程不是同一个。
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.ok(saved, '保存要提交一份配置');
+  assert.equal(saved.adapter, 'openai-images', '协议不能因为不显示就被清掉');
+  assert.deepEqual(plain(saved.protocolOptions), { edit: 'same' }, '协议级选项原样带回');
+  assert.deepEqual(plain(saved.auth), { mode: 'api-key' }, '鉴权方式原样带回');
+  assert.deepEqual(plain(saved.operations), operations, '返回格式原样带回');
+  assert.equal(saved.presetId, 'openai', '来源也原样带回');
 });
 
 test('「自定义设置」只留接入细节：模型目录在，协议 / 鉴权 / 返回格式都不在', () => {
