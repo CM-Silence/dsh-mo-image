@@ -59,12 +59,18 @@ test('every literal t() key in the client exists in the CSV', () => {
   assert.deepEqual(missing, []);
 });
 
-test('dynamic quality and local-preset keys exist in the CSV', () => {
+test('dynamic quality keys exist in the CSV', () => {
   const keys = new Set(parsed.keys);
   for (const value of QUALITY_VALUES) assert.ok(keys.has(`quality.${value}`), `missing quality.${value}`);
+});
+
+// 本地模型表单不再显示预设提示（地址下面 / 密钥下面各一行）：那两行只在这一个地方用，
+// 所以对应的翻译键一并删掉——留着就是死键。
+test('local-preset hint keys are gone from the CSV', () => {
+  const keys = new Set(parsed.keys);
   for (const preset of LOCAL_PRESETS) {
-    assert.ok(keys.has(`localPreset.${preset.id}.hint`), `missing localPreset.${preset.id}.hint`);
-    assert.ok(keys.has(`localPreset.${preset.id}.urlHint`), `missing localPreset.${preset.id}.urlHint`);
+    assert.equal(keys.has(`localPreset.${preset.id}.hint`), false, `localPreset.${preset.id}.hint 应已删除`);
+    assert.equal(keys.has(`localPreset.${preset.id}.urlHint`), false, `localPreset.${preset.id}.urlHint 应已删除`);
   }
 });
 

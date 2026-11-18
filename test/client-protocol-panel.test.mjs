@@ -1057,3 +1057,172 @@ test('旧配置的自定义值可以被预设覆盖', () => {
   assert.equal(collect(tree, (item) => item.props['data-mo-image-output-legacy-hint'] !== undefined).length, 0,
     '覆盖之后不再显示旧配置说明');
 });
+
+// ---------------------------------------------------------------------------
+// 精简本地模型表单 / 模型选项里的返回格式 / 模型行布局
+// ---------------------------------------------------------------------------
+
+/** 从根到目标节点的祖先链（含目标自己）。 */
+function ancestorsOf(root, target, chain = []) {
+  if (root === null || root === undefined) return null;
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      const hit = ancestorsOf(item, target, chain);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (typeof root !== 'object') return null;
+  const next = chain.concat([root]);
+  if (root === target) return next;
+  for (const child of root.children || []) {
+    const hit = ancestorsOf(child, target, next);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** 模型行的 options 开关（chevron 图标按钮，带 aria-expanded）。 */
+function modelOptionsToggle(row) {
+  return collect(row, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean')[0];
+}
+
+/** 展开第 index 个模型的选项面板（需要 preserveFormState 才会记住状态）。 */
+function expandModelOptions(client, provider, render, index = 0) {
+  let node = render();
+  const row = collect(node, (item) => item.props && item.props['data-row-key'] === String(index))[0];
+  assert.ok(row, '模型行 ' + index + ' 在');
+  const toggle = modelOptionsToggle(row);
+  assert.ok(toggle, '模型行上要有展开按钮');
+  toggle.props.onClick({ currentTarget: { focus() {} } });
+  node = render();
+  return collect(node, (item) => item.props && item.props['data-row-key'] === String(index))[0];
+}
+
+test('本地模型表单不再显示预设提示：地址下面与密钥下面的两段文字都不渲染', () => {
+  // 夹具带两段提示原文：真清单里宿主下发的 urlHint / hint 就是这个形状。
+  const fixtures = [{
+    id: 'sd-server', name: 'sd-server', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images',
+    urlHint: 'HINT-URL 只填服务根地址，末尾保留 /v1',
+    hint: 'HINT-KEY 原生 OpenAI Images 接口'
+  }];
+  const client = loadClient({ preserveFormState: true, localPresets: fixtures });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  const localTab = collect(node, (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  assert.ok(localTab, '「本地模型」tab 在');
+  localTab.props.onClick();
+  node = renderForm(client, provider, true);
+
+  const body = text(node).join(' ');
+  assert.doesNotMatch(body, /HINT-URL/, 'API 地址下面那行提示已删掉');
+  assert.doesNotMatch(body, /HINT-KEY/, 'API 密钥下面那行提示已删掉');
+  // 只删提示，字段本身照旧常显（本地服务有时确实要填密钥）。
+  assert.ok(collect(node, (item) => item.type === 'input' && item.props.value === 'http://127.0.0.1:8080/v1')[0],
+    'API 地址输入框还在');
+  assert.ok(collect(node, (item) => item.type === 'input' && item.props.value === 'sd-server')[0],
+    '显示名称输入框还在');
+  assert.ok(collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0],
+    'API 密钥输入框还在');
+});
+
+test('预设有来源时，模型选项里没有返回格式（返回格式属于预设）', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {}
+  };
+  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length, 0,
+    '预设来源的模型选项里不再有返回格式面板');
+  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-preset'] !== undefined).length, 0,
+    '两个返回格式下拉也一个都不剩');
+});
+
+test('自定义模型 API 保留模型选项里的返回格式，两个下拉排在同一行', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+    models: ['m'], names: {}
+  };
+  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+  // 自定义协议的模型选项是手写 JSON（没有手改过就不显示下拉），这块保留。
+  assert.ok(collect(row, (item) => item.props && item.props['data-mo-image-operations'] === 'm')[0],
+    '自定义协议的模型选项还在');
+
+  // 两个返回格式下拉（提供方这一层）在同一行：同一个父容器、横向两列。
+  const tree = renderForm(client, provider);
+  const generate = collect(tree, (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset'] === 'generate')[0];
+  const edit = collect(tree, (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset'] === 'edit')[0];
+  assert.ok(generate && edit, '两个下拉都在');
+  const rowBox = ancestorsOf(tree, generate).find((item) => item.props && item.props.style
+    && item.props.style.gridTemplateColumns);
+  assert.ok(rowBox, '两个下拉要有一个横向排布的父容器');
+  assert.equal(ancestorsOf(tree, edit).includes(rowBox), true, '两个下拉是同一个父容器的子元素');
+  assert.equal(rowBox.props.style.gridTemplateColumns, 'minmax(0, 1fr) minmax(0, 1fr)',
+    '一行两列（各占半宽），不再是上下两行');
+});
+
+test('隐藏的返回格式不清掉老配置：模型上已配过的 output 保存时原样带回', async () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const operations = { version: 1, generate: { output: 'binary' } };
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {},
+    modelOptions: { 'gpt-image-1': { operations: operations } }
+  };
+  const render = () => renderForm(client, provider);
+  expandModelOptions(client, provider, render);
+  let saved = null;
+  const tree = client.render(client.h(client.form(), {
+    provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t
+  }));
+  const save = collect(tree, (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop();
+  assert.ok(save, '保存按钮要存在');
+  await save.props.onClick();
+  const plain = JSON.parse(JSON.stringify(saved.modelOptions));
+  assert.deepEqual(plain['gpt-image-1'].operations, operations, '模型上看不见的返回格式不能被丢掉');
+});
+
+test('模型行展开前后布局一致：两个输入框的列不变，各自 min-width: 0', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    models: ['doubao-seedream-4-0-250828'], names: { 'doubao-seedream-4-0-250828': 'Doubao Seedream' }
+  };
+  // data-row-key 在外层模型卡片上，列定义在内层的 .modelRow 上。
+  const rowOf = (tree) => collect(tree, (item) => String(item.props.className || '').includes('modelRow'))[0];
+  const render = () => renderForm(client, provider);
+  const collapsed = rowOf(render());
+  assert.ok(collapsed, '模型行在');
+  const columns = collapsed.props.style.gridTemplateColumns;
+  assert.equal(columns, 'auto minmax(0, 1.4fr) minmax(0, 1fr) auto auto',
+    '列宽固定：ID 与显示名称各占一份比例，其余是按钮');
+
+  expandModelOptions(client, provider, render);
+  const expanded = rowOf(render());
+  assert.equal(expanded.props.style.gridTemplateColumns, columns,
+    '展开选项面板不改变这一行的列宽');
+
+  // 两个输入框都在第 1 行、各自的列位固定；都允许被压缩 + 省略号截断，谁也不把谁挤没。
+  const fields = collect(expanded, (item) => item.type === 'label'
+    && ['2', '3'].includes(String(item.props.style && item.props.style.gridColumn)));
+  assert.deepEqual(fields.map((item) => item.props.style.gridColumn), ['2', '3'],
+    '两个输入框分别钉在第 2 / 3 列，位置不随展开变化');
+  assert.deepEqual(fields.map((item) => item.props.style.gridRow), ['1', '1'], '都在同一行');
+  const inputs = fields.map((label) => collect(label, (item) => item.type === 'input')[0]);
+  assert.equal(inputs.filter(Boolean).length, 2, '模型 ID 与显示名称两个输入框都在');
+  for (const input of inputs) {
+    assert.equal(input.props.style.minWidth, 0, '输入框能收缩（min-width: 0）');
+    assert.equal(input.props.style.textOverflow, 'ellipsis', '超长用省略号截断');
+  }
+});
