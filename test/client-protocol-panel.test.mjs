@@ -318,8 +318,8 @@ test('「鉴权方式」label 右侧的问号收着原来的说明，下面那�
   assert.equal(text(help).join(''), '?');
 });
 
-test('鉴权方式在 DOM 顺序上位于 API 协议之前，且不在折叠区里', () => {
-  // 两种表单都要这个顺序：编辑已有提供商（字段在「高级」折叠区里）与新增时的自定义模式（字段平铺）。
+test('鉴权方式在 DOM 顺序上位于 API 协议之前，且鉴权与协议都不在折叠区里', () => {
+  // 两种表单都要这个顺序：编辑已有提供商（图生图端点等派生字段在「高级」里）与新增时的自定义模式（字段平铺）。
   const cases = [
     { label: '编辑已有提供商', client: loadClient(), isNew: false },
     { label: '新增自定义', client: loadClient({ customMode: true }), isNew: true }
@@ -338,15 +338,19 @@ test('鉴权方式在 DOM 顺序上位于 API 协议之前，且不在折叠区�
       && n.props['data-mo-image-protocol'] !== undefined)[0];
     const edit = collect(node, (n) => n.type === 'select'
       && n.props['data-mo-image-protocol-option'] === 'edit')[0];
-    assert.ok(url && auth && protocol && edit, item.label + '：地址 / 鉴权 / 协议 / 图生图端点都要在');
+    const detect = collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined)[0];
+    assert.ok(url && auth && protocol && edit && detect,
+      item.label + '：地址 / 鉴权 / 协议（含识别按钮）/ 图生图端点都要在');
     // 鉴权方式是「这个地址怎么认证」，和地址是一对；识别协议失败的绝大多数原因是 401，
     // 所以它要排在协议上方，排查时不用在两个区块之间来回看。
     assert.ok(at(url) < at(auth), item.label + '：鉴权方式紧跟在 API 地址后面');
     assert.ok(at(auth) < at(protocol), item.label + '：鉴权方式在 API 协议之前');
     assert.ok(at(protocol) < at(edit), item.label + '：图生图端点仍排在协议下面');
-    // 常显：不能落在任何一个折叠区（<details>）里。
-    for (let parent = parentOf(node, auth); parent; parent = parentOf(node, parent)) {
-      assert.notEqual(parent.type, 'details', item.label + '：鉴权方式不能收进折叠区');
+    // 常显：鉴权方式与 API 协议（含它的问号和识别按钮）都是主字段，不能落在任何一个折叠区（<details>）里。
+    for (const [name, control] of [['鉴权方式', auth], ['API 协议', protocol], ['识别协议按钮', detect]]) {
+      for (let parent = parentOf(node, control); parent; parent = parentOf(node, parent)) {
+        assert.notEqual(parent.type, 'details', item.label + '：' + name + ' 不能收进折叠区');
+      }
     }
   }
 });
