@@ -1192,37 +1192,163 @@ test('隐藏的返回格式不清掉老配置：模型上已配过的 output 保
   assert.deepEqual(plain['gpt-image-1'].operations, operations, '模型上看不见的返回格式不能被丢掉');
 });
 
-test('模型行展开前后布局一致：两个输入框的列不变，各自 min-width: 0', () => {
-  const client = loadClient({ preserveFormState: true });
-  client.setCatalog();
-  const provider = {
-    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
-    models: ['doubao-seedream-4-0-250828'], names: { 'doubao-seedream-4-0-250828': 'Doubao Seedream' }
-  };
-  // data-row-key 在外层模型卡片上，列定义在内层的 .modelRow 上。
-  const rowOf = (tree) => collect(tree, (item) => String(item.props.className || '').includes('modelRow'))[0];
-  const render = () => renderForm(client, provider);
-  const collapsed = rowOf(render());
-  assert.ok(collapsed, '模型行在');
-  const columns = collapsed.props.style.gridTemplateColumns;
-  assert.equal(columns, 'auto minmax(0, 1.4fr) minmax(0, 1fr) auto auto',
-    '列宽固定：ID 与显示名称各占一份比例，其余是按钮');
+/** `.modelRow` 的直接子项（就是 DOM 子元素）：null 丢掉，数组与 Fragment 展开。 */
+function modelRowChildren(row) {
+  const out = [];
+  for (const child of row.children || []) {
+    if (child === null || child === undefined) continue;
+    if (Array.isArray(child)) { out.push(...child); continue; }
+    if (child.type === 'Fragment') { out.push(...(child.children || [])); continue; }
+    out.push(child);
+  }
+  return out;
+}
 
-  expandModelOptions(client, provider, render);
-  const expanded = rowOf(render());
-  assert.equal(expanded.props.style.gridTemplateColumns, columns,
-    '展开选项面板不改变这一行的列宽');
+/**
+ * 模型行第 1 行里的五个控件（与 DSH 设置页同一套）：拖动把手 / ID / 展开 / 删除 / 显示名称。
+ * 返回 '' 的是展开面板——它们必须自己横跨整行，不能作为普通网格项参与排版。
+ */
+function modelRowControlRole(item) {
+  const props = item.props || {};
+  if (item.type === 'button') {
+    if (props['aria-keyshortcuts']) return 'drag';
+    if (typeof props['aria-expanded'] === 'boolean') return 'toggle';
+    if (String(props['aria-label'] || '').startsWith('form.deleteModel')) return 'delete';
+    return '';
+  }
+  if (item.type === 'label') {
+    if (String(props.className || '').includes('modelName')) return 'name';
+    if (collect(item, (node) => node.type === 'input')[0]) return 'id';
+  }
+  return '';
+}
 
-  // 两个输入框都在第 1 行、各自的列位固定；都允许被压缩 + 省略号截断，谁也不把谁挤没。
-  const fields = collect(expanded, (item) => item.type === 'label'
-    && ['2', '3'].includes(String(item.props.style && item.props.style.gridColumn)));
-  assert.deepEqual(fields.map((item) => item.props.style.gridColumn), ['2', '3'],
-    '两个输入框分别钉在第 2 / 3 列，位置不随展开变化');
-  assert.deepEqual(fields.map((item) => item.props.style.gridRow), ['1', '1'], '都在同一行');
-  const inputs = fields.map((label) => collect(label, (item) => item.type === 'input')[0]);
-  assert.equal(inputs.filter(Boolean).length, 2, '模型 ID 与显示名称两个输入框都在');
-  for (const input of inputs) {
-    assert.equal(input.props.style.minWidth, 0, '输入框能收缩（min-width: 0）');
-    assert.equal(input.props.style.textOverflow, 'ellipsis', '超长用省略号截断');
+/** 展开面板的种类：返回格式（预设下拉）/ 自定义 JSON / 模型参数。 */
+function modelRowPanelKind(item) {
+  const props = item.props || {};
+  if (props['data-mo-image-output-presets'] !== undefined) return 'outputPresets';
+  if (props['data-mo-image-operations'] !== undefined) return 'operations';
+  if (String(props.className || '').includes('modelAdvanced')) return 'params';
+  return String(props.className || '') || String(item.type);
+}
+
+/**
+ * 模型行的落位模型（只用来检查「谁会被排进第 1 列」）。
+ *
+ * 宿主样式表里 `.modelRow` 是 5 列网格（DSH ModelsSection：auto / 1.4fr / 1fr / auto / auto），
+ * 没有显式 grid-column 的子项按 DOM 顺序依次占列；`grid-column: 1 / -1` 的面板自己起一行、
+ * 横跨整行。列模板与窄宽度重排都归宿主，所以测试不复述列宽，只复述「5 列 + 顺序占列」这条
+ * 布局协议——插件一旦把列定义内联抄回来，前面那条断言就会先红。
+ */
+function modelRowPlacement(row) {
+  const COLUMNS = 5;
+  const cells = [];
+  let column = 1;
+  for (const item of modelRowChildren(row)) {
+    const style = item.props.style || {};
+    if (style.gridColumn === '1 / -1') {
+      cells.push({ item: item, columnStart: 1, span: COLUMNS });
+      column = 1;
+      continue;
+    }
+    if (column > COLUMNS) column = 1;
+    cells.push({ item: item, columnStart: column, span: 1 });
+    column += 1;
+  }
+  return cells;
+}
+
+test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，列模板归宿主', () => {
+  // 两种来源各测一遍：内置协议展开的是「返回格式（预设下拉）」面板，自定义协议展开的是
+  // 手写 JSON 的 <details>；两者下面都还挂着「模型参数」面板。
+  const cases = [
+    {
+      label: '内置协议',
+      provider: {
+        id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+        models: ['doubao-seedream-4-0-250828'], names: { 'doubao-seedream-4-0-250828': 'Doubao Seedream' }
+      },
+      panels: ['outputPresets', 'params']
+    },
+    {
+      label: '自定义协议',
+      provider: {
+        id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+        customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+        models: ['m'], names: {}
+      },
+      panels: ['operations', 'params']
+    }
+  ];
+
+  for (const item of cases) {
+    const client = loadClient({ preserveFormState: true });
+    client.setCatalog();
+    const provider = item.provider;
+    const rowOf = (tree) => collect(tree, (node) => String(node.props.className || '').includes('modelRow'))[0];
+    const collapsed = rowOf(renderForm(client, provider));
+    assert.ok(collapsed, item.label + '：模型行在');
+
+    // 列模板（以及 display / gap / align）都在宿主样式表里：内联一份就会盖住宿主的
+    // @container 窄宽度重排，还变成一份不会跟着 DSH 升级的副本。
+    const collapsedStyle = collapsed.props.style || {};
+
+    const render = () => renderForm(client, provider);
+    expandModelOptions(client, provider, render);
+    const expanded = rowOf(render());
+
+    // c) 展开前后列模板一模一样（而且一直是宿主的，不是插件内联的）。
+    assert.equal(expanded.props.style && expanded.props.style.gridTemplateColumns,
+      collapsedStyle.gridTemplateColumns,
+      item.label + '：展开前后列模板不变');
+
+    // 行里只有面板能写 grid-column / grid-row：五个控件的位置由宿主样式表的类规则决定。
+    for (const [state, row] of [['展开前', collapsed], ['展开后', expanded]]) {
+      const rowStyle = row.props.style || {};
+      for (const key of ['display', 'gridTemplateColumns', 'alignItems', 'gap']) {
+        assert.equal(rowStyle[key], undefined,
+          item.label + '：' + state + '的 .modelRow ' + key + ' 归宿主样式表');
+      }
+      for (const child of modelRowChildren(row)) {
+        const style = child.props.style || {};
+        assert.equal(style.gridColumn === undefined || style.gridColumn === '1 / -1', true,
+          item.label + '：' + state + '不内联控件列位');
+        assert.equal(style.gridRow, undefined, item.label + '：' + state + '不内联控件行位');
+      }
+    }
+
+    // a) 每个面板型直接子项都横跨整行。漏一个，它就会被当成下一个网格项排进第 1 列，
+    //    把 auto 轨道撑大、压塌同一列里的两个输入框。
+    const panels = modelRowChildren(expanded).filter((child) => !modelRowControlRole(child));
+    assert.deepEqual(panels.map(modelRowPanelKind).sort(), item.panels.slice().sort(),
+      item.label + '：展开后正好是这些面板');
+    for (const panel of panels) {
+      const style = panel.props.style || {};
+      assert.equal(style.gridColumn, '1 / -1',
+        item.label + '：' + modelRowPanelKind(panel) + ' 面板要横跨整行');
+      assert.equal(style.minWidth, 0, item.label + '：' + modelRowPanelKind(panel) + ' 面板要能压缩');
+    }
+
+    // b) 展开前后，只占第 1 列的直接子项只有拖动把手一个。
+    for (const [state, row] of [['展开前', collapsed], ['展开后', expanded]]) {
+      const firstColumn = modelRowPlacement(row)
+        .filter((cell) => cell.columnStart === 1 && cell.span === 1)
+        .map((cell) => cell.item);
+      assert.equal(firstColumn.length, 1, item.label + '：' + state + '第 1 列只有一格');
+      assert.equal(modelRowControlRole(firstColumn[0]), 'drag',
+        item.label + '：' + state + '第 1 列是拖动把手');
+    }
+
+    // 两个输入框仍然能收缩；input 不支持 text-overflow，别再写这条无效样式。
+    const fields = modelRowChildren(expanded)
+      .filter((child) => ['id', 'name'].includes(modelRowControlRole(child)));
+    assert.equal(fields.length, 2, item.label + '：模型 ID 与显示名称两个输入框都在');
+    for (const label of fields) {
+      const input = collect(label, (node) => node.type === 'input')[0];
+      assert.ok(input, item.label + '：输入框在');
+      assert.equal(input.props.style.minWidth, 0, item.label + '：输入框能收缩（min-width: 0）');
+      assert.equal(input.props.style.textOverflow, undefined,
+        item.label + '：input 不支持 text-overflow，不能写');
+    }
   }
 });
