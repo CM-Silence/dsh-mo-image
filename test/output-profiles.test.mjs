@@ -51,9 +51,9 @@ test('描述符必填 maxBytes / emptyMessage，且拒绝 headers 与凭据字�
 
 test('尚未实现的字段在定义时就报错，不允许静默不生效', () => {
   const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
-  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', as: 'relative' }] }), /pick\.as/, 'relative 留给 comfy/swarmui');
-  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', select: 'last' }] }), /select/, 'select 留给 gemini');
-  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', where: [] }] }), /where/, 'where 留给 gemini');
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', as: 'absolute' }] }), /pick\.as/, 'as 只认四种解释 + relative');
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', select: 'all' }] }), /select/, 'all 还没有消费者');
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', where: [{ path: 'b', equals: 1 }] }] }), /where/, 'where 只对 [] 路径生效，单值路径写了就是静默不生效');
   assert.throws(
     () => validateOutputProfile({ kind: 'task', path: '/tasks/{taskId}', idPath: 'a', statusPath: 'b', resultPath: 'c', success: ['OK'], failure: [], intervalMs: 1, maxBytes: 1, emptyMessage: 'x', poll: {} }),
     /poll/,
@@ -438,4 +438,170 @@ test('from / text 的字段白名单与取值：拼错的字段不静默生效',
   assert.throws(() => validateOutputProfile({ ...base, from: [{ path: 'a', any: 'url' }] }), /any/);
   assert.throws(() => validateOutputProfile({ ...base, from: [{ path: 'a', unknown: 1 }] }), /不认识的字段 unknown/);
   assert.doesNotThrow(() => validateOutputProfile({ ...base, from: [{ path: 'a', any: ['url', ''] }] }));
+});
+
+/* --------------------------- 第二批迁移新增的词汇表（gemini / swarmui / recraft） */
+
+test('select：默认 first，last 把候选列反过来——每个候选仍然试到底', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
+  const last = {
+    ...base,
+    pick: [{ path: 'parts[].data', as: 'base64', select: 'last' }]
+  };
+  assert.deepEqual(
+    readOutput({ parts: [{ data: PNG_1PX }, { data: 'AAAA' }, { data: PNG_RED }] }, last).bytes,
+    Buffer.from(PNG_RED, 'base64'),
+    '第一个候选人赢了'
+  );
+  assert.deepEqual(
+    readOutput({ parts: [{ data: PNG_1PX }, { data: PNG_RED }] }, last).bytes,
+    Buffer.from(PNG_RED, 'base64'),
+    '两张都合法时取最后一张'
+  );
+  assert.deepEqual(
+    readOutput({ parts: [{ data: PNG_RED }, { data: 'AAAA' }] }, last).bytes,
+    Buffer.from(PNG_RED, 'base64'),
+    '最后一张解不出时退到前一张（与迁移前的逆序循环一致）'
+  );
+});
+
+test('where：只过滤 [] 元素；notEquals 保留「没有这个字段」的元素', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
+  const profile = {
+    ...base,
+    pick: [{
+      path: 'parts[]', as: 'base64', select: 'last', any: ['data'],
+      where: [{ path: 'thought', notEquals: true }]
+    }]
+  };
+  // 没有 thought 字段的 part 必须保留（迁移前是 `part.thought === true` 才跳）。
+  assert.deepEqual(readOutput({ parts: [
+    { data: 'AAAA' },
+    { data: PNG_RED },
+    { thought: true, data: PNG_1PX }
+  ] }, profile).bytes, Buffer.from(PNG_RED, 'base64'), 'thought part 被过滤，剩下最后一个');
+  // 字符串 "true" 不是布尔 true，不跳（迁移前就是严格比较）。
+  assert.deepEqual(readOutput({ parts: [
+    { data: PNG_1PX },
+    { thought: 'true', data: PNG_RED }
+  ] }, profile).bytes, Buffer.from(PNG_RED, 'base64'));
+
+  const equals = {
+    ...base,
+    pick: [{ path: 'output[]', as: 'base64', any: ['result'], where: [{ path: 'type', equals: 'image_generation_call' }] }]
+  };
+  assert.deepEqual(readOutput({ output: [
+    { type: 'reasoning', result: PNG_1PX },
+    { type: 'image_generation_call', result: PNG_RED }
+  ] }, equals).bytes, Buffer.from(PNG_RED, 'base64'));
+  assert.throws(() => readOutput({ output: [{ type: 'reasoning', result: PNG_1PX }] }, equals), /x/);
+});
+
+test('where 的写法校验：必须非空、必须恰有一个 equals / notEquals、路径拼错不生效', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
+  const pick = (where) => ({ ...base, pick: [{ path: 'a[]', where: where }] });
+  assert.throws(() => validateOutputProfile(pick([])), /where/);
+  assert.throws(() => validateOutputProfile(pick([{ path: 'a' }])), /equals/);
+  assert.throws(() => validateOutputProfile(pick([{ path: 'a', equals: 1, notEquals: 2 }])), /equals/);
+  assert.throws(() => validateOutputProfile(pick([{ path: 'a', equal: 1 }])), /不认识的字段 equal/);
+  assert.doesNotThrow(() => validateOutputProfile(pick([{ path: 'a', equals: 1 }])));
+  assert.doesNotThrow(() => validateOutputProfile(pick([{ path: 'a', equals: false }])));
+  assert.doesNotThrow(() => validateOutputProfile(pick([{ path: 'a', notEquals: true }])));
+});
+
+test('contentTypePath：纯点号路径相对父对象（openrouter 的 data.0），[] 路径相对元素（gemini 的 part）', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'x' };
+  // openrouter：值本身是字符串，父对象是 data[0]。
+  const openrouter = {
+    ...base,
+    pick: [{ path: 'data.0.b64_json', as: 'base64', contentTypePath: 'media_type' }]
+  };
+  const picked = readOutput({ data: [{ b64_json: PNG_RED, media_type: 'image/webp' }] }, openrouter);
+  assert.deepEqual(picked.bytes, Buffer.from(PNG_RED, 'base64'));
+  assert.equal(picked.contentType, 'image/webp', 'upstream 的 media_type 覆盖签名类型');
+  assert.equal(
+    readOutput({ data: [{ b64_json: PNG_RED }] }, openrouter).contentType,
+    'image/png',
+    '没有 media_type 时保留字节签名'
+  );
+
+  // gemini：值是 part 对象，contentTypePath 相对这个元素，可写多条候选。
+  const gemini = {
+    ...base,
+    pick: [{
+      path: 'parts[]', as: 'base64', select: 'last',
+      any: ['inlineData.data', 'inline_data.data'],
+      contentTypePath: ['inlineData.mimeType', 'inline_data.mime_type']
+    }]
+  };
+  assert.equal(
+    readOutput({ parts: [{ inline_data: { mime_type: 'image/webp', data: PNG_RED } }] }, gemini).contentType,
+    'image/webp'
+  );
+  assert.equal(
+    readOutput({ parts: [{ inlineData: { data: PNG_RED } }] }, gemini).contentType,
+    'image/png',
+    'mimeType 缺失时退回签名'
+  );
+  // 写法校验：空数组 / 非字符串都不许静默不生效；带 text 的条目没有读取方。
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', contentTypePath: [] }] }), /contentTypePath/);
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a', contentTypePath: [1] }] }), /contentTypePath/);
+  assert.throws(
+    () => validateOutputProfile({ ...base, pick: [{ path: 'a', text: [{ regex: 'x' }], contentTypePath: 'b' }] }),
+    /contentTypePath/
+  );
+});
+
+test('emptyDetail：只补「上游给了原因」的那一句；缺字段时文案不变', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'Gemini 没有返回图片' };
+  const profile = { ...base, pick: [{ path: 'parts[].data' }], emptyDetail: { path: 'candidates.0.finishReason', label: 'finishReason' } };
+  assert.throws(() => readOutput({ candidates: [{ finishReason: 'SAFETY' }] }, profile), (error) => {
+    assert.equal(error.message, 'Gemini 没有返回图片（finishReason=SAFETY）');
+    return true;
+  });
+  assert.throws(() => readOutput({ candidates: [{}] }, profile), (error) => {
+    assert.equal(error.message, 'Gemini 没有返回图片');
+    return true;
+  });
+  assert.throws(() => validateOutputProfile({ ...base, pick: [{ path: 'a' }], emptyDetail: {} }), /emptyDetail/);
+  assert.throws(
+    () => validateOutputProfile({ ...base, pick: [{ path: 'a' }], emptyDetail: { path: 'a', label: 'b', unknown: 1 } }),
+    /不认识的字段 unknown/
+  );
+  // task / binary 的 emptyMessage 没有 payload 读取面，写了 emptyDetail 会静默不生效。
+  assert.throws(
+    () => validateOutputProfile({ kind: 'binary', maxBytes: 1, emptyMessage: 'x', emptyDetail: { path: 'a', label: 'b' } }),
+    /不认识的字段 emptyDetail/
+  );
+});
+
+test('纯兜底扫描：只有 scan 没有 pick 也是合法形状（recraft 迁移前就是任意位置扫描）', () => {
+  const profile = { kind: 'json', scan: true, maxBytes: 1024, emptyMessage: 'Recraft 没有返回图片' };
+  assert.doesNotThrow(() => validateOutputProfile(profile));
+  assert.deepEqual(readOutput({ data: [{ url: 'https://cdn.test/a.png' }] }, profile), { url: 'https://cdn.test/a.png' });
+  // 扫描自己的报错照旧透出去（迁移前 throw 在 decodeImagePayload 里，描述符的文案是死代码）。
+  assert.throws(() => readOutput({}, profile), /格式不认识/);
+  assert.throws(() => validateOutputProfile({ kind: 'json', maxBytes: 1, emptyMessage: 'x' }), /pick 或 from/);
+  assert.throws(
+    () => validateOutputProfile({ kind: 'json', scan: false, maxBytes: 1, emptyMessage: 'x' }),
+    /pick 或 from/,
+    'scan:false 等于什么都没写，不能当合法形状'
+  );
+});
+
+test('pick.as 的 relative：按 options.baseUrl 拼，不把 http / data 当相对路径', () => {
+  const base = { kind: 'json', maxBytes: 1024, emptyMessage: 'SwarmUI 没有返回图片' };
+  const profile = { ...base, pick: [{ path: 'images.0', as: 'relative' }] };
+  assert.deepEqual(
+    readOutput({ images: ['View/local/raw/out.png'] }, profile, { baseUrl: 'http://127.0.0.1:7801/' }),
+    { url: 'http://127.0.0.1:7801/View/local/raw/out.png' }
+  );
+  assert.deepEqual(
+    readOutput({ images: ['/View/local/raw/out.png'] }, profile, { baseUrl: 'http://127.0.0.1:7801' }),
+    { url: 'http://127.0.0.1:7801/View/local/raw/out.png' },
+    '开头的斜杠不重复'
+  );
+  assert.throws(() => readOutput({ images: ['https://cdn.test/a.png'] }, profile, { baseUrl: 'http://h' }), /没有返回图片/);
+  assert.throws(() => readOutput({ images: ['data:image/png;base64,' + PNG_1PX] }, profile, { baseUrl: 'http://h' }), /没有返回图片/);
+  assert.throws(() => readOutput({ images: ['a.png'] }, profile), /没有返回图片/, '没有 baseUrl 拼不出来');
 });
