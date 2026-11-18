@@ -30,7 +30,7 @@ form.route.generate,文生图,Text-to-image,テキストから生成,Texto a ima
 form.route.edit,图生图,Image-to-image,画像から生成,Imagen a imagen,Image vers image,Bild zu Bild,Из изображения,Imagem para imagem
 form.route.models,获取模型列表,List models,モデル一覧,Listar modelos,Lister les modèles,Modelle laden,Список моделей,Listar modelos
 form.routeUnsupported,不支持,Not supported,非対応,No compatible,Non pris en charge,Nicht unterstützt,Не поддерживается,Não suportado
-form.customProtocol,自定义（自己填地址）,Custom (enter URLs),カスタム（URL を入力）,Personalizado (introducir URLs),Personnalisé (saisir les URL),Benutzerdefiniert (URLs eingeben),Свой (ввести адреса),Personalizado (inserir URLs)
+form.customProtocol,自定义,Custom,カスタム,Personalizado,Personnalisé,Benutzerdefiniert,Свой,Personalizado
 form.hostModel,"调度模型","Host model","ホストモデル","Modelo anfitrión","Modèle hôte","Host-Modell","Ведущая модель","Modelo host"
 form.hostModelHint,"Responses API 需要一个能调用生图工具的主模型。","The Responses API needs a main model that can call the image tool.","Responses API では画像ツールを呼び出せるメインモデルが必要です。","La API Responses necesita un modelo principal que pueda llamar a la herramienta de imagen.","L'API Responses nécessite un modèle principal capable d'appeler l'outil d'image.","Die Responses-API benötigt ein Hauptmodell, das das Bildwerkzeug aufrufen kann.","Responses API требует основную модель, которая может вызывать инструмент изображений.","A API Responses precisa de um modelo principal que possa chamar a ferramenta de imagem."
 form.apiKey,"API 密钥","API key","API キー","Clave de API","Clé d'API","API-Schlüssel","Ключ API","Chave de API"

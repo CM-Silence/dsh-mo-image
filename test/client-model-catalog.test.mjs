@@ -484,7 +484,7 @@ test('the protocol select keeps common adapters up front and expands the long ta
   assert.equal(protocolSelect.props.disabled, undefined);
   // 常用协议在前；长尾（bfl）收进「更多协议…」，「自定义」永远在末尾（它不在 manifest 里，由客户端补上）。
   assert.deepEqual(optionValues(protocolSelect), ['', 'openai-responses', 'custom', '__more__']);
-  assert.deepEqual(optionTexts(protocolSelect), ['Auto', 'OpenAI Responses', 'Custom (enter URLs)', 'More protocols…']);
+  assert.deepEqual(optionTexts(protocolSelect), ['Auto', 'OpenAI Responses', 'Custom', 'More protocols…']);
   assert.equal(findAll(edited, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length, 0);
 
   // 展开：分组列出全部协议，长尾的 bfl 也在；「更多协议…」不写进选择。

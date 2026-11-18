@@ -217,10 +217,29 @@ test('默认只列常用协议：加上「自动」「自定义」「更多协�
   assert.ok(optionValues(select).length <= 9, '默认渲染的 option 不能超过 9 条');
   assert.deepEqual(optionTexts(select), [
     '自动', 'OpenAI Images', 'OpenAI Chat Completions', 'OpenAI Responses',
-    'Google Gemini', '自定义（自己填地址）', '更多协议…'
+    'Google Gemini', '自定义', '更多协议…'
   ]);
   // 「自动」只是没选协议时的当前状态，不是可选项。
   assert.equal(optionNodes(select)[0].props.disabled, true);
+});
+
+test('自定义协议在下拉里只有一项：标签走 i18n，不出现裸值 custom', () => {
+  const client = createHarness();
+  client.setCatalog();
+  // 选的是「自定义」的提供商：draft.adapter 就是 'custom'，而它并不在宿主的协议清单里。
+  const props = formProps(providerFixture({ adapter: 'custom' }));
+  const customOptions = (select) => optionNodes(select).filter((option) => option.props.value === 'custom');
+
+  const collapsed = protocolSelect(client.renderForm(props));
+  assert.equal(customOptions(collapsed).length, 1, '收起时「自定义」只出现一次');
+  assert.deepEqual(customOptions(collapsed).map((option) => textOf(option).join('')), ['自定义'],
+    '标签是 i18n 文案，不是裸 id，也不带括号');
+
+  // 展开态同样只有一条：清单里没有 custom 这条协议，别把它当成「清单里已经没有的协议」再列一遍。
+  collapsed.props.onChange({ target: { value: MORE } });
+  const expanded = protocolSelect(client.renderForm(props));
+  assert.equal(customOptions(expanded).length, 1, '展开后「自定义」也只出现一次');
+  assert.deepEqual(customOptions(expanded).map((option) => textOf(option).join('')), ['自定义']);
 });
 
 test('点「更多协议…」展开全部 17 条并按组分段，且它不会变成选中的值', () => {

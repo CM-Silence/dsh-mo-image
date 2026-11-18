@@ -14,7 +14,7 @@ const T = {
   'form.protocolMore': '更多协议…',
   'protocol.comfyui': 'ComfyUI',
   'protocol.openai-images': 'OpenAI Images',
-  'form.customProtocol': '自定义（自己填地址）',
+  'form.customProtocol': '自定义',
   'form.protocolOption.edit': '图生图端点',
   'form.protocolOption.edit.edits': '单独的 /images/edits',
   'form.protocolOption.edit.same': '同一个 /images/generations',
@@ -182,6 +182,16 @@ function parentOf(root, target, parent = null) {
   return null;
 }
 
+/** 渲染树的先序遍历 —— 就是 DOM 顺序；拿它给几个控件排序。 */
+function preorder(node, out = []) {
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) { for (const item of node) preorder(item, out); return out; }
+  if (typeof node !== 'object') return out;
+  out.push(node);
+  for (const child of node.children || []) preorder(child, out);
+  return out;
+}
+
 function renderForm(client, provider, isNew = false) {
   const Form = client.form();
   assert.ok(Form, 'client.__test.ImageProviderForm 没暴露');
@@ -243,7 +253,7 @@ test('协议选项改了地址：问号跟着当前取值走', () => {
   assert.match(render({ edit: 'none' }), /图生图：不支持/);
 });
 
-test('协议有选项时，协议下拉下面给出选择项（取值与默认值来自宿主清单）', () => {
+test('协议有选项时给出选择项：鉴权方式在上、图生图端点在下（取值与默认值来自宿主清单）', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -252,15 +262,15 @@ test('协议有选项时，协议下拉下面给出选择项（取值与默认�
   const selects = collect(node, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
   assert.deepEqual(
     selects.map((item) => item.props['data-mo-image-protocol-option']),
-    ['edit', 'auth'],
-    '两个协议级选项都要有下拉'
+    ['auth', 'edit'],
+    '两个协议级选项都要有下拉；鉴权方式排在协议级选项的最前面'
   );
-  const edit = selects[0];
+  const edit = selects[1];
   assert.equal(edit.props.value, 'edits', '没选过就显示默认值');
   const editOptions = collect(edit, (item) => item.type === 'option');
   assert.deepEqual(editOptions.map((option) => option.props.value), ['edits', 'same', 'none']);
   assert.deepEqual(editOptions.map((option) => text(option).join('')), ['/images/edits', '/images/generations', '不支持']);
-  assert.equal(selects[1].props.value, 'bearer');
+  assert.equal(selects[0].props.value, 'bearer');
 
   // 选过的值要回显。
   const picked = renderForm(client, {
@@ -268,7 +278,7 @@ test('协议有选项时，协议下拉下面给出选择项（取值与默认�
     protocolOptions: { edit: 'same', auth: 'api-key' }, models: [], names: {}
   }, false);
   const pickedSelects = collect(picked, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
-  assert.deepEqual(pickedSelects.map((item) => item.props.value), ['same', 'api-key']);
+  assert.deepEqual(pickedSelects.map((item) => item.props.value), ['api-key', 'same']);
 });
 
 test('「图生图端点」只显示路径：edits / same / none 对应三条路径或「不支持」', () => {
@@ -306,6 +316,39 @@ test('「鉴权方式」label 右侧的问号收着原来的说明，下面那�
   assert.equal(typeof help.props.onPointerEnter, 'function', '悬停立刻展开');
   assert.doesNotMatch(text(node).join(' '), /鉴权头形态/, '说明只进气泡，不再占一行');
   assert.equal(text(help).join(''), '?');
+});
+
+test('鉴权方式在 DOM 顺序上位于 API 协议之前，且不在折叠区里', () => {
+  // 两种表单都要这个顺序：编辑已有提供商（字段在「高级」折叠区里）与新增时的自定义模式（字段平铺）。
+  const cases = [
+    { label: '编辑已有提供商', client: loadClient(), isNew: false },
+    { label: '新增自定义', client: loadClient({ customMode: true }), isNew: true }
+  ];
+  for (const item of cases) {
+    item.client.setCatalog();
+    const node = renderForm(item.client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+    }, item.isNew);
+    const order = preorder(node);
+    const at = (target) => order.indexOf(target);
+    const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
+    const auth = collect(node, (n) => n.type === 'select'
+      && n.props['data-mo-image-protocol-option'] === 'auth')[0];
+    const protocol = collect(node, (n) => n.type === 'select'
+      && n.props['data-mo-image-protocol'] !== undefined)[0];
+    const edit = collect(node, (n) => n.type === 'select'
+      && n.props['data-mo-image-protocol-option'] === 'edit')[0];
+    assert.ok(url && auth && protocol && edit, item.label + '：地址 / 鉴权 / 协议 / 图生图端点都要在');
+    // 鉴权方式是「这个地址怎么认证」，和地址是一对；识别协议失败的绝大多数原因是 401，
+    // 所以它要排在协议上方，排查时不用在两个区块之间来回看。
+    assert.ok(at(url) < at(auth), item.label + '：鉴权方式紧跟在 API 地址后面');
+    assert.ok(at(auth) < at(protocol), item.label + '：鉴权方式在 API 协议之前');
+    assert.ok(at(protocol) < at(edit), item.label + '：图生图端点仍排在协议下面');
+    // 常显：不能落在任何一个折叠区（<details>）里。
+    for (let parent = parentOf(node, auth); parent; parent = parentOf(node, parent)) {
+      assert.notEqual(parent.type, 'details', item.label + '：鉴权方式不能收进折叠区');
+    }
+  }
 });
 
 test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
