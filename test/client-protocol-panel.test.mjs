@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+import { normalizeConfig } from '../lib/config-store.js';
+
 const T = {
   'form.route.generate': '文生图',
   'form.route.edit': '图生图',
@@ -606,6 +608,49 @@ test('判据只看 presetId：同一份配置去掉它，就是自己填的网�
   assert.equal(detailsOf(presetNode, '协议设置'), undefined, '加上 presetId 就变回预设来源，整块不渲染');
 });
 
+test('升级前的老配置：normalizeConfig 按地址补上来源，判据就变「预设来源」', () => {
+  // 升级前的配置里没有 presetId（那个字段当年还不存在）：面板把它当自定义 API，协议设置冒出来。
+  const legacyProvider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    models: [], names: {}
+  };
+  const before = loadClient();
+  before.setCatalog();
+  assert.ok(detailsOf(renderForm(before, legacyProvider), '协议设置'),
+    '没有来源：按自定义 API 渲染，协议设置照旧在');
+
+  // 宿主读配置时按地址身份补上来源（地址就是预设的地址）：同一份配置在面板里变成「预设来源」。
+  const config = normalizeConfig({
+    version: 1,
+    providers: [Object.assign({ apiKeyEnv: 'MO_IMAGE_P1_API_KEY' }, legacyProvider)],
+    active: { providerId: 'p1', model: '' },
+    defaults: { quality: 'high', auto: true, width: 1024, height: 1024 }
+  });
+  assert.equal(config.providers[0].presetId, 'openai', '地址等于预设地址，补上来源');
+
+  const after = loadClient();
+  after.setCatalog();
+  const node = renderForm(after, config.providers[0]);
+  assert.equal(detailsOf(node, '协议设置'), undefined, '补上来源后：整块不渲染');
+  for (const [label, control] of Object.entries(protocolPanelControls(node))) {
+    assert.equal(control, undefined, label + ' 不该出现');
+  }
+
+  // 反向：手改过地址的老配置补不上来源，协议设置照旧在（那是他要用的东西）。
+  const relay = normalizeConfig({
+    version: 1,
+    providers: [{ ...legacyProvider, baseUrl: 'https://my-relay.example/v1' }],
+    active: { providerId: 'p1', model: '' },
+    defaults: { quality: 'high', auto: true, width: 1024, height: 1024 }
+  });
+  assert.equal(relay.providers[0].presetId, undefined, '自建网关不补来源');
+  const relayNode = renderForm(after, relay.providers[0]);
+  assert.ok(detailsOf(relayNode, '协议设置'), '协议设置照旧渲染');
+  for (const [label, control] of Object.entries(protocolPanelControls(relayNode))) {
+    assert.ok(control, label + ' 在');
+  }
+});
+
 test('新增从目录选预设：协议 / 返回格式都不渲染（与编辑页同一条判据）', () => {
   const client = loadClient({ preserveFormState: true, providerPresets: PROVIDER_PRESET_FIXTURE });
   client.setCatalog();
@@ -830,19 +875,166 @@ test('自定义协议：路由与调度模型留在「自定义设置」，请�
   assert.ok(insideOf(detailsOf(responses, '自定义设置'), hostModel), '调度模型也属于接入细节');
 });
 
-test('新增自定义仍然平铺：协议 / 鉴权 / 图生图端点都不进折叠区', () => {
+// ---------------------------------------------------------------------------
+// 新建「自定义模型 API」与编辑页共用同一套布局
+// ---------------------------------------------------------------------------
+
+/** 表单根：`.editor`（新建的自定义 API 与编辑页用的是同一个壳）。 */
+function formRoot(node) {
+  return collect(node, (item) => String((item.props || {}).className || '').endsWith('editor'))[0];
+}
+
+/** 表单根的直接子项（数组与 Fragment 展开、null 丢掉）—— 就是 DOM 顺序。 */
+function formBlocks(node) {
+  const root = formRoot(node);
+  assert.ok(root, '表单根 .editor 在');
+  const out = [];
+  const append = (items) => {
+    for (const item of items || []) {
+      if (item === null || item === undefined) continue;
+      if (Array.isArray(item)) { append(item); continue; }
+      if (item.type === 'Fragment') { append(item.children); continue; }
+      out.push(item);
+    }
+  };
+  append(root.children);
+  return out;
+}
+
+/** 新建才有的那一排「第三方 / 本地 / 自定义」模式开关。 */
+function modeBarOf(blocks) {
+  return blocks.find((item) => String((item.props || {}).className || '').endsWith('addModes'));
+}
+
+/**
+ * 表单骨架：只留布局（节点类型、类名与 data-* 标记、顺序），文案 / 取值 / 内联样式全丢掉。
+ * 允许两侧不同的东西（回显值、占位符、按钮文案）都不进骨架，所以骨架相等 = 布局是同一段代码。
+ */
+function formSkeleton(node) {
+  if (node === null || node === undefined) return null;
+  if (Array.isArray(node)) return node.map(formSkeleton).filter((item) => item !== null);
+  if (typeof node !== 'object') return 'text';
+  const props = node.props || {};
+  const marks = Object.keys(props)
+    .filter((key) => key === 'className' || key.startsWith('data-'))
+    .sort()
+    .map((key) => key + '=' + String(props[key]));
+  const children = (node.children || []).map(formSkeleton).filter((item) => item !== null);
+  return JSON.stringify({
+    type: typeof node.type === 'string' ? node.type : 'component',
+    marks: marks,
+    children: children
+  });
+}
+
+/** 去掉新建才有的模式开关之后，表单根的骨架（顺序 + 折叠区 + 控件）。 */
+function bodySkeleton(node) {
+  const blocks = formBlocks(node);
+  const modeBar = modeBarOf(blocks);
+  return blocks.filter((item) => item !== modeBar).map(formSkeleton);
+}
+
+test('新增「自定义模型 API」与编辑页是同一套布局：只有模式开关是新面孔', () => {
+  const cases = [
+    {
+      label: '内置协议',
+      provider: {
+        id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+        models: ['m'], names: {}
+      }
+    },
+    {
+      label: '自定义协议',
+      provider: {
+        id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+        customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+        models: ['m'], names: {}
+      }
+    }
+  ];
+  for (const item of cases) {
+    const editing = loadClient();
+    editing.setCatalog();
+    const edited = renderForm(editing, item.provider, false);
+
+    const creating = loadClient({ customMode: true });
+    creating.setCatalog();
+    const added = renderForm(creating, item.provider, true);
+
+    // 差异只允许在「新建才有的那一排模式开关」上：去掉它，两棵树的骨架必须一模一样
+    // （字段顺序、两个折叠区、按钮行都来自同一段布局代码，改一边忘另一边会先红这条）。
+    assert.deepEqual(bodySkeleton(added), bodySkeleton(edited),
+      item.label + '：新建与编辑的自定义 API 表单结构一致');
+    assert.ok(modeBarOf(formBlocks(added)), item.label + '：新建有「第三方 / 本地 / 自定义」开关');
+    assert.equal(modeBarOf(formBlocks(edited)), undefined, item.label + '：编辑页没有模式开关');
+  }
+});
+
+test('新建「自定义模型 API」：协议设置默认收起，协议排在鉴权之前', () => {
   const client = loadClient({ customMode: true });
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
   }, true);
-  const protocol = collect(node, (n) => n.type === 'select' && n.props['data-mo-image-protocol'] !== undefined)[0];
-  const auth = collect(node, (n) => n.type === 'select' && n.props['data-mo-image-auth-mode'] !== undefined)[0];
-  const edit = collect(node, (n) => n.type === 'select' && n.props['data-mo-image-protocol-option'] === 'edit')[0];
-  for (const [label, control] of [['API 协议', protocol], ['鉴权方式', auth], ['图生图端点', edit]]) {
+  const settings = detailsOf(node, '协议设置');
+  assert.ok(settings, '新建也要有「协议设置」折叠区');
+  assert.equal(settings.props.open, false, '默认收起，与编辑页一致');
+
+  const controls = protocolPanelControls(node);
+  assert.deepEqual(Object.keys(controls),
+    ['API 协议', '鉴权方式', '图生图端点', '文生图返回格式', '图生图返回格式'],
+    '与编辑页同一组控件、同一个顺序');
+  for (const [label, control] of Object.entries(controls)) {
     assert.ok(control, label + ' 在');
-    assert.equal(insideAnyDetails(node, control), false, label + ' 不能收进折叠区');
+    assert.ok(insideOf(settings, control), label + ' 收在协议设置里');
   }
+  // 顺序：协议 → 鉴权 → 图生图端点 → 返回格式。新建页以前是鉴权在协议上面。
+  const order = preorder(settings);
+  const at = (target) => order.indexOf(target);
+  assert.ok(at(controls['API 协议']) < at(controls['鉴权方式']), '新建页也是协议在前、鉴权在后');
+  assert.ok(at(controls['鉴权方式']) < at(controls['图生图端点']), '图生图端点在鉴权之后');
+  const detect = collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined)[0];
+  assert.ok(detect, '识别协议按钮在');
+  assert.ok(insideOf(settings, detect), '识别协议按钮跟着协议收在协议设置里');
+
+  // 三个主字段常显：密钥 / 显示名称 / API 地址都不在任何折叠区里，且排在两个折叠区之前。
+  const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  const name = collect(node, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
+  const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
+  const whole = preorder(formRoot(node));
+  for (const [label, control] of [['API 密钥', key], ['显示名称', name], ['API 地址', url]]) {
+    assert.ok(control, label + ' 在');
+    assert.equal(insideAnyDetails(node, control), false, label + ' 常显');
+    assert.ok(whole.indexOf(control) < whole.indexOf(settings), label + ' 排在协议设置之前');
+  }
+});
+
+test('新建「自定义模型 API」的「自定义设置」：默认收起，装着模型目录 / 路由 / 调度模型', () => {
+  const client = loadClient({ customMode: true });
+  client.setCatalog();
+  const gateway = renderForm(client, {
+    id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' }, models: ['m'], names: {}
+  }, true);
+  const advanced = detailsOf(gateway, '自定义设置');
+  assert.ok(advanced, '自定义设置在');
+  assert.equal(advanced.props.open, false, '默认收起');
+  const route = collect(gateway, (n) => n.type === 'input' && n.props.name === 'route-generate')[0];
+  assert.ok(route, '路由输入框在');
+  assert.ok(insideOf(advanced, route), '路由收在自定义设置里');
+  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 0,
+    '协议不在自定义设置里（它属于上面的协议设置）');
+  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-auth-mode'] !== undefined).length, 0,
+    '鉴权不在自定义设置里');
+
+  // 调度模型（openai-responses 才有）同样属于「接入细节」。
+  const responses = renderForm(client, {
+    id: 'p2', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
+    hostModel: 'gpt-5.2', models: [], names: {}
+  }, true);
+  const hostModel = collect(responses, (n) => n.type === 'input' && n.props.value === 'gpt-5.2')[0];
+  assert.ok(hostModel, '调度模型输入框在');
+  assert.ok(insideOf(detailsOf(responses, '自定义设置'), hostModel), '调度模型属于自定义设置');
 });
 
 test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
