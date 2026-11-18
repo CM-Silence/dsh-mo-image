@@ -61,6 +61,42 @@ test('本地部署按默认地址的主机认：换路径 / 带尾斜杠都还�
   }
 });
 
+test('回环主机是同一台机器：localhost / 127.0.0.1 / [::1] 三种写法都认', () => {
+  // 预设登记的是 127.0.0.1，用户手填的多半是 localhost（复制粘贴友好）。
+  // 同一条预设换个回环写法不该变成「自定义 API」——那会把协议设置重新翻出来。
+  const cases = [
+    ['http://localhost:8188', 'comfyui'],
+    ['http://localhost:8188/', 'comfyui'],
+    ['http://localhost:7860', 'a1111'],
+    ['http://[::1]:7860', 'a1111'],
+    ['http://[::1]:8188', 'comfyui'],
+    ['http://LocalHost:8188', 'comfyui'],                  // 主机名大小写
+    ['http://[0:0:0:0:0:0:0:1]:8188', 'comfyui'],         // IPv6 回环的完整写法
+    ['http://localhost:8188/v1', 'comfyui']               // 路径本来就不参与本地预设的判据
+  ];
+  for (const [baseUrl, expected] of cases) {
+    assert.equal(presetIdOf({ baseUrl: baseUrl, optionalKey: true }), expected, baseUrl);
+  }
+});
+
+test('只做回环这一条等价：同端口的不同机器 / 别的回环地址都不认，云端仍严格比对', () => {
+  // 放宽到「同端口就算同一台」会把 192.168.1.5:8188 也认成 ComfyUI——共享主机或反向
+  // 代理后面那台机器跑的什么都可能，猜错比不填更糟。
+  const unchanged = [
+    'http://192.168.1.5:8188',        // 局域网里另一台机器，端口恰好相同
+    'http://10.0.0.2:7860',
+    'http://127.0.0.2:8188',          // 127.0.0.0/8 里只有 127.0.0.1 属于这条等价
+    'http://[::1]:9999',              // 回环写法对，端口不对
+    'http://localhost',               // 本地预设都登记了端口
+    'https://api.openai.com:8443/v1'  // 云端仍按整条地址比：换了端口就不认
+  ];
+  for (const baseUrl of unchanged) {
+    assert.equal(presetIdOf({ baseUrl: baseUrl }), undefined, baseUrl);
+  }
+  // 云端地址本身不受这条规则影响。
+  assert.equal(presetIdOf({ baseUrl: 'https://api.openai.com/v1' }), 'openai');
+});
+
 test('azure 的预设地址是占位符：按主机后缀认（*.openai.azure.com）', () => {
   for (const baseUrl of [
     'https://my-resource.openai.azure.com/openai/v1',
@@ -82,7 +118,6 @@ test('手改过地址 = 换了一家网关：不回填（否则会重新藏起�
     'https://api.openai.com.evil.test/v1',         // 后缀像，但不是同一个主机
     'https://api.openai.com/v1?token=abc',         // 加了查询串：地址已经不是一个字面
     'http://127.0.0.1:9999',                       // 本地部署换了端口
-    'http://localhost:8188',                       // 回环的另一种写法不是预设的地址
     'https://gateway.example/v1'                   // 自建网关
   ];
   for (const baseUrl of changed) {
@@ -95,6 +130,8 @@ test('地址命中多份预设（有歧义）：不回填，不猜', () => {
   assert.equal(presetIdOf({ baseUrl: 'https://dashscope.aliyuncs.com/api/v1' }), undefined, 'dashscope 地址');
   // 127.0.0.1:8080 上同时登记了 sd-server 与 LocalAI。
   assert.equal(presetIdOf({ baseUrl: 'http://127.0.0.1:8080/v1', optionalKey: true }), undefined, '8080 地址');
+  // 换成回环写法也还是那两份，不能因为归一化而少认成一份。
+  assert.equal(presetIdOf({ baseUrl: 'http://localhost:8080/v1', optionalKey: true }), undefined, 'localhost:8080 地址');
 });
 
 test('空地址不发明 presetId', () => {
