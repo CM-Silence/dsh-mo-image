@@ -1702,6 +1702,31 @@ test('方框顺序：常规 → 模型 → 各 enum 方框（按表里的顺序�
   '常规表 → 模型框 → enum 各自成框（按表里顺序）→ 尺寸 / 质量 / 参考图照旧在最后');
 });
 
+test('方框标题用正文主色（主题自适应），不再是次要灰', async () => {
+  const { harness } = await openEditor(ENUM_CONFIG);
+  const opened = openModelPanel(harness);
+  const boxes = findAll(opened, (node) => node.props && node.props['data-param-box']);
+  assert.deepEqual(boxes.map((node) => node.props['data-param-box']),
+    ['common', 'model', 'enum:1', 'enum:4', 'size', 'quality', 'image'],
+    '常规 / 模型 / 各 enum / 尺寸 / 质量 / 参考图的方框都检查');
+  for (const box of boxes) {
+    const key = box.props['data-param-box'];
+    const title = box.children[0].children[0];
+    const color = String((title.props.style && title.props.style.color) || '');
+    // 主题变量：深色 / 浅色主题各自解析成正文主色，而不是宿主的次要灰。
+    assert.match(color, /var\(--dsw-alias-label-primary\)|currentColor/, key + ' 的标题颜色要取正文主色');
+    assert.doesNotMatch(color, /label-secondary|label-tertiary|opacity|#646a73/, key + ' 的标题不能再用次要灰');
+    // 只改颜色：字号 / 字重保持 14px / 600。
+    assert.equal(title.props.style.fontSize, 14, key + ' 标题字号不变');
+    assert.equal(title.props.style.fontWeight, 600, key + ' 标题字重不变');
+  }
+  // 其它文字保留灰的层次：行 label 没有跟着变主色，表头仍压低一档。
+  const rowLabel = paramRow(paramBox(opened, 'image'), 'image:field').children[0];
+  assert.equal(rowLabel.props.style.color, undefined, '行 label 不跟标题一起变亮');
+  const headCell = paramGrid(opened, 'params:head')[0].children[0];
+  assert.equal(headCell.props.style.opacity, 0.72, '表头仍是原来的灰');
+});
+
 /* ─────────────── 模型框：独立方框 + 参数名提示（暴露是推导的，没有控件） ─────────────── */
 
 test('模型独立成框：常规表里没有 model 行，框里只有参数名与行级锁，且不可删', async () => {

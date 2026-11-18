@@ -199,6 +199,18 @@ function preorder(node, out = []) {
   return out;
 }
 
+/** 直接子节点：render 出来的 children 里可能夹着数组（比如协议下拉的 option 列表），先摊平。 */
+function childrenOf(node) {
+  const flat = (list, out = []) => {
+    for (const item of list || []) {
+      if (Array.isArray(item)) flat(item, out);
+      else out.push(item);
+    }
+    return out;
+  };
+  return flat(node.children);
+}
+
 function renderForm(client, provider, isNew = false) {
   const Form = client.form();
   assert.ok(Form, 'client.__test.ImageProviderForm 没暴露');
@@ -399,7 +411,7 @@ test('「鉴权方式」label 右侧的问号收着说明，下面那行提示�
 });
 
 test('鉴权方式在 DOM 顺序上位于 API 协议之前，且鉴权与协议都不在折叠区里', () => {
-  // 两种表单都要这个顺序：编辑已有提供商（图生图端点等派生字段在「高级」里）与新增时的自定义模式（字段平铺）。
+  // 两种表单都要这个顺序：编辑已有提供商（图生图端点也是常显）与新增时的自定义模式（字段平铺）。
   const cases = [
     { label: '编辑已有提供商', client: loadClient(), isNew: false },
     { label: '新增自定义', client: loadClient({ customMode: true }), isNew: true }
@@ -425,12 +437,55 @@ test('鉴权方式在 DOM 顺序上位于 API 协议之前，且鉴权与协议�
     // 所以它要排在协议上方，排查时不用在两个区块之间来回看。
     assert.ok(at(url) < at(auth), item.label + '：鉴权方式紧跟在 API 地址后面');
     assert.ok(at(auth) < at(protocol), item.label + '：鉴权方式在 API 协议之前');
-    assert.ok(at(protocol) < at(edit), item.label + '：图生图端点仍排在协议下面');
+    assert.ok(at(protocol) < at(edit), item.label + '：图生图端点仍排在协议下面（常显，不进「高级」）');
     // 常显：鉴权方式与 API 协议（含它的问号和识别按钮）都是主字段，不能落在任何一个折叠区（<details>）里。
     for (const [name, control] of [['鉴权方式', auth], ['API 协议', protocol], ['识别协议按钮', detect]]) {
       for (let parent = parentOf(node, control); parent; parent = parentOf(node, parent)) {
         assert.notEqual(parent.type, 'details', item.label + '：' + name + ' 不能收进折叠区');
       }
+    }
+  }
+});
+
+test('图生图端点在 DOM 顺序上紧跟 API 协议，且不在「高级」折叠区里', () => {
+  // 图生图端点是协议的属性（不同协议可选值不同、none 就没有图生图），所以它跟着协议走：
+  // 紧挨着协议下拉、常显；「高级」只留自定义路由、调度模型、模型目录。
+  const cases = [
+    { label: '编辑已有提供商', client: loadClient(), isNew: false },
+    { label: '新增自定义', client: loadClient({ customMode: true }), isNew: true }
+  ];
+  for (const item of cases) {
+    item.client.setCatalog();
+    const node = renderForm(item.client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+    }, item.isNew);
+    const protocol = collect(node, (n) => n.type === 'select'
+      && n.props['data-mo-image-protocol'] !== undefined)[0];
+    const edit = collect(node, (n) => n.type === 'select'
+      && n.props['data-mo-image-protocol-option'] === 'edit')[0];
+    assert.ok(protocol && edit, item.label + '：协议与图生图端点都要在');
+    // 协议下拉外面还有一层下拉行容器，再外面才是 .field。
+    const protocolBox = parentOf(node, parentOf(node, protocol));
+    const editBox = parentOf(node, edit);
+    // 图生图端点可能被一层容器包着（协议级选项共用），往上爬到「协议框也在其中」的那一层：
+    // 两者必须是紧挨着的兄弟，这就是 DOM 顺序上的「紧跟」。
+    let branch = editBox;
+    let container = parentOf(node, branch);
+    while (container && !childrenOf(container).includes(protocolBox)) {
+      branch = container;
+      container = parentOf(node, container);
+    }
+    assert.ok(container, item.label + '：图生图端点与 API 协议应该在同一个容器里');
+    const siblings = childrenOf(container);
+    assert.equal(siblings.indexOf(branch), siblings.indexOf(protocolBox) + 1,
+      item.label + '：图生图端点在 DOM 顺序上紧跟 API 协议');
+    // 「紧跟」不只是最近：协议后面那一格必须就是图生图端点本身（最多套一层选项容器），
+    // 不能是被塞进「高级」那种更深的一层里。
+    assert.ok(branch === editBox || childrenOf(branch).includes(editBox),
+      item.label + '：API 协议后面紧挨着的就是图生图端点');
+    // 「高级」是 <details> 折叠区：图生图端点不能有任何 <details> 祖先。
+    for (let parent = parentOf(node, edit); parent; parent = parentOf(node, parent)) {
+      assert.notEqual(parent.type, 'details', item.label + '：图生图端点不能收进折叠区');
     }
   }
 });
