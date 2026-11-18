@@ -32,6 +32,9 @@ const T = {
   'form.advanced': '自定义设置',
   'form.protocolSettings': '协议设置',
   'form.authFollow': '跟随协议',
+  'form.modeCatalog': '第三方模型提供商',
+  'form.modeCustom': '自定义模型 API',
+  'form.modeLocal': '本地模型',
   'form.outputPreset.auto': '跟随协议',
   'form.outputPreset.customLegacy': '自定义（来自旧配置）',
   'form.outputPreset.customLegacyHint': '当前值是以前手写的返回配置，原样保留；上面的预设选一个即可覆盖它。'
@@ -68,7 +71,28 @@ const ADAPTERS = [
 // 组件内部的 hook 顺序会随实现变化，所以按「初始值是 'catalog' 的那个 state」定位模式开关。
 const CATALOG = 'catalog';
 
-function loadClient({ customMode = false, preserveFormState = false } = {}) {
+/** 目录里的一份云端预设：新增表单从它建，预设置信（协议 / 鉴权 / 返回格式）全都自带。 */
+const PROVIDER_PRESET_FIXTURE = [{
+  id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+  protocol: 'openai-images', models: ['gpt-image-1']
+}];
+
+/** 宿主下发的本地部署器清单（LOCAL_PRESETS 的完整 id 集，形状与真清单一致）。 */
+const LOCAL_DEPLOYER_FIXTURE = [
+  { id: 'sd-server', name: 'sd-server', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images' },
+  { id: 'a1111', name: 'A1111', baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111' },
+  { id: 'comfyui', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui' },
+  { id: 'swarmui', name: 'SwarmUI', baseUrl: 'http://127.0.0.1:7801', adapter: 'swarmui' },
+  { id: 'localai', name: 'LocalAI', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images' },
+  { id: 'openai-gateway', name: '其他 OpenAI 兼容网关', baseUrl: 'http://127.0.0.1:3000/v1', adapter: 'openai-images' }
+];
+
+function loadClient({
+  customMode = false,
+  preserveFormState = false,
+  providerPresets = [],
+  localPresets = []
+} = {}) {
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   let loaded = null;
   let hooks = [];
@@ -124,8 +148,8 @@ function loadClient({ customMode = false, preserveFormState = false } = {}) {
       ok: true,
       config: { providers: [], active: {} },
       adapters: ADAPTERS,
-      providerPresets: [],
-      localPresets: []
+      providerPresets: providerPresets,
+      localPresets: localPresets
     }), { status: 200, headers: { 'content-type': 'application/json' } }),
     setTimeout: () => 0,
     clearTimeout() {},
@@ -159,7 +183,7 @@ function loadClient({ customMode = false, preserveFormState = false } = {}) {
     React, render,
     h: React.createElement,
     setCatalog() { api.__test.applyCatalog({
-      adapters: ADAPTERS, providerPresets: [], localPresets: [], capabilities: [],
+      adapters: ADAPTERS, providerPresets: providerPresets, localPresets: localPresets, capabilities: [],
       outputPresets: ['auto', 'openai', 'binary', 'task-json']
     }); },
     form() { return api.__test.ImageProviderForm; }
@@ -580,6 +604,127 @@ test('判据只看 presetId：同一份配置去掉它，就是自己填的网�
   preset.setCatalog();
   const presetNode = renderForm(preset, { ...provider, presetId: 'openai' });
   assert.equal(detailsOf(presetNode, '协议设置'), undefined, '加上 presetId 就变回预设来源，整块不渲染');
+});
+
+test('新增从目录选预设：协议 / 返回格式都不渲染（与编辑页同一条判据）', () => {
+  const client = loadClient({ preserveFormState: true, providerPresets: PROVIDER_PRESET_FIXTURE });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  // 目录模式默认带出一份预设（真机上由 effect 补；这里直接点下拉选，走同一条 choosePreset）。
+  const presetSelect = collect(node, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'openai').length === 1)[0];
+  assert.ok(presetSelect, '目录模式下要能选预设');
+  presetSelect.props.onChange({ target: { value: 'openai' } });
+  node = renderForm(client, provider, true);
+
+  // 预设在目录里已经把协议 / 鉴权 / 返回格式写好了：整块不渲染，返回格式编辑器也不残留。
+  assert.equal(detailsOf(node, '协议设置'), undefined, '新增表单不该有「协议设置」折叠区');
+  for (const [label, control] of Object.entries(protocolPanelControls(node))) {
+    assert.equal(control, undefined, label + ' 不该出现在新增表单里');
+  }
+  assert.equal(collect(node, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length, 0,
+    '返回格式面板不再残留');
+  assert.equal(collect(node, (item) => item.props && item.props['data-mo-image-operations'] !== undefined).length, 0,
+    '自定义协议的 JSON 编辑器也不该出现');
+  // 主字段与模型目录照旧（目录模式的显示名称来自预设，不单独出输入框）。
+  const providerSelect = collect(node, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'openai').length === 1)[0];
+  assert.equal(providerSelect.props.value, 'openai', '预设选择器停在刚选的这一项');
+  const url = collect(node, (item) => item.type === 'input' && item.props.value === 'https://api.openai.com/v1')[0];
+  assert.ok(url, 'API 地址在');
+  assert.ok(detailsOf(node, '自定义设置'), '「自定义设置」还在');
+});
+
+test('新建提供商的三个 tab 按「第三方 → 本地 → 自定义」排列，默认仍选中第三方', () => {
+  const client = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  const node = renderForm(client, { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} }, true);
+  const labels = ['第三方模型提供商', '本地模型', '自定义模型 API'];
+  const tabs = collect(node, (item) => item.type === 'button' && labels.includes(text(item).join('')));
+  assert.deepEqual(tabs.map((tab) => text(tab).join('')), labels, 'DOM 顺序：第三方 → 本地 → 自定义');
+  // 排序变了，默认值不跟着变：仍然停在第三方（catalog），渲染的是目录表单。
+  const providerSelect = collect(node, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'openai').length === 1)[0];
+  assert.ok(providerSelect, '默认选中的仍是「第三方模型提供商」（catalog）');
+});
+
+test('新增本地部署：与云厂商预设同一规则，鉴权 / 返回格式都不渲染', () => {
+  const client = loadClient({ preserveFormState: true, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  const localButton = collect(node, (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  assert.ok(localButton, '模式开关里要有「本地模型」');
+  localButton.props.onClick();
+  node = renderForm(client, provider, true);
+
+  // 本地预设也是 presetId 来源：零配置是它的卖点，鉴权同样不在这条路上配。
+  assert.equal(collect(node, (item) => item.type === 'select'
+    && item.props['data-mo-image-auth-mode'] !== undefined).length, 0,
+  '本地部署不渲染鉴权方式（要配鉴权走「自定义模型 API」）');
+  assert.equal(collect(node, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length, 0,
+    '返回格式由本地预设写好，不再渲染');
+  assert.equal(collect(node, (item) => item.props && item.props['data-mo-image-output-preset'] !== undefined).length, 0,
+    '返回格式下拉一个都不剩');
+  assert.equal(collect(node, (item) => item.props && item.props['data-mo-image-operations'] !== undefined).length, 0,
+    '请求与返回格式的 JSON 编辑器也不出现');
+  // 主字段照旧：显示名称 / 地址 / 密钥 + 模型目录。
+  const name = collect(node, (item) => item.type === 'input' && item.props.value === 'sd-server')[0];
+  assert.ok(name, '显示名称在');
+  const url = collect(node, (item) => item.type === 'input' && item.props.value === 'http://127.0.0.1:8080/v1')[0];
+  assert.ok(url, 'API 地址在');
+  assert.ok(collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0], '密钥还在');
+});
+
+test('本地预设编辑：与云厂商预设同一规则，整块协议设置都不渲染（含鉴权）', () => {
+  for (const local of LOCAL_DEPLOYER_FIXTURE) {
+    const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
+    client.setCatalog();
+    const node = renderForm(client, {
+      id: 'p1', name: local.name, baseUrl: local.baseUrl, adapter: local.adapter,
+      presetId: local.id, auth: { mode: 'custom', header: 'X-API-Key', prefix: 'Token ' },
+      models: [], names: {}
+    });
+    assert.equal(detailsOf(node, '协议设置'), undefined, local.id + '：不渲染「协议设置」');
+    for (const [label, control] of Object.entries(protocolPanelControls(node))) {
+      assert.equal(control, undefined, local.id + '：' + label + ' 不该出现');
+    }
+    // 主字段与「自定义设置」照旧。
+    const url = collect(node, (item) => item.type === 'input' && item.props.value === local.baseUrl)[0];
+    assert.ok(url, local.id + '：API 地址仍常显');
+    assert.ok(detailsOf(node, '自定义设置'), local.id + '：「自定义设置」还在');
+  }
+});
+
+test('本地部署清单在场时，云厂商预设照旧整块不渲染协议设置', () => {
+  const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: [], names: {}
+  });
+  assert.equal(detailsOf(node, '协议设置'), undefined, '云端预设与本地预设同一套判据');
+  for (const [label, control] of Object.entries(protocolPanelControls(node))) {
+    assert.equal(control, undefined, label + ' 不该出现');
+  }
+});
+
+test('自定义 API：本地部署清单在场时协议设置五项照样全在（对照组）', () => {
+  const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  const settings = detailsOf(node, '协议设置');
+  assert.ok(settings, '没有 presetId = 自己填的网关，协议设置在');
+  const controls = protocolPanelControls(node);
+  assert.deepEqual(Object.keys(controls),
+    ['API 协议', '鉴权方式', '图生图端点', '文生图返回格式', '图生图返回格式']);
+  for (const [label, control] of Object.entries(controls)) {
+    assert.ok(control, label + ' 在');
+    assert.ok(insideOf(settings, control), label + ' 收在协议设置里');
+  }
 });
 
 test('手改 API 地址就不再算预设来源：协议设置重新出现（判据跟着 draft.presetId 走）', () => {
