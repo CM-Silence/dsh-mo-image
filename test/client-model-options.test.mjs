@@ -880,6 +880,15 @@ const paramInput = (tree, key) => findAll(tree, (node) => node.type === 'input'
   && node.props['data-param-key'] === key)[0] || null;
 const paramLock = (tree, key) => findAll(tree, (node) => node.type === 'button'
   && node.props['data-lock-key'] === key)[0] || null;
+/**
+ * 模型选项面板自己的框体：模型行里「高级」那个 details 的 customizedBody。
+ * 不能直接取全树第一个 customizedBody —— 提供商表单自己的折叠区（协议设置 / 自定义设置）
+ * 也是同一个类名，而且排在模型行前面。
+ */
+const panelBody = (tree) => {
+  const panel = findAll(tree, (node) => hasClass(node, 'modelAdvanced'))[0];
+  return panel ? findAll(panel, (node) => hasClass(node, 'customizedBody'))[0] : null;
+};
 
 async function configureAll(harness) {
   const button = findButton(harness.renderRoot(), (node) => /Configure all/i.test(textOf(node).join('')));
@@ -1696,7 +1705,8 @@ test('三张表的最后一列表头统一是「操作」并居中', async () =>
 test('方框顺序：常规 → 模型 → 各 enum 方框（按表里的顺序）→ 尺寸 → 质量 → 参考图', async () => {
   const { harness } = await openEditor(ENUM_CONFIG);
   const opened = openModelPanel(harness);
-  const body = findAll(opened, (node) => hasClass(node, 'customizedBody'))[0];
+  const body = panelBody(opened);
+  assert.ok(body, '模型选项面板的框体在');
   assert.deepEqual(findAll(body, (node) => node.props && node.props['data-param-box'])
     .map((node) => node.props['data-param-box']),
   ['common', 'model', 'enum:1', 'enum:4', 'size', 'quality', 'image'],
@@ -3195,7 +3205,8 @@ test('质量是一个独立方框：和尺寸同级、标题行带锁、占满�
 
   // 方框顺序：常规 → 尺寸 → 质量 → 参考图（尺寸和质量挨着，都是「参数形状」这一类）。
   // 方框顺序：常规 → 模型 → 尺寸 → 质量 → 参考图（模型是一个参数，紧跟参数表）。
-  const body = findAll(opened, (node) => hasClass(node, 'customizedBody'))[0];
+  const body = panelBody(opened);
+  assert.ok(body, '模型选项面板的框体在');
   const order = findAll(body, (node) => node.props && node.props['data-param-box']).map((node) => node.props['data-param-box']);
   assert.deepEqual(order, ['common', 'model', 'size', 'quality', 'image']);
 });

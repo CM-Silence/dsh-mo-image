@@ -91,6 +91,8 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 「模型目录」沿用 DSH 对话模型设置页的模型行：拖动手柄（或聚焦手柄后按上下方向键）调整顺序，顺序就是选择器里的顺序；「获取可用模型」会把上游列出的模型连同显示名一起带回来，已加入列表的模型默认勾选，勾选结果就是新的模型列表。
 
+编辑已有提供商时，表单分三段：**密钥 / 显示名称 / API 地址**常显；**协议设置**（默认收起）里是 API 协议（含右侧的「识别协议」按钮）、鉴权方式、图生图端点和两个返回格式——这一组回答的是同一件事「这个地址按哪套协议说话、这套协议怎么认证、返回怎么读」；**自定义设置**（默认收起）里是模型目录、自定义协议的三条路由与调度模型这些接入细节。
+
 内置了几家官方或大型模型平台，也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
 
 ## 多语言
@@ -264,7 +266,7 @@ $DSH_HOME/.credentials.yaml
 |---|---|---|---|
 | **Google Gemini / Nano Banana** | `google-gemini` | `gemini-nano-banana-2.1`、`gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-2.5-flash-image` | 原生 `generateContent`；生成 + 参考图编辑，新模型最多 14 张、2.5 只有 3 张 |
 | OpenAI | `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
-| **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在高级设置里填「调度模型」 |
+| **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在「自定义设置」里填「调度模型」 |
 | **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
 | **Azure OpenAI** | `openai-images`（`auth.mode: 'api-key'`） | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
 | **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
@@ -450,11 +452,11 @@ $DSH_HOME/.credentials.yaml
 |---|---|---|
 | `edit` | `edits`（默认）/ `same` / `none` | 编辑走 `/images/edits`、走同一个 generations、或没有编辑端点 |
 
-鉴权方式是**提供商自己的字段** `provider.auth`（客户端下拉在任何协议下都显示），**没写 = 回落到该协议的默认值**：
+鉴权方式是**提供商自己的字段** `provider.auth`（客户端下拉在任何协议下都显示），**没写 = 回落到该协议的默认值**。下拉的第一项「跟随协议」就是「没写」：选它等于不落 `provider.auth`，请求时按协议自己的默认形态走：
 
 | `mode` | 请求头 | 说明 |
 |---|---|---|
-| `bearer`（默认） | `Authorization: Bearer <key>` | 多数服务 |
+| `bearer` | `Authorization: Bearer <key>` | 多数服务；协议没声明默认形态时的兜底 |
 | `api-key` | `api-key: <key>` | Azure 一类 |
 | `x-key` | `x-key: <key>` | BFL 一类 |
 | `fal-key` | `Authorization: Key <key>` | fal |

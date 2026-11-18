@@ -204,6 +204,12 @@ function flattenChildren(children, out = []) {
   return out;
 }
 
+/** 按 summary 文案定位折叠区（「自定义设置」= Advanced settings）。 */
+function detailsBySummary(tree, label) {
+  return findAll(tree, (node) => node.type === 'details'
+    && findAll(node, (child) => child.type === 'summary' && textOf(child).join('') === label).length > 0)[0] || null;
+}
+
 function fakeEvent(overrides = {}) {
   return Object.assign({
     preventDefault() {},
@@ -337,6 +343,27 @@ test('model rows use the DSH field layout: drag handle, id field, delete, name f
 
   const remove = findAll(first.row, (node) => node.type === 'button' && hasClass(node, 'iconButtonDanger'))[0];
   assert.ok(remove, 'expected the remove button');
+});
+
+test('the model catalog stays inside the collapsed custom-settings section, and its entry still works', async () => {
+  const { harness, tree: edited } = await openProviderEditor(baseConfig());
+  const advanced = detailsBySummary(edited, 'Advanced settings');
+  assert.ok(advanced, 'expected the custom-settings details');
+
+  // 模型目录是接入细节：留在「自定义设置」折叠区里，默认收起。
+  assert.equal(advanced.props.open, false, 'the section is collapsed by default');
+  const fetchButton = findButton(edited, 'Fetch available models');
+  assert.ok(fetchButton, 'expected the fetch-models button');
+  assert.equal(findAll(advanced, (node) => node === fetchButton).length, 1, 'the entry lives in the custom settings');
+  for (const row of modelRows(edited)) {
+    assert.equal(findAll(advanced, (node) => node === row.row).length, 1, 'model rows live in the custom settings');
+  }
+
+  // 收起只是 open 属性：入口照旧可点（这里覆盖「拉取 → 勾选清单」这一整条）。
+  await fetchButton.props.onClick();
+  const tree = harness.renderRoot();
+  assert.equal(candidateRows(tree).length, 4);
+  assert.ok(findButton(tree, 'Update list'), 'expected the update-list button');
 });
 
 test('dragging a row handle onto a lower row reorders the catalog', async () => {
