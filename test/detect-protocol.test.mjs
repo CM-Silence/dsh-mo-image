@@ -53,8 +53,8 @@ test('已知的 OpenAI 兼容主机：直接判定 openai-images，零探测', a
     ['https://ark.cn-beijing.volces.com/api/v3', { edit: 'same' }],
     ['https://api.together.xyz/v1', { edit: 'none' }],
     ['https://api.siliconflow.cn/v1', { edit: 'same' }],
-    // Azure 并进 openai-images 之后，鉴权形态靠选项带回来。
-    ['https://res.openai.azure.com/openai/v1', { auth: 'api-key' }],
+    // Azure 并进 openai-images 之后，鉴权形态（provider.auth）单独带回来，不进协议选项。
+    ['https://res.openai.azure.com/openai/v1', {}, { mode: 'api-key' }],
     ['https://api.openai.com/v1', {}],
     ['https://api.fireworks.ai/inference/v1', {}],
     ['https://api.novita.ai/v3/openai', {}],
@@ -62,10 +62,11 @@ test('已知的 OpenAI 兼容主机：直接判定 openai-images，零探测', a
     ['https://api.x.ai/v1', { edit: 'none' }],
     ['https://open.bigmodel.cn/api/paas/v4', { edit: 'none' }]
   ];
-  for (const [baseUrl, expectedOptions] of cases) {
+  for (const [baseUrl, expectedOptions, expectedAuth] of cases) {
     const start = detectProtocolStart({ baseUrl: baseUrl, key: 'k' }, 'some-image-model');
     const expected = { protocol: 'openai-images', matched: true, probed: false };
     if (Object.keys(expectedOptions).length) expected.protocolOptions = expectedOptions;
+    if (expectedAuth) expected.auth = expectedAuth;
     assert.deepEqual(start, { done: true, answer: expected }, baseUrl);
   }
   assert.deepEqual(calls, [], '已知主机一个探测请求都不该发');

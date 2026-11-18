@@ -2380,7 +2380,9 @@ test('协议问号：悬停立刻弹出气泡，三条地址一行一条', async
   help.props.ref.current = tipTarget();
   help.props.onPointerEnter();
   const opened = harness.renderRoot();
-  const tip = tipNodes(opened)[0];
+  // 表单里现在有两个问号（协议地址、鉴权方式）。假 React 的 hook 按组件类型共享，
+  // 悬停会用同一份状态把两个都渲染出来 —— 这里按内容挑协议地址那一个（只有它含换行）。
+  const tip = tipNodes(opened).find((node) => String(node.children[0]).includes('\n'));
   assert.ok(tip, '悬停立刻出现气泡');
   assert.equal(tip.props.style.position, 'fixed');
   assert.equal(tip.props.style.whiteSpace, 'pre-line', '气泡按 \\n 分行');

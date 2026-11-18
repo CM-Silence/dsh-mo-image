@@ -11,7 +11,7 @@ import {
   BEGIN_MARKER,
   END_MARKER
 } from '../scripts/build-locales.mjs';
-import { LOCAL_PRESETS, adapterManifest } from '../lib/adapters.js';
+import { LOCAL_PRESETS, adapterManifest, AUTH_MODES } from '../lib/adapters.js';
 import { SERVER_ERROR_CODES, NETWORK_HINT_CODES } from '../lib/localized-error.js';
 
 const csv = readFileSync(new URL('../locale/messages.csv', import.meta.url), 'utf8');
@@ -85,6 +85,19 @@ test('dynamic protocol option keys exist in the CSV', () => {
         );
       }
     }
+  }
+});
+
+// 鉴权方式是**提供商字段**（provider.auth），协议清单里已经看不到它了；下拉的五个取值
+// 与 custom 的头名/前缀两个标签同样是客户端拼出来的键（form.auth.<mode> / form.authHeader …），
+// 字面量扫描与协议选项核对都盖不住，所以按宿主常量逐条核对。
+test('dynamic provider auth keys exist in the CSV', () => {
+  const keys = new Set(parsed.keys);
+  for (const key of ['form.auth', 'form.authHint', 'form.authHeader', 'form.authPrefix']) {
+    assert.ok(keys.has(key), `missing ${key}`);
+  }
+  for (const mode of AUTH_MODES) {
+    assert.ok(keys.has(`form.auth.${mode}`), `missing form.auth.${mode}`);
   }
 });
 

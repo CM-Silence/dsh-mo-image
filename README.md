@@ -266,7 +266,7 @@ $DSH_HOME/.credentials.yaml
 | OpenAI | `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
 | **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要在高级设置里填「调度模型」 |
 | **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
-| **Azure OpenAI** | `openai-images`（`auth:'api-key'`） | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
+| **Azure OpenAI** | `openai-images`（`auth.mode: 'api-key'`） | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
 | **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
 | **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
@@ -416,13 +416,13 @@ $DSH_HOME/.credentials.yaml
 | `quality` | 该模型是否有质量档位、档位名称/数量，以及如何映射成平台参数（如 DALL·E 的 `standard/hd`、Ideogram 的 `rendering_speed`）；没有就不下发，选择器也不显示质量行 |
 | `transport` | `json` 或 `multipart` |
 | `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
-| `authHeader` | `bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal） |
+| `authHeader` | 该协议的**默认**鉴权形态：`bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal）；提供商设了 `provider.auth` 就以它为准 |
 | `endpoints` | 可以是字符串，也可以是按模型拼路径的函数（Ideogram、fal、Replicate） |
 | `async` + `output` | 异步入队型：`async` 只剩请求侧（`edit / build / submitPath`）；轮询地址、状态词、结果图读 `output:{kind:'task'}`（`lib/output-profiles.js`），轮询头在适配器侧（`taskPollHeaders`）；老写法的 `poll` 仍兼容 |
 | `autoAsync` | 通用兜底自己识别：响应里有图就同步返回，有任务 id / 轮询地址就跟着轮询（自定义 API 不需要选它） |
 | `compose` | body 需要嵌套（如 `{input, parameters}`）时把白名单字段折叠进去 |
 
-内置协议 17 条。协议只负责「三个地址 + 组装 + 响应解码」：字段名、尺寸与质量、常量参数由预设与模型规则决定，同一条地址下真正的差异（编辑端点往哪走、鉴权头长什么样）做成**协议级选项**，不再各占一条协议 id。
+内置协议 17 条。协议只负责「三个地址 + 组装 + 响应解码」：字段名、尺寸与质量、常量参数由预设与模型规则决定，同一条地址下真正的差异（编辑端点往哪走）做成**协议级选项**；**鉴权方式是提供商字段**（`provider.auth`），回答的是「这个地址怎么认证」，与协议无关，所以切到任何协议都能设，不再各占一条协议 id。
 
 | 分组 | 协议 id | 用途 | 三条地址（生成 / 编辑 / 模型列表） |
 |---|---|---|---|
@@ -444,16 +444,25 @@ $DSH_HOME/.credentials.yaml
 | 异步任务 | `replicate` | Replicate | 按模型拼（编辑同址） / — |
 | 异步任务 | `modelscope` | 魔搭 ModelScope | `/v1/images/generations` / 同左 / — |
 
-`openai-images` 的两个协议级选项存在 `provider.protocolOptions` 里，**没写 = 默认**：
+`openai-images` 唯一剩下的协议级选项存在 `provider.protocolOptions` 里，**没写 = 默认**：
 
 | 选项 | 取值 | 含义 |
 |---|---|---|
 | `edit` | `edits`（默认）/ `same` / `none` | 编辑走 `/images/edits`、走同一个 generations、或没有编辑端点 |
-| `auth` | `bearer`（默认）/ `api-key` | `Authorization: Bearer` 还是 `api-key` 头（Azure） |
+
+鉴权方式是**提供商自己的字段** `provider.auth`（客户端下拉在任何协议下都显示），**没写 = 回落到该协议的默认值**：
+
+| `mode` | 请求头 | 说明 |
+|---|---|---|
+| `bearer`（默认） | `Authorization: Bearer <key>` | 多数服务 |
+| `api-key` | `api-key: <key>` | Azure 一类 |
+| `x-key` | `x-key: <key>` | BFL 一类 |
+| `fal-key` | `Authorization: Key <key>` | fal |
+| `custom` | `<header>: <prefix><key>` | 自定义，填 `header`（如 `X-API-Key`）与 `prefix`（可空） |
 
 协议收敛前的 9 个旧 id 在读取配置时自动改写（`presetId`、`modelOptions`、模型规则、尺寸/质量与锁原样保留），落盘一律是新写法：
 
-| 旧 id | 合并为 | 协议级选项 |
+| 旧 id | 合并为 | 协议级选项 / 鉴权方式 |
 |---|---|---|
 | `dall-e-3` | `openai-images` | 全默认 |
 | `gpt-image` | `openai-images` | 全默认 |
@@ -461,9 +470,11 @@ $DSH_HOME/.credentials.yaml
 | `localai` | `openai-images` | `edit: none` |
 | `siliconflow` | `openai-images` | `edit: same` |
 | `volcengine-ark` | `openai-images` | `edit: same` |
-| `azure-openai` | `openai-images` | `auth: api-key` |
+| `azure-openai` | `openai-images` | `auth.mode: api-key` |
 | `xai-imagine` | `openai-images` | `edit: none` |
 | `zhipu` | `openai-images` | `edit: none` |
+
+老配置里协议级的 `protocolOptions.auth`（只有 `bearer` / `api-key` 两个值）在读入时迁到 `provider.auth.mode`，写回只写 `provider.auth`，同层的 `edit` 原样保留。
 
 协议下拉默认只列常用四条（`openai-images` / `openai-chat` / `openai-responses` / `google-gemini`），其余收在「更多协议…」里，按通用 / 兼容网关 / 厂商原生 / 本地部署 / 异步任务分组展开。
 
@@ -475,7 +486,7 @@ $DSH_HOME/.credentials.yaml
 
 **识别协议**：设置页「API 协议」下拉右侧的按钮。判定分三步，能不发请求就不发：
 
-1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 两个域名）时直接判 `openai-images`，并按主机带回协议级选项（如 Azure 的 `auth:'api-key'`、方舟的 `edit:'same'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
+1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 两个域名）时直接判 `openai-images`，并按主机带回协议选项与鉴权方式（如方舟的 `edit:'same'`、Azure 的 `auth.mode:'api-key'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
 2. **客户端逐条探测**：其余地址只返回一份**探测顺序**，设置页按顺序一条条问宿主；每发一条之前就把「正在尝试访问 /xxx…」写进提示——进度是真的，不是假轮播。
 3. **命中即停**：哪条路径回来的形状能证明某个协议就停；全都不中才落到「自定义」，并预填三条相对地址，提示里带上最后试过的路径。
 

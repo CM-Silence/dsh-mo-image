@@ -5,10 +5,11 @@
  *
  *   1. **旧 id 的映射**：老配置里的 dall-e-3 / gpt-image / together / localai /
  *      siliconflow / volcengine-ark / azure-openai 升级成 openai-images + 对应选项
- *      （`edit` / `auth`）；幂等（已经是新值的不能再变），而且 presetId / modelOptions 原样保留。
+ *      （`edit` 是协议选项，`auth` 是提供商字段）；幂等（已经是新值的不能再变），
+ *      而且 presetId / modelOptions 原样保留。
  *   2. **旧 id 与新 id 产出同一个请求体**：同一模型经旧 id（升级后）与新 id 发出的
  *      path / headers / body 逐字节一致——合并只许改名字，不许改线上请求。
- *   3. **选项本身**：`edit:'same' | 'none'` 的编辑地址与编码、`auth:'api-key'` 的鉴权头。
+ *   3. **选项本身**：`edit:'same' | 'none'` 的编辑地址与编码、`auth.mode:'api-key'` 的鉴权头。
  *   4. 清单里不再有那七个 id。
  *
  * 基线层面的「旧协议 body 没变」由 test/adapter-body-regression.test.mjs 的 variants 段锁着。
@@ -34,7 +35,8 @@ const LEGACY = {
   'siliconflow': { model: 'Qwen/Qwen-Image', baseUrl: 'https://api.siliconflow.cn/v1', options: { edit: 'same' } },
   'volcengine-ark': { model: 'doubao-seedream-4-0-250828', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', options: { edit: 'same' } },
   // Azure 与官方只差鉴权头形态：地址三元组 / 传输 / 字段模板都一样。
-  'azure-openai': { model: 'gpt-image-2.5-flare', baseUrl: 'https://example-resource.openai.azure.com/openai/v1', options: { auth: 'api-key' } },
+  // 鉴权是提供商字段（provider.auth），不是协议选项。
+  'azure-openai': { model: 'gpt-image-2.5-flare', baseUrl: 'https://example-resource.openai.azure.com/openai/v1', options: {}, auth: { mode: 'api-key' } },
   // xAI / 智谱：地址三元组一样、没有编辑端点；body 全在规则表里（xai 的 response_format /
   // resolution 由请求常量规则与尺寸规则给）。
   'xai-imagine': { model: 'grok-imagine-image', baseUrl: 'https://api.x.ai/v1', options: { edit: 'none' } },
@@ -84,12 +86,14 @@ function sameRequest(kind, left, right, label) {
 
 /* ------------------------------------------------------------ 1. 旧 id 映射 */
 
-test('旧协议 id 映射成 openai-images + 对应的 edit 选项', () => {
+test('旧协议 id 映射成 openai-images + 对应的协议选项 / 鉴权方式', () => {
   for (const [legacy, spec] of Object.entries(LEGACY)) {
     const mapped = upgraded(providerOf(legacy));
     assert.equal(mapped.adapter, 'openai-images', legacy + ' 没有映射');
     const expected = Object.keys(spec.options).length ? spec.options : undefined;
     assert.deepEqual(mapped.protocolOptions, expected, legacy + ' 的选项映射不对');
+    // 鉴权是提供商字段：迁移表给的 api-key 落在 mapped.auth，不留在 protocolOptions 里。
+    assert.deepEqual(mapped.auth, spec.auth, legacy + ' 的鉴权方式映射不对');
   }
 });
 
@@ -99,14 +103,21 @@ test('映射是幂等的：已经是新值的配置再跑一遍什么都不变',
     const twice = upgraded(once);
     assert.deepEqual(twice, once, legacy + ' 第二次规范化又变了');
   }
-  // 新值本身（包括用户选的选项）也不该被迁移表碰到。
-  for (const options of [{}, { edit: 'none' }, { edit: 'same' }, { edit: 'edits' }, { edit: 'edits', auth: 'api-key' }]) {
-    const provider = { id: 'p9', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images', models: ['flux-1'], protocolOptions: options };
-    const once = upgraded(provider);
-    assert.equal(once.adapter, 'openai-images');
-    // 空选项不落盘（没写 = 默认值），有内容才存。
-    assert.deepEqual(once.protocolOptions, Object.keys(options).length ? options : undefined);
-    assert.deepEqual(upgraded(once), once, 'openai-images 的配置第二次规范化变了');
+  // 新值本身（包括用户选的选项与鉴权方式）也不该被迁移表碰到。
+  for (const options of [{}, { edit: 'none' }, { edit: 'same' }, { edit: 'edits' }]) {
+    for (const auth of [undefined, { mode: 'bearer' }, { mode: 'api-key' }, { mode: 'custom', header: 'X-API-Key', prefix: 'k ' }]) {
+      const provider = {
+        id: 'p9', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images',
+        models: ['flux-1'], protocolOptions: options
+      };
+      if (auth) provider.auth = auth;
+      const once = upgraded(provider);
+      assert.equal(once.adapter, 'openai-images');
+      // 空选项不落盘（没写 = 默认值），有内容才存。
+      assert.deepEqual(once.protocolOptions, Object.keys(options).length ? options : undefined);
+      assert.deepEqual(once.auth, auth, '鉴权方式被改写了：' + JSON.stringify(auth));
+      assert.deepEqual(upgraded(once), once, 'openai-images 的配置第二次规范化变了');
+    }
   }
 });
 
@@ -146,6 +157,12 @@ test('映射表与实现一致：LEGACY_PROTOCOL_ALIASES 的键与测试表一�
     assert.equal(LEGACY_PROTOCOL_ALIASES[legacy].adapter, 'openai-images', legacy);
     const declared = LEGACY_PROTOCOL_ALIASES[legacy].protocolOptions;
     assert.deepEqual(declared, spec.options, legacy + ' 的迁移选项与测试表不一致');
+    // 鉴权形态（azure 的 api-key）现在写在迁移表的 auth 上，不是 protocolOptions 里。
+    assert.deepEqual(LEGACY_PROTOCOL_ALIASES[legacy].auth, spec.auth, legacy + ' 的迁移鉴权方式与测试表不一致');
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(declared, 'auth'), false,
+      legacy + ' 的协议选项里不该再有 auth'
+    );
   }
   for (const [legacy, target] of Object.entries(LEGACY_PROTOCOL_ALIASES)) {
     assert.equal(target.adapter, 'openai-images', legacy + ' 应该并进 openai-images');
@@ -166,10 +183,10 @@ test('清单里没有那些老协议 id 了', () => {
 for (const [legacy, spec] of Object.entries(LEGACY)) {
   test('旧 id ' + legacy + ' 与新 id 产出的请求逐字节一致', () => {
     const oldProvider = upgraded(providerOf(legacy));
-    const newProvider = upgraded({
+    const newProvider = upgraded(Object.assign({
       id: 'p1', name: legacy, baseUrl: spec.baseUrl, adapter: 'openai-images',
       models: [spec.model], protocolOptions: spec.options
-    });
+    }, spec.auth ? { auth: spec.auth } : {}));
     // 升级后的老配置必须与新写法**完全等价**：后面的请求一致是从这里来的。
     assert.deepEqual(oldProvider, newProvider, legacy + ' 升级后的配置与新写法不等价');
 
@@ -224,9 +241,9 @@ test("默认（不写选项）仍然是 /images/edits + multipart", () => {
   assert.deepEqual(adapter.editFields, ['image[]', 'image']);
 });
 
-test("auth:'api-key' 用 api-key 头，默认仍是 Bearer", () => {
+test("provider.auth.mode:'api-key' 用 api-key 头，默认仍是 Bearer", () => {
   const bearer = { id: 'p6', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images', key: 'sk-test' };
-  const apiKey = { id: 'p7', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images', key: 'sk-test', protocolOptions: { auth: 'api-key' } };
+  const apiKey = { id: 'p7', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images', key: 'sk-test', auth: { mode: 'api-key' } };
   const input = { model: 'flux-1', prompt: 'p', fitted: { width: 1024, height: 1024, size: '1024x1024' } };
 
   const withBearer = prepareGenerate(resolveAdapter(bearer, 'flux-1'), bearer, input, new Set());
@@ -240,8 +257,11 @@ test("auth:'api-key' 用 api-key 头，默认仍是 Bearer", () => {
   assert.equal(bodyText(withApiKey.body), bodyText(withBearer.body));
 });
 
-test('非法选项值被忽略，回落到协议默认', () => {
-  const provider = { id: 'p8', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images', protocolOptions: { edit: 'bogus', auth: 'bogus' } };
+test('非法选项值与非法鉴权方式都回落到协议默认', () => {
+  const provider = {
+    id: 'p8', name: 'relay', baseUrl: 'https://gateway.example.com/v1', adapter: 'openai-images',
+    protocolOptions: { edit: 'bogus' }, auth: { mode: 'bogus' }
+  };
   const adapter = resolveAdapter(provider, 'flux-1');
   assert.equal(adapter.endpoints.edit, '/images/edits');
   assert.equal(adapter.headers, undefined);

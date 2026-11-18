@@ -10,8 +10,9 @@
  * ---- 协议收敛（26 → 20 → 19）-------------------------------------------
  *
  * 第一轮：dall-e-3 / gpt-image / together / localai / siliconflow / volcengine-ark
- * 六条协议合并成一条 `openai-images` + 协议级选项（`edit` / `auth`，见 lib/adapters.js 的
- * PROTOCOL_OPTIONS）。第二轮：azure-openai 也只差鉴权头形态，并成 `{ auth: 'api-key' }`。
+ * 六条协议合并成一条 `openai-images` + 协议级选项（`edit`，见 lib/adapters.js 的
+ * PROTOCOL_OPTIONS）。第二轮：azure-openai 也只差鉴权头形态；第三轮把鉴权从协议选项
+ * 升成提供商字段（provider.auth.mode = 'api-key'），body 一个字节都不该动。
  * 它们当年真正发出去的 body 由基线的 `variants` 段继续锁住（`legacy/*`），比对方式是
  * **字符串相等**，连键顺序都不许变；`adapters` 段只留现存的 19 条协议。合并带来的 body
  * 变化为 0：字段名仍在预设/规则里，尺寸与质量仍在规则表里，`response_format` / `watermark` /
@@ -169,8 +170,8 @@ const BASE_URLS = {
  *
  * `adapters` 只能记「一条协议 × 一套输入」，而合并后这些都是同一协议的不同选项组合，
  * 所以它们单独记在基线的 `variants` 段：旧协议当年真正发出去的 body 继续被逐字节锁住，
- * 合并只是换了名字，不是换了行为。多加一条 `auth:'api-key'`：鉴权头不进 body，
- * 但「body 与鉴权形态无关」这件事也该有个断言（见 test('…鉴权头…')）。
+ * 合并只是换了名字，不是换了行为。多加一条老写法的 `auth:'api-key'`：鉴权头不进 body，
+ * 但「body 与鉴权形态无关」这件事也该有个断言（见 test('provider.auth 只改鉴权头…')）。
  */
 const VARIANTS = {
   'legacy/dall-e-3': { model: 'dall-e-3', baseUrl: 'https://api.openai.com/v1', options: {} },
@@ -333,6 +334,11 @@ function recordVariant(name) {
     key: 'test-key',
     protocolOptions: { ...entry.options }
   };
+  // 鉴权已从协议选项升成 provider.auth：老写法（protocolOptions.auth，只有 bearer /
+  // api-key 两个值）按 normalizeConfig 的迁移路径落到 provider.auth.mode，这里照同一条路重放。
+  // 基线的 `options` 段仍然记老写法，所以 provider 上两种都带着——鉴权不进 body，录出来不变。
+  const legacyAuth = String((entry.options && entry.options.auth) || '').trim().toLowerCase();
+  if (legacyAuth === 'bearer' || legacyAuth === 'api-key') provider.auth = { mode: legacyAuth };
   const adapter = resolveAdapter(provider, model);
   assert.equal(adapter.id, 'openai-images', name + ' 应该落在合并后的 openai-images 上');
   const spec = qualityOptionsFor(provider, model, adapter);
@@ -498,11 +504,30 @@ test('合并前的九条协议：同一套输入按新写法重放，body 与合
   }
 });
 
-test('auth 选项只改鉴权头，不改 body', () => {
+test('provider.auth 只改鉴权头，不改 body', () => {
   const bearer = recordVariant('option/auth=bearer');
   const apiKey = recordVariant('option/auth=api-key');
-  assert.deepEqual(apiKey.generate, bearer.generate, 'auth 选项不该影响 generate body');
-  assert.deepEqual(apiKey.edit, bearer.edit, 'auth 选项不该影响 edit body');
+  assert.deepEqual(apiKey.generate, bearer.generate, '鉴权方式不该影响 generate body');
+  assert.deepEqual(apiKey.edit, bearer.edit, '鉴权方式不该影响 edit body');
+
+  // 基线只锁 body，不记请求头；鉴权形态单独在这里取一次真实请求头来对。
+  const entry = VARIANTS['option/auth=api-key'];
+  const headersOf = (auth) => {
+    const provider = { adapter: 'openai-images', baseUrl: entry.baseUrl, key: 'test-key' };
+    if (auth) provider.auth = auth;
+    return prepareGenerate(resolveAdapter(provider, entry.model), provider, {
+      model: entry.model,
+      prompt: FIXED.prompt,
+      negativePrompt: FIXED.negativePrompt,
+      fitted: fitSize(provider, FIXED.sizeRequest, entry.model),
+      quality: null,
+      images: [FIXED.image]
+    }, new Set()).headers;
+  };
+  assert.equal(headersOf(undefined).Authorization, 'Bearer test-key', '没设 provider.auth 时回落到 bearer');
+  const apiKeyHeaders = headersOf({ mode: 'api-key' });
+  assert.equal(apiKeyHeaders['api-key'], 'test-key');
+  assert.equal(apiKeyHeaders.Authorization, undefined);
 });
 
 test('openai-chat 的 generate 体是空的：尺寸走提示词，不是漏字段', () => {

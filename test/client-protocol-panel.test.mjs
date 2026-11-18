@@ -20,12 +20,20 @@ const T = {
   'form.protocolOption.edit.same': '同一个 /images/generations',
   'form.protocolOption.edit.none': '不支持图生图',
   'form.protocolOption.editHint': '编辑请求发到哪个地址',
-  'form.protocolOption.auth': '鉴权方式',
-  'form.protocolOption.auth.bearer': 'Authorization: Bearer',
-  'form.protocolOption.auth.api-key': 'api-key 头',
-  'form.protocolOption.authHint': '鉴权头形态'
+  'form.auth': '鉴权方式',
+  'form.auth.bearer': 'Authorization: Bearer <key>',
+  'form.auth.api-key': 'api-key <key>',
+  'form.auth.x-key': 'x-key <key>',
+  'form.auth.fal-key': 'Authorization: Key <key>',
+  'form.auth.custom': '自定义请求头',
+  'form.authHint': '鉴权头形态',
+  'form.authHeader': '请求头名称',
+  'form.authPrefix': '前缀'
 };
 const t = (key) => T[key] || key;
+
+/** 客户端在主清单缺 authModes 时的兜底顺序；宿主下发的也是这五个。 */
+const AUTH_MODES = ['bearer', 'api-key', 'x-key', 'fal-key', 'custom'];
 
 /** 协议清单的片段：带选项的那条（openai-images）与不带选项的那条（comfyui）各一。label 是 i18n key。 */
 const ADAPTERS = [
@@ -46,8 +54,7 @@ const ADAPTERS = [
           same: { generate: '/images/generations', edit: '/images/generations', models: '/models' },
           none: { generate: '/images/generations', edit: '', models: '/models' }
         }
-      },
-      { name: 'auth', values: ['bearer', 'api-key'], default: 'bearer' }
+      }
     ]
   }
 ];
@@ -253,7 +260,7 @@ test('协议选项改了地址：问号跟着当前取值走', () => {
   assert.match(render({ edit: 'none' }), /图生图：不支持/);
 });
 
-test('协议有选项时给出选择项：鉴权方式在上、图生图端点在下（取值与默认值来自宿主清单）', () => {
+test('协议声明的选项只有图生图端点：取值与默认值来自宿主清单', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -262,23 +269,22 @@ test('协议有选项时给出选择项：鉴权方式在上、图生图端点�
   const selects = collect(node, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
   assert.deepEqual(
     selects.map((item) => item.props['data-mo-image-protocol-option']),
-    ['auth', 'edit'],
-    '两个协议级选项都要有下拉；鉴权方式排在协议级选项的最前面'
+    ['edit'],
+    '鉴权已升成提供商字段，协议选项里只剩图生图端点'
   );
-  const edit = selects[1];
+  const edit = selects[0];
   assert.equal(edit.props.value, 'edits', '没选过就显示默认值');
   const editOptions = collect(edit, (item) => item.type === 'option');
   assert.deepEqual(editOptions.map((option) => option.props.value), ['edits', 'same', 'none']);
   assert.deepEqual(editOptions.map((option) => text(option).join('')), ['/images/edits', '/images/generations', '不支持']);
-  assert.equal(selects[0].props.value, 'bearer');
 
   // 选过的值要回显。
   const picked = renderForm(client, {
     id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
-    protocolOptions: { edit: 'same', auth: 'api-key' }, models: [], names: {}
+    protocolOptions: { edit: 'same' }, models: [], names: {}
   }, false);
   const pickedSelects = collect(picked, (item) => item.type === 'select' && item.props['data-mo-image-protocol-option']);
-  assert.deepEqual(pickedSelects.map((item) => item.props.value), ['api-key', 'same']);
+  assert.deepEqual(pickedSelects.map((item) => item.props.value), ['same']);
 });
 
 test('「图生图端点」只显示路径：edits / same / none 对应三条路径或「不支持」', () => {
@@ -299,15 +305,89 @@ test('「图生图端点」只显示路径：edits / same / none 对应三条路
   assert.doesNotMatch(text(node).join(' '), /编辑请求发到哪个地址/);
 });
 
-test('「鉴权方式」label 右侧的问号收着原来的说明，下面那行提示不再渲染', () => {
+test('鉴权方式是提供商字段：换任何协议，下拉都在，且五种模式都能选', () => {
+  // 这条是这次改动的核心：鉴权不挂在协议下面，所以 comfyui / custom / 空串这些
+  // 「没有协议级选项」的协议下也必须看得到它。
+  for (const adapter of ['openai-images', 'comfyui', 'custom', '']) {
+    const client = loadClient();
+    client.setCatalog();
+    const node = renderForm(client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: adapter, models: [], names: {}
+    });
+    const select = collect(node, (item) => item.type === 'select'
+      && item.props['data-mo-image-auth-mode'] !== undefined)[0];
+    assert.ok(select, '协议 ' + (adapter || '(自动)') + ' 下鉴权下拉不该消失');
+    assert.deepEqual(
+      collect(select, (item) => item.type === 'option').map((option) => option.props.value),
+      AUTH_MODES,
+      '五种鉴权模式都要能选'
+    );
+    assert.equal(select.props.value, 'bearer', '没设过就显示 bearer（缺省值）');
+  }
+});
+
+test('鉴权方式的取值回显 provider.auth，认不出的值回落到 bearer', () => {
+  const client = loadClient();
+  client.setCatalog();
+  for (const mode of AUTH_MODES) {
+    const node = renderForm(client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'comfyui',
+      auth: { mode: mode }, models: [], names: {}
+    });
+    const select = collect(node, (item) => item.type === 'select'
+      && item.props['data-mo-image-auth-mode'] !== undefined)[0];
+    assert.equal(select.props.value, mode);
+  }
+  const bogus = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'comfyui',
+    auth: { mode: 'bogus' }, models: [], names: {}
+  });
+  assert.equal(collect(bogus, (item) => item.type === 'select'
+    && item.props['data-mo-image-auth-mode'] !== undefined)[0].props.value, 'bearer');
+});
+
+test('选 custom 时多出头名与前缀两个输入框，值来自 provider.auth', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    auth: { mode: 'custom', header: 'X-API-Key', prefix: 'Token ' }, models: [], names: {}
+  });
+  const inputs = collect(node, (item) => item.type === 'input');
+  const header = inputs.find((item) => item.props.name === 'auth-header');
+  const prefix = inputs.find((item) => item.props.name === 'auth-prefix');
+  assert.ok(header, 'custom 要给请求头名称输入框');
+  assert.ok(prefix, 'custom 要给前缀输入框');
+  assert.equal(header.props.value, 'X-API-Key');
+  assert.equal(prefix.props.value, 'Token ');
+  // 两个标签都渲染出来（文案键是拼出来的，测试里用兜底字典兜住）。
+  const body = text(node).join(' ');
+  assert.match(body, /请求头名称/);
+  assert.match(body, /前缀/);
+
+  // 非 custom 时不出现这两格（免得「选了 Bearer 还在填头名」）。
+  for (const mode of ['bearer', 'api-key', 'x-key', 'fal-key']) {
+    const plain = renderForm(client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+      auth: { mode: mode }, models: [], names: {}
+    });
+    assert.equal(
+      collect(plain, (item) => item.type === 'input' && String(item.props.name || '').startsWith('auth-')).length,
+      0,
+      mode + ' 下不该有 custom 的两个输入框'
+    );
+  }
+});
+
+test('「鉴权方式」label 右侧的问号收着说明，下面那行提示不再渲染', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
   });
-  const labelRow = collect(node, (item) => item.props && item.props['data-protocol-option-label'] === 'auth')[0];
+  const labelRow = collect(node, (item) => item.props && item.props['data-mo-image-auth-label-row'] !== undefined)[0];
   assert.ok(labelRow, '鉴权方式 label 行在');
-  const help = collect(labelRow, (item) => item.props && item.props['data-protocol-option-help'] === 'auth')[0];
+  const help = collect(labelRow, (item) => item.props && item.props['data-mo-image-auth-help'] !== undefined)[0];
   assert.ok(help, '问号在 label 右侧');
   assert.equal(help.props.className?.includes('helpButton') || help.props.className === 'helpButton', true,
     '与协议问号同一套样式');
@@ -333,7 +413,7 @@ test('鉴权方式在 DOM 顺序上位于 API 协议之前，且鉴权与协议�
     const at = (target) => order.indexOf(target);
     const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
     const auth = collect(node, (n) => n.type === 'select'
-      && n.props['data-mo-image-protocol-option'] === 'auth')[0];
+      && n.props['data-mo-image-auth-mode'] !== undefined)[0];
     const protocol = collect(node, (n) => n.type === 'select'
       && n.props['data-mo-image-protocol'] !== undefined)[0];
     const edit = collect(node, (n) => n.type === 'select'

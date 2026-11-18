@@ -107,6 +107,20 @@ test('已知主机：火山方舟 Agent Plan 的完整地址 → openai-images +
   assert.deepEqual(calls, [], '已知主机一个请求都不该发');
 });
 
+test('已知主机：Azure 带 provider.auth.mode=api-key 回来（鉴权是提供商字段）', async (t) => {
+  const { route, calls } = await setup(t);
+  const res = makeRes();
+  await route.handler(jsonReq({
+    baseUrl: 'https://res.openai.azure.com/openai/v1', key: 'draft-key', model: 'gpt-image-2.5-flare'
+  }), res);
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    ok: true, done: true, protocol: 'openai-images', matched: true, probed: false,
+    auth: { mode: 'api-key' }
+  }, '鉴权形态单独回传，不再塞进 protocolOptions');
+  assert.deepEqual(calls, [], '已知主机一个请求都不该发');
+});
+
 test('unknown host: answers only with the probe plan — zero upstream requests', async (t) => {
   const { route, calls } = await setup(t);
   const res = makeRes();
