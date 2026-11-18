@@ -566,7 +566,8 @@ test('解析参数入口、loading 与候选清单已移除，只留「解析工
   const { harness, tree } = await openEditor(CONFIG);
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  findAll(opened, (node) => node.type === 'textarea')[0]
+  const workflowPanel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  findAll(workflowPanel, (node) => node.type === 'textarea')[0]
     .props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
   const labels = findAll(opened, (node) => node.type === 'button').map((node) => textOf(node).join(''));

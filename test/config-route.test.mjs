@@ -253,7 +253,7 @@ test('config route migrates keys to the credentials store and never returns them
 
   const missingBase = makeRes();
   await modelsRoute.handler(jsonReq('POST', JSON.stringify({ baseUrl: '' })), missingBase);
-  assert.equal(missingBase.status, 502);
+  assert.equal(missingBase.status, 400);
   const missingBaseBody = JSON.parse(missingBase.body);
   assert.equal(missingBaseBody.code, 'provider.missingBaseUrl');
   assert.equal(missingBaseBody.error, '请先填写 API 地址');

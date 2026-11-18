@@ -28,12 +28,15 @@ const T = {
   'form.auth.custom': '自定义请求头',
   'form.authHint': '鉴权头形态',
   'form.authHeader': '请求头名称',
-  'form.authPrefix': '前缀'
+  'form.authPrefix': '前缀',
+  'form.advanced': '自定义设置',
+  'form.outputPreset.customLegacy': '自定义（来自旧配置）',
+  'form.outputPreset.customLegacyHint': '当前值是以前手写的返回配置，原样保留；上面的预设选一个即可覆盖它。'
 };
 const t = (key) => T[key] || key;
 
-/** 客户端在主清单缺 authModes 时的兜底顺序；宿主下发的也是这五个。 */
-const AUTH_MODES = ['bearer', 'api-key', 'x-key', 'fal-key', 'custom'];
+/** 客户端在主清单缺 authModes 时的兜底顺序。 */
+const AUTH_MODES = ['bearer', 'api-key', 'x-key', 'fal-key', 'custom', 'none', 'basic', 'query'];
 
 /** 协议清单的片段：带选项的那条（openai-images）与不带选项的那条（comfyui）各一。label 是 i18n key。 */
 const ADAPTERS = [
@@ -62,11 +65,12 @@ const ADAPTERS = [
 // 组件内部的 hook 顺序会随实现变化，所以按「初始值是 'catalog' 的那个 state」定位模式开关。
 const CATALOG = 'catalog';
 
-function loadClient({ customMode = false } = {}) {
+function loadClient({ customMode = false, preserveFormState = false } = {}) {
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   let loaded = null;
   let hooks = [];
   let hookIndex = 0;
+  const formHooks = [];
 
   const React = {
     createElement(type, props, ...children) { return { type, props: props || {}, children }; },
@@ -77,7 +81,10 @@ function loadClient({ customMode = false } = {}) {
         const value = typeof initial === 'function' ? initial() : initial;
         hooks[index] = (customMode && value === CATALOG) ? 'custom' : value;
       }
-      return [hooks[index], () => {}];
+      const owner = hooks;
+      return [owner[index], (update) => {
+        if (preserveFormState) owner[index] = typeof update === 'function' ? update(owner[index]) : update;
+      }];
     },
     useEffect(fn) { hooks[hookIndex++] = fn; },
     useLayoutEffect(fn) { hooks[hookIndex++] = fn; },
@@ -138,7 +145,7 @@ function loadClient({ customMode = false } = {}) {
     if (Array.isArray(node)) return node.map(render);
     if (typeof node !== 'object') return node;
     if (typeof node.type === 'function') {
-      hooks = [];
+      hooks = preserveFormState && node.type === api.__test.ImageProviderForm ? formHooks : [];
       hookIndex = 0;
       return render(node.type(node.props || {}));
     }
@@ -148,7 +155,10 @@ function loadClient({ customMode = false } = {}) {
   return {
     React, render,
     h: React.createElement,
-    setCatalog() { api.__test.applyCatalog({ adapters: ADAPTERS, providerPresets: [], localPresets: [], capabilities: [] }); },
+    setCatalog() { api.__test.applyCatalog({
+      adapters: ADAPTERS, providerPresets: [], localPresets: [], capabilities: [],
+      outputPresets: ['auto', 'openai', 'binary', 'task-json']
+    }); },
     form() { return api.__test.ImageProviderForm; }
   };
 }
@@ -317,7 +327,7 @@ test('「图生图端点」只显示路径：edits / same / none 对应三条路
   assert.doesNotMatch(text(node).join(' '), /编辑请求发到哪个地址/);
 });
 
-test('鉴权方式是提供商字段：换任何协议，下拉都在，且五种模式都能选', () => {
+test('鉴权方式是提供商字段：换任何协议，下拉都仍然可用', () => {
   // 这条是这次改动的核心：鉴权不挂在协议下面，所以 comfyui / custom / 空串这些
   // 「没有协议级选项」的协议下也必须看得到它。
   for (const adapter of ['openai-images', 'comfyui', 'custom', '']) {
@@ -332,7 +342,7 @@ test('鉴权方式是提供商字段：换任何协议，下拉都在，且五�
     assert.deepEqual(
       collect(select, (item) => item.type === 'option').map((option) => option.props.value),
       AUTH_MODES,
-      '五种鉴权模式都要能选'
+      '支持的鉴权模式都要能选'
     );
     assert.equal(select.props.value, 'bearer', '没设过就显示 bearer（缺省值）');
   }
@@ -587,4 +597,109 @@ test('自定义协议填了模型列表地址才给出拉取按钮', () => {
     models: [], names: {}
   }, true);
   assert.equal(fetchButton(empty), undefined, '没填模型列表地址不该给出拉取按钮');
+});
+
+test('自定义操作预览使用实际端点，返回预设可直接写入草稿', () => {
+  const client = loadClient({ customMode: true, preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', adapter: 'custom', baseUrl: '',
+    customEndpoints: { generate: 'old' },
+    operations: { version: 1, generate: { path: 'v1/render', method: 'POST' }, models: { path: 'https://g.example/v1/catalog' } },
+    models: ['m']
+  };
+  const select = (tree) => collect(tree, (node) => node.props['data-mo-image-output-preset'] === 'generate')[0];
+  let tree = renderForm(client, provider, true);
+  assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/render/);
+  assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/catalog/);
+  assert.notEqual(fetchButton(tree).props.disabled, true);
+  assert.equal(select(tree).props.value, 'auto');
+  select(tree).props.onChange({ target: { value: 'binary' } });
+  tree = renderForm(client, provider, true);
+  assert.equal(select(tree).props.value, 'binary');
+  const editor = collect(tree, (node) => node.props['data-mo-image-operations'] === 'provider')[0];
+  const json = collect(editor, (node) => node.type === 'textarea')[0];
+  assert.deepEqual(JSON.parse(json.props.value).generate, { path: 'v1/render', method: 'POST', output: 'binary' });
+});
+
+/** 高级区：内置协议的返回格式面板（预设下拉所在的那个 details）。 */
+function advancedOf(node, label = '自定义设置') {
+  return collect(node, (item) => item.type === 'details'
+    && collect(item, (child) => child.type === 'summary' && text(child).join('') === label).length > 0)[0];
+}
+
+test('内置协议的返回格式只剩预设下拉：手写 JSON 输入框与提示都已删除', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    operations: { version: 1, generate: { output: 'binary' } },
+    models: [], names: {}
+  });
+  const panel = collect(node, (item) => item.props['data-mo-image-output-presets'] === 'provider')[0];
+  assert.ok(panel, '返回预设面板要渲染');
+  const advanced = advancedOf(node);
+  assert.ok(advanced, '高级区还在');
+  assert.ok(collect(advanced, (item) => item === panel).length === 1, '这块 UI 仍留在高级里');
+  const selects = collect(panel, (item) => item.type === 'select' && item.props['data-mo-image-output-preset']);
+  assert.deepEqual(
+    selects.map((item) => item.props['data-mo-image-output-preset']).sort(),
+    ['edit', 'generate'],
+    '文生图与图生图两个预设下拉都在'
+  );
+  assert.equal(selects.find((item) => item.props['data-mo-image-output-preset'] === 'generate').props.value, 'binary');
+  assert.equal(collect(node, (item) => item.type === 'textarea').length, 0, '手写 JSON 的输入框已不存在');
+  assert.equal(collect(node, (item) => item.type === 'textarea'
+    && item.props['aria-label'] === '返回格式覆盖').length, 0, '旧的 JSON 入口（aria-label）也不存在');
+});
+
+test('旧配置里手写的 output 显示为只读「自定义（来自旧配置）」，保存时原样保留', async () => {
+  const client = loadClient();
+  client.setCatalog();
+  const legacy = { kind: 'json', pick: [{ path: 'data.0.url', as: 'url' }] };
+  let saved = null;
+  const tree = client.render(client.h(client.form(), {
+    provider: {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+      operations: { version: 1, generate: { output: legacy } },
+      models: [], names: {}
+    },
+    isNew: false,
+    onSave(next) { saved = next; },
+    onClose() {},
+    t: t
+  }));
+  const select = collect(tree, (item) => item.props['data-mo-image-output-preset'] === 'generate')[0];
+  assert.equal(select.props.value, 'custom', '匹配不到预设的旧值要显示成自定义');
+  const option = collect(select, (item) => item.type === 'option'
+    && item.props && item.props.value === 'custom')[0];
+  assert.ok(option, '自定义项要出现在下拉里');
+  assert.equal(option.props.disabled, true, '自定义项是只读的');
+  assert.equal(text(option).join(''), '自定义（来自旧配置）');
+  assert.equal(collect(tree, (item) => item.props['data-mo-image-output-legacy-hint'] !== undefined).length, 1,
+    '给一句简短说明');
+  const save = collect(tree, (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+  assert.ok(save, '保存按钮要存在');
+  await save.props.onClick();
+  assert.deepEqual(saved.operations.generate.output, legacy, '用户重新选预设之前，旧值不能被丢掉');
+});
+
+test('旧配置的自定义值可以被预设覆盖', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    operations: { version: 1, generate: { output: { kind: 'binary' } } },
+    models: [], names: {}
+  };
+  const render = () => renderForm(client, provider);
+  let tree = render();
+  const select = () => collect(tree, (item) => item.props['data-mo-image-output-preset'] === 'generate')[0];
+  assert.equal(select().props.value, 'custom');
+  select().props.onChange({ target: { value: 'binary' } });
+  tree = render();
+  assert.equal(select().props.value, 'binary', '重新选预设就覆盖旧的自定义值');
+  assert.equal(collect(tree, (item) => item.props['data-mo-image-output-legacy-hint'] !== undefined).length, 0,
+    '覆盖之后不再显示旧配置说明');
 });

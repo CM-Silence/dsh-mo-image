@@ -290,8 +290,7 @@ test('ideogram 的 data.0.url 经 fetchResultImage 下载（同源带凭据）�
   assert.deepEqual(result.bytes, Buffer.from(PNG_1PX, 'base64'));
   const download = calls.find((call) => call.url === 'https://api.ideogram.ai/out.png');
   assert.ok(download, 'URL 由 execute() 交给 fetchResultImage 下载');
-  // ideogram 没有声明 authHeader，所以同源下载走默认 Bearer——迁移前就是这个形状，这一步不改它。
-  assert.equal(download.init.headers.Authorization, 'Bearer k');
+  assert.equal(download.init.headers['Api-Key'], 'k');
 });
 
 /* ------------------------------------------ binary（stability 迁移的新 kind） */

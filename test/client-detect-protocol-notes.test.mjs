@@ -287,24 +287,47 @@ test('404：提示「这个地址没有该接口」，而不是 Key 问题', asy
   assert.equal(noteTextOf(tree), '这个地址没有该接口（/models 返回 404）；已切到自定义并预填地址');
 });
 
-test('超时：提示请求超时（status 0 + reason timeout，不是 404）', async () => {
+test('超时：只说连接超时并给出完整 URL（status 0 + reason timeout，不是 404）', async () => {
   const client = createHarness({
     detect: detectFailureStub(['/models'], { '/models': { status: 0, reason: 'timeout' } })
   });
   client.setCatalog();
   const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
   const tree = await clickDetect(client, props);
-  assert.equal(noteTextOf(tree), '请求超时（/models）：请检查网络或代理；已切到自定义并预填地址');
+  assert.equal(noteTextOf(tree), '连接 https://relay.example/v1/models 超时，请检查网络或代理后重试；已切到自定义并预填地址');
 });
 
-test('连不上：提示连不上这个地址（status 0 + reason network）', async () => {
+test('连不上：只说连不上并给出完整 URL（status 0 + reason network）', async () => {
   const client = createHarness({
     detect: detectFailureStub(['/models'], { '/models': { status: 0, reason: 'network' } })
   });
   client.setCatalog();
   const props = formProps(providerFixture({ baseUrl: 'https://relay.example/v1' }));
   const tree = await clickDetect(client, props);
-  assert.equal(noteTextOf(tree), '连不上这个地址（/models）：请检查 API 地址；已切到自定义并预填地址');
+  assert.equal(noteTextOf(tree), '无法连接到 https://relay.example/v1/models，请确保服务已经启动后再重试；已切到自定义并预填地址');
+});
+
+test('手选 ComfyUI 连不上：只说连不上，报该协议自己的 /object_info 完整地址', async () => {
+  const client = createHarness({
+    detect: detectFailureStub(
+      // 故意把 A1111 的探针排在第一条（复现用户遇到的那次顺序）：仍然该报 ComfyUI 自己的。
+      ['/sdapi/v1/sd-models', '/object_info', '/API/ListModels', '/models'],
+      {
+        '/sdapi/v1/sd-models': { status: 0, reason: 'network' },
+        '/object_info': { status: 0, reason: 'unreadable' },
+        '/API/ListModels': { status: 0, reason: 'network' },
+        '/models': { status: 0, reason: 'network' }
+      }
+    )
+  });
+  client.setCatalog();
+  const props = formProps(providerFixture({ adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188' }));
+  const tree = await clickDetect(client, props);
+  const note = noteTextOf(tree);
+  assert.equal(note, '无法连接到 http://127.0.0.1:8188/object_info，请确保服务已经启动后再重试。');
+  assert.equal(note.includes('不像'), false, '连不上就不该评价像不像');
+  assert.equal(note.includes('/sdapi'), false, '该报用户所选协议的探针，不是 A1111 的');
+  assert.equal(protocolSelect(tree).props.value, 'comfyui', '校验失败不改写用户选择');
 });
 
 test('校验模式遇到 401：协议与选项不动，在「不像」后面写明鉴权失败', async () => {
@@ -368,7 +391,7 @@ test('自动：openai 的 {data:[…]} 是通用兜底，提示保持「地址�
   assert.equal(noteTextOf(tree), '地址可用，已设为 OpenAI Images', '兜底协议不带探针细节');
 });
 
-test('手选了 ComfyUI：只校验，不改写；通过时提示「已确认」', async () => {
+test('手选了 ComfyUI 后提示模型列表可访问', async () => {
   const client = createHarness({
     detect: detectStub(['/object_info', '/models'], {
       '/object_info': { shape: 'object', protocols: ['comfyui'] }
@@ -381,7 +404,7 @@ test('手选了 ComfyUI：只校验，不改写；通过时提示「已确认」
   assert.equal(askedBodiesOf(client)[0].expectedProtocol, 'comfyui', '手选的协议要送给宿主校验');
   assert.equal(protocolSelect(tree).props.value, 'comfyui', '协议不能被改写');
   assert.equal(noteOf(tree).props['data-mo-image-protocol-note'], 'ok');
-  assert.equal(noteTextOf(tree), '已确认：ComfyUI（/object_info 返回 JSON 对象）');
+  assert.equal(noteTextOf(tree), '模型列表可访问（/object_info 返回 JSON 对象）');
 });
 
 test('手选的协议没通过：协议与选项都不动，提示「不像」+ 看起来像谁 + 最后试过哪条', async () => {

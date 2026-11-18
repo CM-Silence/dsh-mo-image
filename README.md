@@ -459,6 +459,9 @@ $DSH_HOME/.credentials.yaml
 | `x-key` | `x-key: <key>` | BFL 一类 |
 | `fal-key` | `Authorization: Key <key>` | fal |
 | `custom` | `<header>: <prefix><key>` | 自定义，填 `header`（如 `X-API-Key`）与 `prefix`（可空） |
+| `none` | 无 | 无需密钥的本地或云端接口 |
+| `basic` | `Authorization: Basic <base64>` | 在凭据框输入 `username:password` |
+| `query` | `?<name>=<key>` | 填查询参数名 `name`，值仍由凭据服务提供 |
 
 协议收敛前的 9 个旧 id 在读取配置时自动改写（`presetId`、`modelOptions`、模型规则、尺寸/质量与锁原样保留），落盘一律是新写法：
 
@@ -555,13 +558,83 @@ $DSH_HOME/.credentials.yaml
 
 **错误自愈**：上游报「不认识某某参数」时摘掉该字段重试；429 / 5xx 退避重试。降级过程都会写日志，方便回头把描述符改准。
 
-新增一家平台：在 `lib/adapters.js` 里加一条描述符即可，不用动工具层和前端。
+## 自定义 HTTP 接入
+
+常规接入从「第三方模型提供商」或「本地部署」选预设，再填凭据和模型 ID。上游提供模型列表时可以直接拉取。不同模型共享同一个提供商地址和鉴权，模型自己的尺寸、质量、参数及返回格式可以单独覆盖。
+
+自定义 API 支持配置文生图、图生图和模型列表三个端点。相对端点追加在 API 地址的路径之后，例如 Base URL 为 `https://gateway.example/api/v2` 时，`render` 指向 `/api/v2/render`。也可填写完整的 HTTP(S) 地址。生成和编辑的端点支持 `{model}` 占位符。图生图端点留空可关闭该操作。
+
+在「请求与返回格式」中选择返回预设，或填入 JSON 配置（自定义协议）。内置协议只需要**按操作选择返回预设**——预设已覆盖这些响应形态，不再提供手写 JSON；以前手写的值会原样保留，面板里显示为「自定义（来自旧配置）」，重新选一个预设即可覆盖。模型覆盖未填写的选项会继承提供商设置。
+
+```json
+{
+  "version": 1,
+  "generate": {
+    "method": "POST",
+    "transport": "json",
+    "input": "explicit",
+    "fields": {
+      "prompt": { "path": "input.text" },
+      "model": { "path": "input.model_id" },
+      "width": { "path": "input.width" },
+      "height": { "path": "input.height" }
+    },
+    "output": {
+      "kind": "task",
+      "idPath": "job.id",
+      "path": "/jobs/{taskId}",
+      "statusPath": "phase",
+      "success": ["READY"],
+      "failure": ["FAILED", "CANCELLED"],
+      "resultPath": "assets.0.url",
+      "intervalMs": 1500
+    }
+  },
+  "edit": {
+    "transport": "multipart",
+    "input": "explicit",
+    "fields": { "prompt": { "multipart": "text" }, "image": { "multipart": "files[]" } },
+    "output": "binary"
+  },
+  "models": {
+    "path": "catalog",
+    "method": "POST",
+    "body": { "type": "image" },
+    "output": { "path": "items", "idPath": "slug", "namePath": "title" }
+  }
+}
+```
+
+| 设置 | 含义 |
+|---|---|
+| `generate`、`edit` | 可选 `path` 覆盖端点，`method` 支持 GET、POST、PUT、PATCH，`transport` 支持 JSON、multipart、URL 编码表单和查询参数 |
+| `input: "explicit"` | 只写入配置的字段映射与参数表中的自定义行。省略时继承现有提示词、尺寸、模型和参考图配置 |
+| `fields` | 可绑定 `prompt`、`negative`、`model`、`image`、`n`、`quality`、`size`、`width`、`height`、`aspect`、`tier`。参考图映射可选择 multipart、Base64、data URL 或已有 URL |
+| `headers`、`pollHeaders` | 请求和轮询需要的普通协议头。鉴权凭据通过提供商的鉴权设置传入 |
+| `models` | 可选 `path` 覆盖端点。GET 使用端点的查询参数，其他方法可配 JSON `body`。自定义 `output.path` 指向列表，`idPath` 和 `namePath` 相对于列表项 |
+| `pollOrigins`、`resultOrigins` | 允许携带提供商鉴权的额外 HTTP(S) 源，填写完整协议、主机和端口 |
+
+“常规”参数表可加入可选参数，也可用 `json` 类型传数组或对象。暴露开关允许对话模型覆盖默认值。保存时请核对字段路径，避免与提示词、参考图和尺寸等已映射字段重叠。
+
+### 返回格式预设
+
+- `auto` 使用当前协议的默认解析。通用网关会依次查找直接图片、任务包络、Location 和常见响应字段。
+- `openai`、`binary`、`image-url`、`image-base64` 分别适配 OpenAI Images 结构、二进制、顶层图片链接和顶层 Base64。
+- `task-location` 从 Location 读取状态 URL。相对值以提交响应的 URL 为基准。 `task-json` 从 JSON 读任务 ID，再查询 `/tasks/{taskId}`。
+- 自定义 `json` 描述符可声明字段路径、候选顺序、筛选和内容类型。自定义 `task` 描述符可声明任务 ID、状态词、轮询地址、成功后读取的路径和额外结果请求。设 `resultAs: "relative"` 可按最终响应 URL 解析图片路径。设 `pollOutput: "binary"` 可在轮询接口直接接收图片。
+
+提供商预设由 `lib/adapters.js` 的目录下发。新的返回格式预设可加到 `lib/provider-operations.js` 中，继续使用 `lib/output-profiles.js` 的描述符校验和解析。配置支持这套声明式能力之外的协议使用专用适配器，例如需要获取会话、上传文件、刷新 OAuth 凭据或编排本地工作流的接口。
+
+### 异常恢复
+
+提交超时、连接中断或上游 5xx 时，若受理状态未知，工具会提示先查询原任务。已取得轮询信息的任务可以将错误中的本地任务 ID 传给 `resume_job_id`，继续原任务的查询和下载。同步接口只有在上游提供查询入口时才具备远程恢复条件。
+
 
 ## 已知限制
 
-- **通用异步识别有边界**：`openai-images` 的自动轮询只覆盖「OpenAI 兼容形状 + 常见任务字段/状态词」。如果厂商要求专用请求头（如魔搭的 `X-ModelScope-Async-Mode`）、专用轮询头、或者完全不同的 envelope，仍然需要专用适配器——这类平台已经内置了适配器（`modelscope`、`bfl`、`fal`、`replicate`、`dashscope-wanx`）。
+- **专用交互**：连续对话、WebSocket、动态签名和令牌自动刷新需要专用适配器。常见的 HTTP 提交、JSON 或二进制结果及异步轮询可用返回预设和操作配置接入。
 - **新协议只做了 mock 验证**：`openai-responses`、`openrouter-images`、`openai-chat`、`bfl`、`fal`、`replicate`、`modelscope` 的协议形状来自 2026-11 官方文档/官方示例代码，但本机没有对应账号，未做真实连通验证。真实调用若报字段错误，请带上 `$DSH_HOME/mo-image/host.log` 反馈。
-- **gpt-image 的新参数没做 UI**：`background` / `moderation` / `output_compression` 等 2026 年新增字段暂不发送，等设置页有入口再接。
+- **扩展参数**：供应商新增的请求字段可以按该接口接受的类型加入模型的参数表。预设会优先管理已映射的核心字段。
 - **C 级协议未实现**：Krea、Luma Photon、Runway、腾讯混元、百度文心一格、Adobe Firefly、Gemini Interactions API 留在后续版本。
 - **Google Imagen 已停用**：Gemini API 下线、Vertex 侧 2026-06-30 停服，插件不再支持；请改用 `gemini-3.1-flash-image` 等 Nano Banana 模型。
 - **Vertex AI 未支持**：需要 OAuth access token（1 小时过期）且没有模型列表端点。
