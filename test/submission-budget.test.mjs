@@ -321,6 +321,142 @@ test('a 5xx submit is not resent and is reported as an unknown submission', asyn
   assert.equal(posts, 1);
 });
 
+/* ---------------------------------------- 5xx / 408 / 429 的提交分支 */
+
+/** 同步适配器：没有任务包络，POST 之后直接读响应体。 */
+function syncAdapter(overrides = {}) {
+  return Object.assign({
+    id: 'fake-sync',
+    label: 'Fake sync',
+    endpoints: { generate: '/images', edit: '/images' },
+    transport: { generate: 'json', edit: 'json' },
+    maxN: 1
+  }, overrides);
+}
+
+const submitInput = { model: 'm', prompt: 'p', fitted: fitted };
+
+/** 装一个只数 POST 的 fetch 桩，返回「发了几次」。 */
+function stubSubmit(reply) {
+  const state = { posts: 0 };
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(init.method || '').toUpperCase() === 'POST') state.posts++;
+    return reply(url, init);
+  };
+  return () => state.posts;
+}
+
+test('a 5xx submit is posted once for sync and async adapters alike', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const make of [syncAdapter, legacyAsyncAdapter]) {
+      const adapter = make();
+      const posts = stubSubmit(() => jsonResponse({ error: 'overloaded' }, 503));
+      await assert.rejects(
+        () => callImageApi('generate', adapter, gatewayProvider(), submitInput, new AbortController().signal),
+        (error) => {
+          assert.equal(error.code, 'submission_unknown');
+          assert.equal(error.submissionState, 'unknown');
+          assert.equal(error.phase, 'submit');
+          assert.equal(error.status, 503);
+          return true;
+        }
+      );
+      assert.equal(posts(), 1, adapter.id + ' must not post a 5xx submit twice');
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('a 408 submit is an unknown submission and is posted once', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const make of [syncAdapter, legacyAsyncAdapter]) {
+      const adapter = make();
+      // 408 走的就是 5xx 那条路：正文里的任务标识同样要被报出来。
+      const posts = stubSubmit(() => jsonResponse({ task_id: 'pending-408', error: 'request timeout' }, 408));
+      await assert.rejects(
+        () => callImageApi('generate', adapter, gatewayProvider(), submitInput, new AbortController().signal),
+        (error) => {
+          assert.equal(error.code, 'submission_unknown');
+          assert.equal(error.submissionState, 'unknown',
+            '408 means the upstream may already own the request, so it is never "rejected"');
+          assert.equal(error.phase, 'submit');
+          assert.equal(error.status, 408);
+          assert.ok(String(error.message).includes('pending-408'),
+            'a 408 takes the same path as a 5xx and reports the task id it found');
+          return true;
+        }
+      );
+      assert.equal(posts(), 1, adapter.id + ' must not post a 408 submit twice');
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('a 5xx body that names a task id reports it and never dumps the body', async () => {
+  const original = globalThis.fetch;
+  try {
+    const cases = [
+      { body: { task_id: 'task-top-1', debug: 'SENSITIVE-MARKER' }, id: 'task-top-1' },
+      { body: { data: { id: 'task-data-2' }, debug: 'SENSITIVE-MARKER' }, id: 'task-data-2' },
+      { body: { output: { request_id: 'req-3' }, debug: 'SENSITIVE-MARKER' }, id: 'req-3' },
+      { body: { taskId: 987654, debug: 'SENSITIVE-MARKER' }, id: '987654' }
+    ];
+    for (const item of cases) {
+      const posts = stubSubmit(() => jsonResponse(item.body, 503));
+      await assert.rejects(
+        () => callImageApi('generate', syncAdapter(), gatewayProvider(), submitInput, new AbortController().signal),
+        (error) => {
+          assert.equal(error.submissionState, 'unknown');
+          assert.match(String(error.message), /上游可能已创建任务/);
+          assert.ok(String(error.message).includes(item.id), 'the message must name ' + item.id);
+          assert.doesNotMatch(String(error.message), /SENSITIVE-MARKER/,
+            'the body itself must never be copied into the message');
+          return true;
+        }
+      );
+      assert.equal(posts(), 1, 'the 5xx is still never resent after reading its body');
+    }
+
+    // 扫不到 id 就退回原文案：状态未知、不许直接重发。
+    const posts = stubSubmit(() => jsonResponse({ error: 'overloaded', debug: 'SENSITIVE-MARKER' }, 503));
+    await assert.rejects(
+      () => callImageApi('generate', syncAdapter(), gatewayProvider(), submitInput, new AbortController().signal),
+      (error) => {
+        assert.equal(error.submissionState, 'unknown');
+        assert.match(String(error.message), /无法确认上游是否已经受理/);
+        assert.doesNotMatch(String(error.message), /上游可能已创建任务|SENSITIVE-MARKER/);
+        return true;
+      }
+    );
+    assert.equal(posts(), 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('a 429 submit still retries on the sync path', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const posts = stubSubmit(() => new Response(JSON.stringify({ error: 'rate limited' }), {
+    status: 429, headers: { 'content-type': 'application/json', 'retry-after': '0' }
+  }));
+  await assert.rejects(
+    () => callImageApi('generate', syncAdapter(), gatewayProvider(), submitInput, new AbortController().signal),
+    (error) => {
+      assert.equal(error.code, 'rate_limit');
+      assert.equal(error.phase, 'submit');
+      assert.equal(error.submissionState, 'rejected');
+      assert.equal(error.retryAfterMs, 0);
+      return true;
+    }
+  );
+  assert.equal(posts(), 3, 'the first submit plus at most two rate-limit retries');
+});
+
 test('an empty 401 while polling is an auth failure, not a pending task', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

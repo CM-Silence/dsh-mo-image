@@ -197,6 +197,12 @@ function findButton(node, predicate) {
   return findAll(node, (item) => item.type === 'button' && predicate(item))[0] || null;
 }
 
+/**
+ * 跨 vm 边界的对象先过一趟 JSON：deepEqual 也比原型，vm 里的 Object 与本进程不是同一个。
+ * 样式对象是 client.js 在 vm 里现造的，所以比对它们之前一律走这里。
+ */
+const plainValue = (value) => JSON.parse(JSON.stringify(value));
+
 const CONFIG = {
   providers: [{
     id: 'p1', name: 'Local ComfyUI', baseUrl: 'http://127.0.0.1:8188',
@@ -959,6 +965,67 @@ test('锁状态只存与默认不同的键：预设上锁、自配解锁、Comfy
   }, 'ComfyUI：输入参数不锁，输出设置照预设来源锁');
   // 老配置没有 presetId：按自配处理（放宽），一升级不该发现改不了尺寸。
   assert.equal(plain(api.__test.lockedMapOf({}, {})).size, false);
+});
+
+test('本地部署三条（ComfyUI / A1111 / SwarmUI）默认不锁输入键，OpenAI 兼容的 sd-server 仍锁', () => {
+  const { api } = createHarness({ config: PRESET_CONFIG });
+  const unlockedInputs = {
+    size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false
+  };
+  // 参数清单由部署端决定（装了哪个 sampler、模型目录里有哪几个 checkpoint、工作流接了什么），
+  // 预设给不了映射：锁住这些键等于让这个模型配不下去。返回格式仍是协议定的，三种都照锁。
+  for (const adapter of ['comfyui', 'a1111', 'swarmui']) {
+    assert.deepEqual(plainValue(api.__test.lockDefaultsFor({ presetId: adapter, adapter })),
+      { ...unlockedInputs, operations: true },
+      adapter + '：输入键默认不锁，返回格式仍按预设来源锁');
+  }
+  // sd-server / localai / openai-gateway 走 OpenAI 兼容字段（adapter 是 openai-images）：
+  // 尺寸、质量、字段模板都有规则可写，和云端预设同一档，照旧全锁。
+  for (const presetId of ['sd-server', 'localai', 'openai-gateway']) {
+    const defaults = plainValue(api.__test.lockDefaultsFor({ presetId, adapter: 'openai-images' }));
+    for (const key of ['size', 'quality', 'prompt', 'negative', 'model', 'n', 'image', 'operations']) {
+      assert.equal(defaults[key], true, presetId + ' 的 ' + key + ' 仍锁');
+    }
+  }
+  // 协议 id 是配置里的字符串（可能是手写的）：大小写与空白不该决定锁不锁。
+  assert.deepEqual(plainValue(api.__test.lockDefaultsFor({ presetId: 'a1111', adapter: ' A1111 ' })),
+    { ...unlockedInputs, operations: true });
+});
+
+/** 本地部署预设：presetId 在，但参数由部署端决定。 */
+function localPresetConfig(presetId, adapter, baseUrl) {
+  return {
+    providers: [{
+      id: 'pl', name: presetId, baseUrl, key: '', hasKey: false, adapter,
+      protocol: 'openai-images', optionalKey: true, presetId,
+      models: ['local-model.safetensors'], names: {}
+    }],
+    active: { providerId: 'pl', model: 'local-model.safetensors' },
+    defaults: {}
+  };
+}
+
+test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是锁', async () => {
+  // A1111 的模型面板只有参数表（尺寸 / 采样器全走 sdapi 参数），锁在表标题那一行。
+  const a1111 = await openEditor(localPresetConfig('a1111', 'a1111', 'http://127.0.0.1:7860'));
+  const a1111Panel = openModelPanel(a1111.harness);
+  assert.ok(paramBox(a1111Panel, 'common'), 'A1111 的参数表在');
+  assert.equal(paramLock(a1111Panel, 'prompt').props['aria-pressed'], 'false', 'A1111 的参数表默认不锁');
+  assert.notEqual(paramCell(commonRows(a1111Panel)[0], 'name').props.disabled, true, 'A1111 的参数行能直接改');
+
+  // SwarmUI 走模型选项面板：尺寸方框的锁也默认松着。
+  const swarm = await openEditor(localPresetConfig('swarmui', 'swarmui', 'http://127.0.0.1:7801'));
+  const swarmPanel = openModelPanel(swarm.harness);
+  assert.equal(paramLock(swarmPanel, 'size').props['aria-pressed'], 'false', 'SwarmUI 的尺寸不锁');
+  const sizeMode = findAll(swarmPanel, (node) => node.type === 'select'
+    && node.props['data-param-key'] === 'size')[0];
+  assert.notEqual(sizeMode.props.disabled, true, 'SwarmUI 的尺寸控件能直接改');
+
+  // sd-server 走 OpenAI 兼容字段：和云端预设一样默认全锁。
+  const sd = await openEditor(localPresetConfig('sd-server', 'openai-images', 'http://127.0.0.1:8080/v1'));
+  const sdPanel = openModelPanel(sd.harness);
+  assert.equal(paramLock(sdPanel, 'size').props['aria-pressed'], 'true', 'sd-server 的尺寸仍锁');
+  assert.equal(paramLock(sdPanel, 'prompt').props['aria-pressed'], 'true', 'sd-server 的常规表仍锁');
 });
 
 test('一键配置把命中的尺寸与字段写进去，并给写过的键上锁', async () => {
@@ -2635,35 +2702,94 @@ test('方框一律占满面板宽度：不再半宽、也不按内容收缩', as
   assert.equal(body.props.style.gridTemplateColumns, 'minmax(0, 1fr)', '框体是单列：每个方框都占满');
 });
 
-test('自动检测与全部解锁挪进「输入设置」这一行的右端', async () => {
-  const { harness } = await openEditor(CLOUD_CONFIG);
+/** 「输入设置 / 输出设置」两块折叠区：按 data-* 标记找，不按文案。 */
+const settingsSection = (tree, marker) => findAll(tree, (node) => node.type === 'details'
+  && node.props && node.props[marker] !== undefined)[0] || null;
+const settingsRow = (section) => findAll(section, (node) => node.type === 'summary')[0] || null;
+
+test('输入设置与输出设置是同一行结构：标题在左、操作区在右，两行逐字段对齐', async () => {
+  // 自定义端点这一档同时有两样参照物：两块折叠区都在，模型目录里也有「获取可用模型」。
+  const { harness } = await openEditor(CUSTOM_RELAY_CONFIG);
   const opened = openModelPanel(harness);
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const summary = findAll(panel, (node) => node.type === 'summary')[0];
-  assert.ok(summary, '「输入设置」的 summary 在');
-  assert.equal(summary.props.style.justifyContent, 'space-between', 'label 左、两个按钮右');
+  const input = settingsSection(opened, 'data-mo-image-input-settings');
+  const output = settingsSection(opened, 'data-mo-image-output-settings');
+  assert.ok(input, '「输入设置」折叠区在');
+  assert.ok(output, '「输出设置」折叠区在');
+  const rows = [settingsRow(input), settingsRow(output)];
+  assert.ok(rows[0] && rows[1], '两行都在');
 
-  const detectButton = findAll(summary, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join('')))[0];
-  const unlockButton = findAll(summary, (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join('')))[0];
-  assert.ok(detectButton, '自动检测在 summary 里');
-  assert.ok(unlockButton, '全部解锁在 summary 里');
-  // 面板上各只剩这一个：没有另一处散落的按钮。
-  assert.equal(findAll(panel, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join(''))).length, 1);
-  assert.equal(findAll(panel, (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join(''))).length, 1);
+  // ① 同一个容器（类名相同 = 同一份内边距），两格布局：标题左、操作区右。
+  assert.equal(rows[0].props.className, rows[1].props.className, '两行用同一个容器类');
+  for (const row of rows) {
+    assert.equal(row.props.style.display, 'flex', '显式 flex：不靠宿主样式');
+    assert.equal(row.props.style.justifyContent, 'space-between', '只有一条左基线、一条右基线');
+    assert.equal(row.props.style.alignItems, 'center', '锁图标与按钮同一条垂直中线');
+    assert.equal(row.props.style.width, '100%');
+    assert.equal(row.children.length, 2, '标题 + 操作区，别的不放（多一个按钮就会撑高、挪基线）');
+  }
 
-  // 点按钮不该把折叠区开合：preventDefault / stopPropagation 都要拦住。
+  // ② 左格、右格各自同一份样式：左边缘与右边缘因此是同一条线。
+  assert.deepEqual(plainValue(rows[0].children[0].props.style), plainValue(rows[1].children[0].props.style),
+    '标题格同一份样式');
+  assert.equal(rows[0].children[1].props.className, rows[1].children[1].props.className, '操作区同一个盒子');
+  assert.deepEqual(plainValue(rows[0].children[1].props.style), plainValue(rows[1].children[1].props.style),
+    '操作区同一份样式');
+  assert.equal(rows[1].children[1].props.style.display, 'flex');
+  assert.equal(rows[1].children[1].props.style.alignItems, 'center', '操作区内部也居中');
+
+  // ③ 输入行右边只有「自动检测」，样式直接复用模型目录的「获取可用模型」。
+  const detectButtons = findAll(rows[0], (node) => node.type === 'button');
+  assert.equal(detectButtons.length, 1, '输入行只留一个按钮');
+  const detect = detectButtons[0];
+  assert.match(textOf(detect).join(''), /Auto-detect/);
+  const fetchModelsButton = findButton(opened, (node) => /Fetch available models/i.test(textOf(node).join('')));
+  assert.ok(fetchModelsButton, '模型目录里的「获取可用模型」是同一套样式的参照');
+  assert.equal(detect.props.className, fetchModelsButton.props.className, '同一个组件 + 同一个类名');
+  assert.ok(hasClass(detect, 'linkButton'), '就是 linkButton，不是 secondaryButton');
+  assert.equal(findAll(rows[0], (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join(''))).length, 0,
+    '「全部解锁」不再挂在输入行上');
+  // 面板上只此一处自动检测：没有另一份散落的按钮。
+  assert.equal(findAll(opened, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join(''))).length, 1);
+
+  // ④ 输出行右边还是一个锁图标，且不带按钮内边距（右边缘才和按钮对齐）。
+  const outputButtons = findAll(rows[1], (node) => node.type === 'button');
+  assert.equal(outputButtons.length, 1, '输出行只有一把锁');
+  assert.equal(outputButtons[0].props['data-lock-key'], 'operations');
+  assert.equal(outputButtons[0].props.style.padding, 0, '锁图标没有按钮内边距');
+
+  // ⑤ 点「自动检测」照旧只检测、不开合折叠区。
   const calls = { prevented: 0, stopped: 0 };
-  const event = () => ({
+  detect.props.onClick({
     preventDefault() { calls.prevented += 1; },
     stopPropagation() { calls.stopped += 1; }
   });
-  unlockButton.props.onClick(event());
   assert.deepEqual(calls, { prevented: 1, stopped: 1 });
-  detectButton.props.onClick(event());
   assert.equal(harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length, 1,
     '自动检测照旧发起请求');
-  assert.equal(calls.prevented, 2);
-  assert.equal(calls.stopped, 2);
+});
+
+test('「全部解锁」收进「输入设置」展开后的第一行：提示文字右边，参数表上方', async () => {
+  const { harness } = await openEditor(PRESET_CONFIG);
+  const opened = openModelPanel(harness);
+  const input = settingsSection(opened, 'data-mo-image-input-settings');
+  const body = findAll(input, (node) => hasClass(node, 'customizedBody'))[0];
+  assert.ok(body, '「输入设置」的内容区在');
+  const toolbar = body.children[0];
+  assert.equal(toolbar.props.style.justifyContent, 'space-between', '一行里：说明在左、解锁在右');
+
+  const unlock = findButton(toolbar, (node) => /Unlock all/i.test(textOf(node).join('')));
+  assert.ok(unlock, '「全部解锁」在提示行上');
+  assert.ok(hasClass(unlock, 'linkButton'), '小字按钮：和提示同一行，不抢标题栏');
+  assert.match(textOf(toolbar).join(''), /Locked keys survive bulk and single detection/, '解锁的说明就在同一行');
+
+  // 在参数表上方：先看到「锁着也行 / 要改就解锁」，再看到方框。
+  const order = [];
+  walk(body, (node) => order.push(node));
+  const firstBox = paramBox(body, 'common');
+  assert.ok(firstBox, '参数表还在');
+  assert.ok(order.indexOf(toolbar) < order.indexOf(firstBox), '提示行在参数表之前');
+  // 两行的标题栏里都没有它（标题栏只放一个操作）。
+  assert.equal(findAll(opened, (node) => node.type === 'summary' && /Unlock all/.test(textOf(node).join(''))).length, 0);
 });
 
 /* ───────── 参考图「传法」：先选传法、后填字段名，不用回来重选 ───────── */
