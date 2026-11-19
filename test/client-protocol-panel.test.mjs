@@ -655,6 +655,22 @@ test('自定义协议不提醒：adapter 就是用户自己挑的「自定义」
   assert.ok(presetNoticeOf(other), '换了协议就该提醒');
 });
 
+test('新建的「自定义模型 API」入口不提醒：那个入口本来就是自己配', () => {
+  // 用户已经明确选了「我自己配」，红字再说「没认出预设」纯属噪音。
+  const client = loadClient({ customMode: true });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: '', name: '', baseUrl: 'https://g.example/v1', adapter: '', presetId: '', models: [], names: {}
+  }, true);
+  assert.equal(presetNoticeOf(node), undefined, '自定义 API 入口不该有红字');
+  // 对照：编辑同样形状（adapter 空、没有来源）的老配置就提醒——证明不是「永远没有」。
+  const editing = loadClient();
+  editing.setCatalog();
+  assert.ok(presetNoticeOf(renderForm(editing, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: '', models: [], names: {}
+  })), '编辑页照旧提醒');
+});
+
 test('预设来源不提醒：有 presetId 就是认出来了', () => {
   const client = loadClient();
   client.setCatalog();
@@ -1030,6 +1046,9 @@ function formSkeleton(node) {
   if (Array.isArray(node)) return node.map(formSkeleton).filter((item) => item !== null);
   if (typeof node !== 'object') return 'text';
   const props = node.props || {};
+  // 顶部那句红字是**条件元素**（认不出来源才出现），不是布局差异：新建「自定义模型 API」
+  // 入口本来就不提醒，编辑同形状的配置会提醒。比对骨架时整棵子树丢掉。
+  if (props['data-mo-image-provider-notice'] !== undefined) return null;
   const marks = Object.keys(props)
     .filter((key) => key === 'className' || key.startsWith('data-'))
     .sort()
@@ -1046,7 +1065,8 @@ function formSkeleton(node) {
 function bodySkeleton(node) {
   const blocks = formBlocks(node);
   const modeBar = modeBarOf(blocks);
-  return blocks.filter((item) => item !== modeBar).map(formSkeleton);
+  // formSkeleton 对「条件元素」（顶部红字）返回 null：这里一并丢掉，否则两侧会差一个块。
+  return blocks.filter((item) => item !== modeBar).map(formSkeleton).filter((item) => item !== null);
 }
 
 test('新增「自定义模型 API」与编辑页是同一套布局：只有模式开关是新面孔', () => {
