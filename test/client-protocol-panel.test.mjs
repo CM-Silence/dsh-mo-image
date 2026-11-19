@@ -493,7 +493,7 @@ function insideAnyDetails(node, target) {
   return false;
 }
 
-test('三个主字段常显：密钥 / 显示名称 / API 地址都不在任何折叠区里', () => {
+test('编辑页常显只有 API 密钥：显示名称 / API 地址都收进「自定义设置」', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -502,25 +502,34 @@ test('三个主字段常显：密钥 / 显示名称 / API 地址都不在任何�
   const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
   const name = collect(node, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
   const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
-  for (const [label, control] of [['API 密钥', key], ['显示名称', name], ['API 地址', url]]) {
-    assert.ok(control, label + ' 在');
-    assert.equal(insideAnyDetails(node, control), false, label + ' 不能收进折叠区');
+  assert.ok(key && name && url, '三个字段都还在');
+  assert.equal(insideAnyDetails(node, key), false, 'API 密钥常显');
+  const settings = detailsOf(node, '自定义设置');
+  for (const [label, control] of [['显示名称', name], ['API 地址', url]]) {
+    assert.equal(insideAnyDetails(node, control), true, label + ' 收进折叠区');
+    assert.ok(insideOf(settings, control), label + ' 在「自定义设置」里');
   }
-  // 对照组：同样的断言能抓到被收起来的东西（协议就在协议设置里）。
+  // 「唯一常显的字段」是字面意思：不套 details 的输入框只剩密钥这一个。
+  const alwaysVisible = collect(node, (n) => n.type === 'input' && !insideAnyDetails(node, n));
+  assert.deepEqual(alwaysVisible.map((n) => (n.props.type === 'password' ? 'key' : n.props.value)), ['key'],
+    '常显的输入框只有 API 密钥');
+  // 对照组：同样的断言能抓到被收起来的东西（协议就在同一个折叠区里）。
   const protocol = collect(node, (n) => n.type === 'select' && n.props['data-mo-image-protocol'] !== undefined)[0];
   assert.equal(insideAnyDetails(node, protocol), true, '协议是收在折叠区里的');
 });
 
-test('协议设置：默认收起的折叠区，协议 / 鉴权 / 图生图端点 / 两个返回格式都在里面', () => {
+test('编辑页只有一个「自定义设置」折叠区，默认收起：协议五项与接入细节都在里面', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
-    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: ['m'], names: {}
   };
   let node = renderForm(client, provider);
-  const settings = detailsOf(node, '协议设置');
-  assert.ok(settings, '协议设置折叠区在');
-  assert.equal(settings.props.open, false, '默认收起：多数人打开面板只改密钥 / 地址 / 模型目录');
+  // 协议相关不再单独成区：所有非密钥字段只住一个折叠区。
+  assert.equal(detailsOf(node, '协议设置'), undefined, '不再有「协议设置」折叠区');
+  const settings = detailsOf(node, '自定义设置');
+  assert.ok(settings, '「自定义设置」折叠区在');
+  assert.equal(settings.props.open, false, '默认收起：多数人打开面板只改密钥');
 
   // 五个控件：API 协议、鉴权方式、图生图端点、文生图返回格式、图生图返回格式。
   const controls = () => protocolPanelControls(node);
@@ -528,12 +537,16 @@ test('协议设置：默认收起的折叠区，协议 / 鉴权 / 图生图端�
     ['API 协议', '鉴权方式', '图生图端点', '文生图返回格式', '图生图返回格式']);
   for (const [label, control] of Object.entries(controls())) {
     assert.ok(control, label + ' 在');
-    assert.ok(insideOf(settings, control), label + ' 收在协议设置里');
+    assert.ok(insideOf(settings, control), label + ' 收在「自定义设置」里');
   }
   // 「识别协议」按钮跟在协议下拉同一行，也一并收进来。
   const detect = collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined)[0];
   assert.ok(detect, '识别协议按钮在');
-  assert.ok(insideOf(settings, detect), '识别协议按钮也收在协议设置里');
+  assert.ok(insideOf(settings, detect), '识别协议按钮也收在「自定义设置」里');
+  // 接入细节同住一个区：模型目录不再有自己的折叠外壳。
+  const directory = collect(node, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(directory, '模型目录在');
+  assert.ok(insideOf(settings, directory), '模型目录也在同一个折叠区里');
 
   // 顺序按协议本身来：协议（含识别按钮）→ 鉴权 → 图生图端点 → 文生图返回格式 → 图生图返回格式。
   const order = preorder(settings);
@@ -548,7 +561,7 @@ test('协议设置：默认收起的折叠区，协议 / 鉴权 / 图生图端�
   // 展开：open 是受控状态，点一下 summary 重渲染就是展开态，控件一个不少。
   settings.props.onToggle({ currentTarget: { open: true } });
   node = renderForm(client, provider);
-  const opened = detailsOf(node, '协议设置');
+  const opened = detailsOf(node, '自定义设置');
   assert.equal(opened.props.open, true, '点开 summary 就展开');
   for (const [label, control] of Object.entries(controls())) {
     assert.ok(insideOf(opened, control), label + ' 展开后还在原地');
@@ -567,12 +580,12 @@ function protocolPanelControls(node) {
   };
 }
 
-test('预设来源的提供商不渲染「协议设置」：协议 / 鉴权 / 图生图端点 / 返回格式一个都不出现', () => {
+test('预设来源不渲染协议项，但显示名称 / 地址 / 模型目录仍在「自定义设置」里', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
-    presetId: 'openai', models: [], names: {}
+    presetId: 'openai', models: ['m'], names: {}
   });
   // 判据就是来源（provider.presetId）：预设里协议 / 鉴权 / 返回格式都写好了，
   // 用户零配置就该能用，所以整块不渲染——不是藏起来留个空壳。
@@ -583,18 +596,23 @@ test('预设来源的提供商不渲染「协议设置」：协议 / 鉴权 / �
   // 「识别协议」是协议设置里的动作：协议已知，连按钮一起不显示。
   assert.equal(collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined).length, 0,
     '预设来源不需要识别协议');
-  // 常显的三段与「自定义设置」照旧：藏起来的只是协议那一块。
+
+  // 藏起来的只是协议那一块：显示名称 / 地址 / 模型目录照常出现，只是都住在折叠区里。
+  const settings = detailsOf(node, '自定义设置');
+  assert.ok(settings, '「自定义设置」还在');
   const name = collect(node, (n) => n.type === 'input' && n.props.value === 'OpenAI')[0];
   const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://api.openai.com/v1')[0];
+  const directory = collect(node, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
   const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
-  for (const [label, control] of [['显示名称', name], ['API 地址', url], ['API 密钥', key]]) {
+  for (const [label, control] of [['显示名称', name], ['API 地址', url], ['模型目录', directory]]) {
     assert.ok(control, label + ' 还在');
-    assert.equal(insideAnyDetails(node, control), false, label + ' 仍然常显');
+    assert.ok(insideOf(settings, control), label + ' 在「自定义设置」里');
   }
-  assert.ok(detailsOf(node, '自定义设置'), '「自定义设置」还在');
+  assert.ok(key, 'API 密钥还在');
+  assert.equal(insideAnyDetails(node, key), false, 'API 密钥仍然常显');
 });
 
-test('判据只看 presetId：同一份配置去掉它，就是自己填的网关，协议设置照旧渲染', () => {
+test('判据只看 presetId：同一份配置去掉它，协议项就回到「自定义设置」里', () => {
   // 对照组：地址和协议一模一样，只差来源。不能靠 baseUrl 猜「是不是内置的」。
   const provider = {
     id: 'p1', name: 'Relay', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], names: {}
@@ -602,11 +620,11 @@ test('判据只看 presetId：同一份配置去掉它，就是自己填的网�
   const custom = loadClient();
   custom.setCatalog();
   const customNode = renderForm(custom, provider);
-  const customSettings = detailsOf(customNode, '协议设置');
-  assert.ok(customSettings, '没有 presetId 的提供商仍然有「协议设置」');
+  const customSettings = detailsOf(customNode, '自定义设置');
+  assert.ok(customSettings, '没有 presetId 的提供商：协议项收在「自定义设置」里');
   for (const [label, control] of Object.entries(protocolPanelControls(customNode))) {
     assert.ok(control, label + ' 在');
-    assert.ok(insideOf(customSettings, control), label + ' 收在协议设置里');
+    assert.ok(insideOf(customSettings, control), label + ' 收在「自定义设置」里');
   }
   assert.equal(collect(customNode, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined).length, 1,
     '识别协议按钮在（协议未知，这正是它派上用场的地方）');
@@ -614,7 +632,8 @@ test('判据只看 presetId：同一份配置去掉它，就是自己填的网�
   const preset = loadClient();
   preset.setCatalog();
   const presetNode = renderForm(preset, { ...provider, presetId: 'openai' });
-  assert.equal(detailsOf(presetNode, '协议设置'), undefined, '加上 presetId 就变回预设来源，整块不渲染');
+  assert.equal(collect(presetNode, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 0,
+    '加上 presetId 就变回预设来源，协议项整块不渲染');
 });
 
 /** 表单顶部那句「认不出提供商预设」的红字（没有就是 undefined）。 */
@@ -746,8 +765,9 @@ test('升级前的老配置：normalizeConfig 按分组补上来源，判据就�
   };
   const before = loadClient();
   before.setCatalog();
-  assert.ok(detailsOf(renderForm(before, legacyProvider), '协议设置'),
-    '没有来源：按自定义 API 渲染，协议设置照旧在');
+  assert.ok(collect(renderForm(before, legacyProvider), (n) => n.type === 'select'
+    && n.props['data-mo-image-protocol'] !== undefined)[0],
+  '没有来源：按自定义 API 渲染，协议项照旧在');
 
   // 宿主读配置时按分组补上来源（openai-images 那组里按地址认到了 openai）：同一份配置在面板里变成「预设来源」。
   const config = normalizeConfig({
@@ -766,7 +786,7 @@ test('升级前的老配置：normalizeConfig 按分组补上来源，判据就�
     assert.equal(control, undefined, label + ' 不该出现');
   }
 
-  // 反向：手改过地址的老配置补不上来源，协议设置照旧在（那是他要用的东西）。
+  // 反向：手改过地址的老配置补不上来源，协议项照旧在（那是他要用的东西）。
   const relay = normalizeConfig({
     version: 1,
     providers: [{ ...legacyProvider, baseUrl: 'https://my-relay.example/v1' }],
@@ -775,7 +795,7 @@ test('升级前的老配置：normalizeConfig 按分组补上来源，判据就�
   });
   assert.equal(relay.providers[0].presetId, undefined, '自建网关不补来源');
   const relayNode = renderForm(after, relay.providers[0]);
-  assert.ok(detailsOf(relayNode, '协议设置'), '协议设置照旧渲染');
+  assert.ok(detailsOf(relayNode, '自定义设置'), '「自定义设置」照旧渲染');
   for (const [label, control] of Object.entries(protocolPanelControls(relayNode))) {
     assert.ok(control, label + ' 在');
   }
@@ -927,6 +947,72 @@ test('本地模型：模型目录收在「自定义设置」折叠区里，模�
   assert.equal(insideOf(advancedWithRow, row), true, '模型行跟着模型目录一起收在「自定义设置」里');
 });
 
+test('这次只动编辑页：新增的三条入口布局保持原样（第三方 / 本地 / 自定义）', () => {
+  // 第三方：预设选择器 + 密钥常显；地址 / 模型目录收在「自定义设置」里；显示名称来自预设，
+  // 所以这条入口没有显示名称输入框。协议设置不出现（预设里已经写好了）。
+  const catalog = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  catalog.setCatalog();
+  const catalogNode = renderForm(catalog,
+    { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} }, true);
+  const catalogAdvanced = detailsOf(catalogNode, '自定义设置');
+  assert.ok(catalogAdvanced, '第三方：有「自定义设置」');
+  assert.equal(catalogAdvanced.props.open, false, '第三方：默认收起');
+  assert.equal(detailsOf(catalogNode, '协议设置'), undefined, '第三方：没有「协议设置」');
+  const catalogKey = collect(catalogNode, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  assert.ok(catalogKey, '第三方：API 密钥在');
+  assert.equal(insideAnyDetails(catalogNode, catalogKey), false, '第三方：密钥常显');
+  const catalogDirectory = collect(catalogNode,
+    (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(catalogDirectory, '第三方：模型目录在');
+  assert.ok(insideOf(catalogAdvanced, catalogDirectory), '第三方：模型目录收在「自定义设置」里');
+  // 输入框就两个：常显的密钥 + 折叠区里的地址。多一个就是这条入口被顺手改了（比如加了显示名称）。
+  assert.deepEqual(collect(catalogNode, (n) => n.type === 'input').map((n) => n.props.type || 'text'),
+    ['password', 'text'], '第三方：密钥常显 + 折叠区里的地址，显示名称来自预设（不单独出输入框）');
+
+  // 本地：部署器 + 显示名称 + 密钥常显；地址 / 模型目录在「自定义设置」里。
+  const localClient = loadClient({ preserveFormState: true, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  localClient.setCatalog();
+  const localProvider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let localNode = renderForm(localClient, localProvider, true);
+  const localButton = collect(localNode, (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  assert.ok(localButton, '本地：模式开关里有「本地模型」');
+  localButton.props.onClick();
+  localNode = renderForm(localClient, localProvider, true);
+  const localDeployer = collect(localNode, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'sd-server').length === 1)[0];
+  const localName = collect(localNode, (item) => item.type === 'input' && item.props.value === 'sd-server')[0];
+  const localKey = collect(localNode, (item) => item.type === 'input' && item.props.type === 'password')[0];
+  const localUrl = collect(localNode, (item) => item.type === 'input' && item.props.value === 'http://127.0.0.1:8080/v1')[0];
+  const localAdvanced = detailsOf(localNode, '自定义设置');
+  for (const [label, control] of [['本地部署器', localDeployer], ['显示名称', localName], ['API 密钥', localKey]]) {
+    assert.ok(control, '本地：' + label + ' 在');
+    assert.equal(insideAnyDetails(localNode, control), false, '本地：' + label + ' 常显');
+  }
+  assert.ok(localUrl, '本地：API 地址在');
+  assert.ok(insideOf(localAdvanced, localUrl), '本地：API 地址收在「自定义设置」里');
+  assert.equal(insideAnyDetails(localNode, localName), false, '本地：显示名称仍常显（这次没动新增页）');
+  assert.equal(detailsOf(localNode, '协议设置'), undefined, '本地：没有「协议设置」');
+
+  // 自定义 API：整张表平铺，一个折叠区都没有。
+  const custom = loadClient({ customMode: true });
+  custom.setCatalog();
+  const customNode = renderForm(custom, {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: ['m'], names: {}
+  }, true);
+  assert.deepEqual(collect(customNode, (item) => item.type === 'details'), [], '自定义 API：表单里没有任何 details');
+  const customName = collect(customNode, (n) => n.type === 'input' && n.props.value === 'Gateway')[0];
+  const customUrl = collect(customNode, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
+  const customKey = collect(customNode, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  for (const [label, control] of [['显示名称', customName], ['API 地址', customUrl], ['API 密钥', customKey]]) {
+    assert.ok(control, '自定义 API：' + label + ' 在');
+    assert.equal(insideAnyDetails(customNode, control), false, '自定义 API：' + label + ' 平铺');
+  }
+  const customOrder = preorder(formRoot(customNode));
+  const customAt = (target) => customOrder.indexOf(target);
+  assert.ok(customAt(customName) < customAt(customUrl), '自定义 API：显示名称 → API 地址');
+  assert.ok(customAt(customUrl) < customAt(customKey), '自定义 API：API 地址 → API 密钥');
+});
+
 test('本地预设编辑：与云厂商预设同一规则，整块协议设置都不渲染（含鉴权）', () => {
   for (const local of LOCAL_DEPLOYER_FIXTURE) {
     const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
@@ -960,20 +1046,20 @@ test('本地部署清单在场时，云厂商预设照旧整块不渲染协议�
   }
 });
 
-test('自定义 API：本地部署清单在场时协议设置五项照样全在（对照组）', () => {
+test('自定义 API：本地部署清单在场时协议五项照样全在「自定义设置」里（对照组）', () => {
   const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
   });
-  const settings = detailsOf(node, '协议设置');
-  assert.ok(settings, '没有 presetId = 自己填的网关，协议设置在');
+  const settings = detailsOf(node, '自定义设置');
+  assert.ok(settings, '没有 presetId = 自己填的网关，协议项收在「自定义设置」里');
   const controls = protocolPanelControls(node);
   assert.deepEqual(Object.keys(controls),
     ['API 协议', '鉴权方式', '图生图端点', '文生图返回格式', '图生图返回格式']);
   for (const [label, control] of Object.entries(controls)) {
     assert.ok(control, label + ' 在');
-    assert.ok(insideOf(settings, control), label + ' 收在协议设置里');
+    assert.ok(insideOf(settings, control), label + ' 收在「自定义设置」里');
   }
 });
 
@@ -1033,7 +1119,7 @@ test('隐藏协议设置不清值：预设来源存在里面的协议 / 鉴权 /
   assert.equal(saved.presetId, 'openai', '来源也原样带回');
 });
 
-test('「自定义设置」只留接入细节：模型目录在，协议 / 鉴权 / 返回格式都不在', () => {
+test('编辑页展开「自定义设置」：显示名称 → API 地址 → 协议设置 → 模型目录', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -1043,21 +1129,47 @@ test('「自定义设置」只留接入细节：模型目录在，协议 / 鉴�
   assert.ok(advanced, '自定义设置折叠区在');
   assert.equal(advanced.props.open, false, '默认收起');
 
+  const name = collect(node, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
+  const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
+  const protocol = protocolPanelControls(node)['API 协议'];
+  const directory = collect(node, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
   const fetch = fetchButton(node);
-  assert.ok(fetch, '「获取可用模型」入口在');
-  assert.ok(insideOf(advanced, fetch), '模型目录（含拉取按钮）仍在自定义设置里');
-
-  for (const [label, prop] of [
-    ['API 协议', 'data-mo-image-protocol'],
-    ['鉴权方式', 'data-mo-image-auth-mode'],
-    ['返回格式', 'data-mo-image-output-presets']
-  ]) {
-    assert.equal(collect(advanced, (n) => n.props && n.props[prop] !== undefined).length, 0,
-      label + ' 不该收进自定义设置');
+  for (const [label, control] of [['显示名称', name], ['API 地址', url],
+    ['API 协议', protocol], ['模型目录', directory], ['获取可用模型', fetch]]) {
+    assert.ok(control, label + ' 在');
+    assert.ok(insideOf(advanced, control), label + ' 收在「自定义设置」里');
   }
+  const order = preorder(advanced);
+  const at = (target) => order.indexOf(target);
+  assert.ok(at(name) < at(url), '显示名称排在 API 地址之前');
+  assert.ok(at(url) < at(protocol), '协议设置排在 API 地址之后');
+  assert.ok(at(protocol) < at(directory), '模型目录排在协议设置之后');
+  assert.ok(at(directory) < at(fetch), '拉取按钮跟着模型目录');
+
+  // 自定义协议：路由排在模型目录之后，是折叠区里的最后一块。
+  const gateway = renderForm(client, {
+    id: 'p2', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom', models: ['m'], names: {}
+  });
+  const gatewayAdvanced = detailsOf(gateway, '自定义设置');
+  const route = collect(gateway, (n) => n.type === 'input' && n.props.name === 'route-generate')[0];
+  const gatewayDirectory = collect(gateway, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(route && gatewayDirectory, '路由与模型目录都在');
+  assert.ok(insideOf(gatewayAdvanced, route), '路由收在「自定义设置」里');
+  const gatewayOrder = preorder(gatewayAdvanced);
+  assert.ok(gatewayOrder.indexOf(gatewayDirectory) < gatewayOrder.indexOf(route), '路由排在模型目录之后');
+
+  // 调度模型（openai-responses 才有）同样在折叠区里，排在模型目录之后。
+  const responses = renderForm(client, {
+    id: 'p3', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
+    hostModel: 'gpt-5.2', models: ['m'], names: {}
+  });
+  const responsesAdvanced = detailsOf(responses, '自定义设置');
+  const hostModel = collect(responses, (n) => n.type === 'input' && n.props.value === 'gpt-5.2')[0];
+  assert.ok(hostModel, '调度模型输入框在');
+  assert.ok(insideOf(responsesAdvanced, hostModel), '调度模型收在「自定义设置」里');
 });
 
-test('自定义协议：路由与调度模型留在「自定义设置」，请求与返回格式跟着协议常显', () => {
+test('自定义协议：路由 / 调度模型排在模型目录之后，请求与返回格式跟着协议同住一个折叠区', () => {
   const client = loadClient();
   client.setCatalog();
   const gateway = renderForm(client, {
@@ -1068,12 +1180,15 @@ test('自定义协议：路由与调度模型留在「自定义设置」，请�
   assert.ok(route, '自定义路由输入框在');
   assert.ok(insideOf(advanced, route), '路由是接入细节：收在自定义设置里');
 
-  const settings = detailsOf(gateway, '协议设置');
   const operations = collect(gateway, (n) => n.props && n.props['data-mo-image-operations'] === 'provider')[0];
   assert.ok(operations, '「请求与返回格式」编辑器在');
-  assert.ok(insideOf(settings, operations), '请求与返回格式跟着协议，收在协议设置里');
-  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-operations'] === 'provider').length, 0,
-    '同一块不再出现在自定义设置里');
+  assert.ok(insideOf(advanced, operations), '请求与返回格式跟着协议，同一个折叠区里');
+  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-operations'] === 'provider').length, 1,
+    '同一块只渲染一份，不因为合并折叠区重复一遍');
+  const directory = collect(gateway, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  const order = preorder(advanced);
+  assert.ok(order.indexOf(operations) < order.indexOf(directory), '返回格式（协议）排在模型目录之前');
+  assert.ok(order.indexOf(directory) < order.indexOf(route), '路由排在模型目录之后');
 
   const responses = renderForm(client, {
     id: 'p2', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
@@ -1138,12 +1253,23 @@ function formSkeleton(node) {
   });
 }
 
-/** 去掉新建才有的模式开关之后，表单根的骨架（顺序 + 折叠区 + 控件）。 */
-function bodySkeleton(node) {
-  const blocks = formBlocks(node);
+/**
+ * 摊平折叠外壳、去掉模式开关与「常显的密钥块」之后，表单根的直接子块骨架（顺序 + 控件）。
+ *
+ * 新建的「自定义模型 API」是平铺的、编辑页收进一个「自定义设置」；两条入口的密钥位置本来就
+ * 不同（新建把密钥排在地址之后，见 ProviderFormLayout 的 fieldOrder），所以比对前先摘掉密钥
+ * 那一块，剩下的应当逐块相同——验证的是「字段顺序只有一处定义」，而不是「两边长得一模一样」。
+ * 密钥块只能回到渲染树里认：骨架不带字段类型（buttons / inputs 的 type 都不进 marks）。
+ */
+function sharedLayoutOf(node) {
+  const blocks = formBlocks(withoutSections(node));
   const modeBar = modeBarOf(blocks);
-  // formSkeleton 对「条件元素」（顶部红字）返回 null：这里一并丢掉，否则两侧会差一个块。
-  return blocks.filter((item) => item !== modeBar).map(formSkeleton).filter((item) => item !== null);
+  return blocks
+    .filter((item) => item !== modeBar)
+    .filter((item) => collect(item, (child) => child && child.type === 'input'
+      && child.props && child.props.type === 'password').length === 0)
+    .map(formSkeleton)
+    .filter((item) => item !== null);
 }
 
 /**
@@ -1175,7 +1301,7 @@ function withoutSections(node) {
   return { type: node.type, props: props, children: children };
 }
 
-test('新建「自定义模型 API」全部平铺，编辑页仍是两个折叠区：字段顺序来自同一处', () => {
+test('这次只动编辑页：新建「自定义模型 API」仍全部平铺，编辑页只收进一个「自定义设置」', () => {
   const cases = [
     {
       label: '内置协议',
@@ -1202,12 +1328,12 @@ test('新建「自定义模型 API」全部平铺，编辑页仍是两个折叠�
     creating.setCatalog();
     const added = renderForm(creating, item.provider, true);
 
-    // 编辑页照旧折叠：这次只动新建的那条入口。
-    assert.ok(detailsOf(edited, '协议设置'), item.label + '：编辑页的「协议设置」还在');
-    assert.ok(detailsOf(edited, '自定义设置'), item.label + '：编辑页的「自定义设置」还在');
+    // 编辑页：所有非密钥字段只住一个折叠区，协议不再单独成区。
+    assert.equal(detailsOf(edited, '协议设置'), undefined, item.label + '：编辑页不再有「协议设置」折叠区');
+    assert.ok(detailsOf(edited, '自定义设置'), item.label + '：编辑页的「自定义设置」在');
 
-    // 新建的自定义 API：两个折叠区都不再出现（自定义协议那块「请求与返回格式」编辑器自带
-    // 一个 details 外壳，它是编辑器本身，不是这次要拆的「协议设置 / 自定义设置」）。
+    // 新建的自定义 API：一个折叠区都不出现（自定义协议那块「请求与返回格式」编辑器自带
+    // 一个 details 外壳，它是编辑器本身，不是这次要动的折叠区）。
     assert.equal(detailsOf(added, '协议设置'), undefined, item.label + '：没有「协议设置」折叠区');
     assert.equal(detailsOf(added, '自定义设置'), undefined, item.label + '：没有「自定义设置」折叠区');
     assert.deepEqual(collect(formRoot(added), (node) => node.type === 'details'
@@ -1215,9 +1341,9 @@ test('新建「自定义模型 API」全部平铺，编辑页仍是两个折叠�
         || node.props['data-mo-image-advanced'] !== undefined)), [],
     item.label + '：两个折叠区的标记一个都不剩');
 
-    // 差的只是那层壳：去掉壳之后两棵树逐块相同（字段顺序没有第二份定义）。
-    assert.deepEqual(bodySkeleton(withoutSections(added)), bodySkeleton(withoutSections(edited)),
-      item.label + '：去掉折叠外壳后，新建与编辑逐块相同');
+    // 差的只是那层壳与密钥的位置：摘掉密钥块之后两棵树逐块相同（字段顺序没有第二份定义）。
+    assert.deepEqual(sharedLayoutOf(added), sharedLayoutOf(edited),
+      item.label + '：去掉折叠外壳与密钥块后，新建与编辑逐块相同');
     assert.ok(modeBarOf(formBlocks(added)), item.label + '：新建有「第三方 / 本地 / 自定义」开关');
     assert.equal(modeBarOf(formBlocks(edited)), undefined, item.label + '：编辑页没有模式开关');
   }
@@ -1336,7 +1462,7 @@ test('新建「自定义模型 API」：显示名称 → API 地址 → API 密�
   assert.equal(directory.props.style, undefined, '新建入口的模型目录保留分隔线');
 });
 
-test('编辑页的「自定义设置」：模型目录不再多画一条上边线，折叠区自己的边线保留', () => {
+test('编辑页的「自定义设置」：模型目录不再站在第一块，自带的分隔线保留', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -1348,12 +1474,13 @@ test('编辑页的「自定义设置」：模型目录不再多画一条上边�
   // 折叠区自身那条线来自 .customized 的 border-top，不是内联样式：别顺手把它也删了。
   assert.match(String(settings.props.className || ''), /customized/, '折叠区自身样式还在');
   assert.equal(settings.props.style, undefined, '没有给折叠区加内联样式');
-  // 多余的是模型目录自带的上边线（.modelCatalog 的 border-top，紧贴标题下面）：
-  // 在编辑页它是折叠区第一块，必须显式关掉。
+  // 模型目录上面现在还有名称 / 地址 / 协议：它自带的上边线是有用的分隔线，必须留着。
   const directory = collect(settings, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
   assert.ok(directory, '模型目录在「自定义设置」里');
-  assert.equal(directory.props.style && directory.props.style.borderTop, 'none',
-    '模型目录不再带上边线（那条多余的分割线）');
+  assert.equal(directory.props.style, undefined, '模型目录不再显式关掉上边线');
+  const name = collect(settings, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
+  const order = preorder(settings);
+  assert.ok(order.indexOf(name) < order.indexOf(directory), '模型目录前面还有别的字段，那条线是分隔线');
 });
 
 test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
@@ -1492,8 +1619,9 @@ test('自定义协议的返回格式不再套折叠区：两个下拉直接排�
   assert.ok(panel, '返回格式面板在');
   assert.notEqual(panel.type, 'details', '不再套「请求与返回格式」details');
   assert.equal(detailsOf(node, '请求与返回格式'), undefined, '没有那个折叠区了');
-  // 位置不变：它是协议这一组的最后一项（协议 → 鉴权 → 图生图端点 → 返回格式）。
-  assert.equal(insideOf(detailsOf(node, '协议设置'), panel), true, '跟着协议设置走');
+  // 位置不变：它是协议这一组的最后一项（协议 → 鉴权 → 图生图端点 → 返回格式），
+  // 和协议其它字段一起收在「自定义设置」里。
+  assert.equal(insideOf(detailsOf(node, '自定义设置'), panel), true, '跟着协议一起收在「自定义设置」里');
 
   // 两个下拉是本面板的第一块，和内置协议一样一行两列。
   const selects = collect(panel, (item) => item.type === 'select' && item.props['data-mo-image-output-preset']);
@@ -1601,13 +1729,14 @@ test('内置协议的返回格式只剩预设下拉：手写 JSON 输入框与�
   });
   const panel = collect(node, (item) => item.props['data-mo-image-output-presets'] === 'provider')[0];
   assert.ok(panel, '返回预设面板要渲染');
-  // 返回格式属于协议：跟着协议收在「协议设置」里，不再塞进「自定义设置」。
-  const settings = detailsOf(node, '协议设置');
-  assert.ok(settings, '协议设置折叠区在');
+  // 返回格式属于协议：跟着协议一起收进「自定义设置」，不再有自己的折叠区。
+  const settings = detailsOf(node, '自定义设置');
+  assert.ok(settings, '自定义设置折叠区在');
   assert.equal(insideOf(settings, panel), true, '这块 UI 跟着协议走');
-  const advanced = detailsOf(node, '自定义设置');
-  assert.ok(advanced, '自定义设置折叠区还在');
-  assert.equal(insideOf(advanced, panel), false, '不再留在自定义设置里');
+  assert.equal(detailsOf(node, '协议设置'), undefined, '协议设置不再单独成区');
+  assert.equal(collect(node, (item) => item.type === 'details'
+    && item.props['data-mo-image-protocol-settings'] !== undefined).length, 0,
+  '协议设置的标记也不在');
   const selects = collect(panel, (item) => item.type === 'select' && item.props['data-mo-image-output-preset']);
   assert.deepEqual(
     selects.map((item) => item.props['data-mo-image-output-preset']).sort(),
