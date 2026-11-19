@@ -54,7 +54,7 @@ async function harness(t, options = {}) {
 
   const tools = [];
   const mod = await import('../lib/index.js?call-lifecycle-' + Math.random().toString(36).slice(2));
-  mod.apply(fakeContext(tools), options.applyOptions || {});
+  mod.apply(fakeContext(tools), { update: { skipCheck: true }, ...options.applyOptions });
 
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -175,7 +175,7 @@ async function bflHarness(t) {
 
   const tools = [];
   const mod = await import('../lib/index.js?bfl-journal-' + Math.random().toString(36).slice(2));
-  mod.apply(fakeContext(tools), { queue: { concurrency: 2, maxWaiting: 8 } });
+  mod.apply(fakeContext(tools), { queue: { concurrency: 2, maxWaiting: 8 }, update: { skipCheck: true } });
 
   const calls = [];
   const originalFetch = globalThis.fetch;
@@ -234,7 +234,7 @@ test('an async generate writes a resumable job record', async (t) => {
 
 async function restartPlugin(tools) {
   const mod = await import('../lib/index.js?restart-' + Math.random().toString(36).slice(2));
-  mod.apply(fakeContext(tools), { queue: { concurrency: 2, maxWaiting: 8 } });
+  mod.apply(fakeContext(tools), { queue: { concurrency: 2, maxWaiting: 8 }, update: { skipCheck: true } });
   return tools;
 }
 

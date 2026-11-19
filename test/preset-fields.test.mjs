@@ -37,7 +37,7 @@ function presets() {
 
 /** 该预设实际落在哪条协议上：和 resolveAdapter 的判定一致（空模型名足够区分主机型协议）。 */
 function protocolOf(preset) {
-  return resolveAdapter({ adapter: preset.adapter, baseUrl: preset.baseUrl }, '');
+  return resolveAdapter(preset, '');
 }
 
 /** 每个逻辑字段的样例值：够让三个出口都真的走一遍写入。 */
@@ -91,49 +91,17 @@ function gatewayFields(fields) {
  *
  * 所以守卫下沉一层：按**网关家族**比。同一家族里的预设仍然必须一字不差
  * （那是「两份预设各写一个样」的唯一防线），跨家族不比。
- * 每条预设都必须登记且只登记一次，否则下面的「还没有归到家族」会红。
+ * 只比较已有的同族条目。新增独立预设会自动跑下方通用契约测试。
  */
 const FIELD_FAMILIES = {
-  'openai-compatible': ['fireworks', 'novita', 'openai', 'openai-gateway', 'sd-server'],
+  'openai-compatible': ['openai', 'openai-gateway', 'sd-server'],
   // MiniMax 两个域名是同一条接口（OpenAI Images 形状）的不同地址，字段一字不差。
   'minimax': ['minimax', 'minimax-cn'],
-  'volcengine': ['volcengine', 'volcengine-plan'],
-  'siliconflow': ['siliconflow'],
-  'together': ['together'],
-  'localai': ['localai'],
-  'gemini': ['gemini'],
-  'xai': ['xai'],
-  'recraft': ['recraft'],
-  'ideogram': ['ideogram'],
-  'stability': ['stability'],
-  'openrouter': ['openrouter'],
-  'azure': ['azure'],
-  'bfl': ['bfl'],
-  'fal': ['fal'],
-  'replicate': ['replicate'],
-  'dashscope-qwen-image': ['dashscope'],
-  'dashscope-wanx': ['dashscope-wanx'],
-  'bigmodel': ['bigmodel'],
-  'modelscope': ['modelscope'],
-  'a1111': ['a1111'],
-  'comfyui': ['comfyui'],
-  'swarmui': ['swarmui']
+  'volcengine': ['volcengine', 'volcengine-plan']
 };
 
 test('同一个网关家族的所有预设，fields 必须完全一致（防止两份漂移）', () => {
   const list = presets();
-  const known = new Map();
-  for (const [family, ids] of Object.entries(FIELD_FAMILIES)) {
-    for (const id of ids) {
-      assert.equal(known.has(id), false, id + ' 同时属于 ' + known.get(id) + ' 与 ' + family);
-      known.set(id, family);
-    }
-  }
-  assert.deepEqual(
-    list.map((preset) => preset.id).filter((id) => !known.has(id)), [],
-    '这些预设还没有归到任何网关家族：新预设要在 FIELD_FAMILIES 里登记'
-  );
-
   for (const [family, ids] of Object.entries(FIELD_FAMILIES)) {
     const group = ids.map((id) => {
       const preset = list.find((item) => item.id === id);
@@ -154,18 +122,20 @@ test('同一个网关家族的所有预设，fields 必须完全一致（防止�
   }
 });
 
-test('协议复用清单：合并后这 15 条预设落在同一条 openai-images 上', () => {
+test('预设目录的 ID 唯一，地址与协议有效', () => {
   const byProtocol = new Map();
+  const ids = new Set();
   for (const preset of presets()) {
-    const id = protocolOf(preset).id;
+    assert.match(preset.id, /^[a-z0-9][a-z0-9._-]*$/);
+    assert.ok(!ids.has(preset.id), 'duplicate preset ' + preset.id);
+    ids.add(preset.id);
+    assert.match(new URL(preset.baseUrl).protocol, /^https?:$/);
+    const adapter = protocolOf(preset);
+    assert.ok(adapter.endpoints?.generate || adapter.routes?.generate, preset.id);
+    const id = adapter.id;
     if (!byProtocol.has(id)) byProtocol.set(id, []);
     byProtocol.get(id).push(preset.id);
   }
-  assert.deepEqual(
-    byProtocol.get('openai-images').sort(),
-    ['azure', 'bigmodel', 'fireworks', 'localai', 'minimax', 'minimax-cn', 'novita', 'openai', 'openai-gateway', 'sd-server', 'siliconflow', 'together', 'volcengine', 'volcengine-plan', 'xai'].sort(),
-    'openai-images 的复用清单变了'
-  );
   // 合并掉的协议 id 不能再出现在清单里。
   for (const gone of ['dall-e-3', 'gpt-image', 'together', 'localai', 'siliconflow', 'volcengine-ark', 'azure-openai', 'xai-imagine', 'zhipu']) {
     assert.equal(byProtocol.has(gone), false, gone + ' 应该已经合并进 openai-images');

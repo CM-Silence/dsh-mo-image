@@ -42,6 +42,11 @@ function legacy(provider) {
 }
 const presetIdOf = (provider) => legacy(provider).providers[0].presetId;
 
+test('明确自配的提供商保存后不按协议或官方地址回填', () => {
+  assert.equal(presetIdOf({ presetId: '', adapter: 'openai-images', baseUrl: 'https://api.openai.com/v1' }), '');
+  assert.equal(presetIdOf({ presetId: '', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188' }), '');
+});
+
 /* ------------------------------------- 第 2 步：adapter 组里只有一条 */
 
 test('adapter 唯一确定身份：地址随便写都还是那一份预设', () => {
@@ -81,8 +86,6 @@ test('共用 adapter 的靠地址分开：openai-images + 各家官方地址各�
     ['https://api.openai.com/v1', 'openai'],
     ['https://api.x.ai/v1', 'xai'],
     ['https://api.together.xyz/v1', 'together'],
-    ['https://api.fireworks.ai/inference/v1', 'fireworks'],
-    ['https://api.novita.ai/v3/openai', 'novita'],
     ['https://api.minimax.io/v1', 'minimax'],
     ['https://api.minimax.cn/v1', 'minimax-cn'],
     ['https://api.siliconflow.cn/v1', 'siliconflow'],

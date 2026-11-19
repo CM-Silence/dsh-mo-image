@@ -56,8 +56,6 @@ test('已知的 OpenAI 兼容主机：直接判定 openai-images，零探测', a
     // Azure 并进 openai-images 之后，鉴权形态（provider.auth）单独带回来，不进协议选项。
     ['https://res.openai.azure.com/openai/v1', {}, { mode: 'api-key' }],
     ['https://api.openai.com/v1', {}],
-    ['https://api.fireworks.ai/inference/v1', {}],
-    ['https://api.novita.ai/v3/openai', {}],
     // xAI / 智谱也并进来了：没有编辑端点。
     ['https://api.x.ai/v1', { edit: 'none' }],
     ['https://open.bigmodel.cn/api/paas/v4', { edit: 'none' }]

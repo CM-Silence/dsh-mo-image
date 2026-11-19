@@ -252,6 +252,28 @@ async function openProviderEditor(config, options = {}) {
   return { harness, tree };
 }
 
+test('the provider Edit button toggles the detail form and reports aria-expanded', async () => {
+  const harness = createHarness({ config: baseConfig() });
+  await settle();
+  let tree = harness.renderRoot();
+
+  const edit = findButton(tree, 'Edit');
+  assert.ok(edit, 'expected the provider Edit button');
+  assert.equal(edit.props['aria-expanded'], false, 'collapsed by default');
+  assert.equal(findButton(tree, 'Save'), null, 'the detail form is closed');
+
+  edit.props.onClick();
+  tree = harness.renderRoot();
+  assert.equal(findButton(tree, 'Edit').props['aria-expanded'], true, 'expanded after the first click');
+  assert.ok(findButton(tree, 'Save'), 'the detail form is open');
+
+  // 再点一次是收起，不是重新打开：同一个按钮承担开 / 合。
+  findButton(tree, 'Edit').props.onClick();
+  tree = harness.renderRoot();
+  assert.equal(findButton(tree, 'Edit').props['aria-expanded'], false, 'collapsed after the second click');
+  assert.equal(findButton(tree, 'Save'), null, 'the detail form is closed again');
+});
+
 test('the fetched model list pre-checks the models already in the catalog', async () => {
   const { harness, tree: edited } = await openProviderEditor(baseConfig());
   const fetchButton = findButton(edited, 'Fetch available models');

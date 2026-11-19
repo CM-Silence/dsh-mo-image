@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { apply, callImageApi } from '../lib/index.js';
 import { normalizeConfig } from '../lib/config-store.js';
-import { resolveAdapter } from '../lib/adapters.js';
+import { detectProtocolStart, providerPresetManifest, resolveAdapter } from '../lib/adapters.js';
 import { normalizeOperations, outputPresetManifest } from '../lib/provider-operations.js';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -17,6 +17,42 @@ const relay = {
   auth: { mode: 'custom', header: 'X-Relay-Key' }, models: ['m'],
   customEndpoints: { generate: 'render', edit: 'retouch', models: 'catalog' }
 };
+
+test('shipped Fireworks and Novita presets use their documented image APIs', async (t) => {
+  const presets = providerPresetManifest();
+  const cdn = 'https://cdn.invalid/result.png';
+  const calls = stubFetch(t, ({ url, method, headers, body }) => {
+    if (url.href === cdn) {
+      assert.equal(headers.get('authorization'), null);
+      assert.equal(method, 'GET');
+      return png();
+    }
+    assert.equal(method, 'POST');
+    assert.equal(headers.get('authorization'), 'Bearer mock-key');
+    if (url.host === 'api.fireworks.ai') {
+      assert.equal(url.pathname, '/inference/v1/workflows/accounts/fireworks/models/flux-1-schnell-fp8/text_to_image');
+      assert.equal(headers.get('accept'), 'image/png');
+      assert.deepEqual(JSON.parse(body), { prompt: input.prompt, aspect_ratio: '1:1' });
+      return png();
+    }
+    assert.equal(url.href, 'https://api.novita.ai/v3beta/flux-1-schnell');
+    assert.deepEqual(JSON.parse(body), {
+      prompt: input.prompt, width: 512, height: 512, image_num: 1, response_image_format: 'png'
+    });
+    return json({ images: [{ image_url: cdn }], task: { task_id: 'done' } });
+  });
+  for (const id of ['fireworks', 'novita']) {
+    const preset = presets.find((entry) => entry.id === id);
+    const provider = normalizeConfig({ providers: [{ ...preset, presetId: id, key: 'mock-key' }] }).providers[0];
+    const model = provider.models[0];
+    assert.equal(provider.presetId, id);
+    assert.equal(preset.supportsModels, false);
+    assert.equal(detectProtocolStart({ baseUrl: preset.baseUrl }).done, false);
+    const result = await callImageApi('generate', resolveAdapter(provider, model), provider, { ...input, model });
+    assert.equal(result.contentType, 'image/png');
+  }
+  assert.equal(calls.length, 3);
+});
 
 function stubFetch(t, respond) {
   const original = globalThis.fetch;
@@ -95,6 +131,7 @@ test('an unauthenticated draft can save, discover arbitrary model IDs, then gene
   const provider = { ...relay, auth: { mode: 'none' }, customEndpoints: { ...relay.customEndpoints, models: 'legacy-catalog' }, operations: {
     generate: {
       input: 'explicit', path: 'render/{model}', method: 'PUT', transport: 'form',
+      body: { output_format: 'webp', response: { mode: 'file' } },
       fields: { prompt: { path: 'caption' } },
       headers: { 'X-Render-Schema': '1' },
       output: { kind: 'json', pick: [{ path: 'assets.0.image', as: 'relative' }] }
@@ -113,7 +150,9 @@ test('an unauthenticated draft can save, discover arbitrary model IDs, then gene
       assert.equal(method, 'PUT');
       assert.equal(headers.get('X-Render-Schema'), '1');
       assert.match(headers.get('content-type'), /^application\/x-www-form-urlencoded/);
-      assert.deepEqual(Object.fromEntries(new URLSearchParams(body)), { caption: input.prompt });
+      assert.deepEqual(Object.fromEntries(new URLSearchParams(body)), {
+        caption: input.prompt, output_format: 'webp', response: '{"mode":"file"}'
+      });
       return json({ assets: [{ image: '../result.png' }] });
     }
     if (url.pathname === '/api/result.png') return png();

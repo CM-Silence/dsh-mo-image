@@ -164,7 +164,7 @@ test('provider manifests include hot image providers and native capabilities', (
     assert.ok(presets.some((preset) => preset.id === id), id);
   }
   assert.ok(presets.find((preset) => preset.id === 'gemini').models.includes('gemini-2.5-flash-image'));
-  assert.ok(presets.find((preset) => preset.id === 'xai').models.includes('grok-imagine-image'));
+  assert.ok(presets.find((preset) => preset.id === 'xai').models.includes('grok-imagine-image-2.0'));
   assert.ok(adapters.some((adapter) => adapter.id === 'google-gemini' && adapter.supportsModels));
   // xAI 并进 openai-images 了：模型清单改由通用 /models 提供（按图片关键词过滤）。
   assert.ok(adapters.some((adapter) => adapter.id === 'openai-images' && adapter.supportsModels));

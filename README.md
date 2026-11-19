@@ -169,7 +169,7 @@ npm run release -- minor --dry-run        # 只看会做什么
 | OpenAI DALL·E 3 | 显示 | Off / Standard / HD |
 | Ideogram 3 | 显示 | Off / Turbo / Default / Quality |
 | Google Gemini / Nano Banana | 隐藏 | 只有尺寸/比例，没有 quality |
-| xAI Grok Imagine | 隐藏 | 只有 resolution，没有 quality |
+| xAI Grok Imagine | 隐藏 | 当前预设使用上游默认质量，可选择分辨率 |
 | Recraft | 隐藏 | 没有 quality |
 | Stability AI | 隐藏 | 没有 quality |
 | Together AI | 隐藏 | 没有 quality |
@@ -275,13 +275,13 @@ $DSH_HOME/.credentials.yaml
 | **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **魔搭 ModelScope** | `modelscope` | `Qwen/Qwen-Image-2.1`、`Qwen/Qwen-Image-Edit` | 异步任务；提交带 `X-ModelScope-Async-Mode`，轮询 `/v1/tasks/{id}` |
-| **xAI Grok Imagine** | `openai-images`（`edit:'none'`） | `grok-imagine-image` | 生成；`aspect_ratio` + `resolution`（由主机规则给），原生编辑暂未支持 |
+| **xAI Grok Imagine** | `openai-images`（`edit:'none'`） | `grok-imagine-image-2.0` | 预设提供文生图，使用 `aspect_ratio` 和 `resolution` |
 | **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
 | **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4`、`ideogram-4-5`、`ideogram-4-transparent` | 生成；模型写在路径里，4 收 JSON+像素枚举，4-5 只收 `size`，3/transparent 收字母 `x` 的比例 |
 | **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
 | **Together AI** | `openai-images`（`edit:'none'`） | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
-| **Fireworks AI** | `openai-images` | `accounts/fireworks/models/flux-1-schnell` | OpenAI Images 兼容网关 |
-| **Novita AI** | `openai-images` | `flux-1-schnell` | OpenAI Images 兼容网关 |
+| **Fireworks AI** | 声明式 HTTP | `flux-1-schnell-fp8` | FLUX.1 Schnell FP8 专用端点，读取二进制图片 |
+| **Novita AI** | 声明式 HTTP | `flux-1-schnell` | FLUX.1 Schnell 专用端点，下载响应中的图片链接 |
 | 自定义 / 新网关 | `openai-images` | 手动/获取 | 同步或异步自动识别（见下文） |
 | 火山方舟 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成；档位按模型分（5.x 是 `1K/1.5K/2K`，lite 是 `2K/3K/4K`，4.5 是 `2K/4K`），也收任意宽高 |
 | 火山方舟 Agent Plan | `openai-images`（`edit:'same'`） | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
@@ -326,7 +326,7 @@ $DSH_HOME/.credentials.yaml
 | 部署方式 | 适配器 | 默认地址（服务根地址） | 获取模型 | 生成 / 编辑 |
 |---|---|---|---|---|
 | stable-diffusion.cpp `sd-server` | `openai-images` | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成 + `/images/edits` |
-| LocalAI | `openai-images`（`edit:'none'`） | `http://127.0.0.1:8080/v1` | `/v1/models` | 生成；没有 `/images/edits` |
+| LocalAI | `openai-images`（`edit:'none'`） | `http://127.0.0.1:8080/v1` | `/v1/models` | 预设提供生成。LocalAI 的局部编辑接口需要蒙版 |
 | AUTOMATIC1111 / Forge / SD.Next / Draw Things | `a1111` | `http://127.0.0.1:7860` | `/sdapi/v1/sd-models` | 生成 + `/sdapi/v1/img2img` |
 | ComfyUI | `comfyui` | `http://127.0.0.1:8188` | `/object_info`（CheckpointLoaderSimple + UNETLoader） | 生成 + 编辑；内置工作流按模型自动选，也可粘自定义工作流 |
 | SwarmUI | `swarmui` | `http://127.0.0.1:7801` | `/API/ListModels` | 生成；原生编辑暂不支持 |
@@ -494,7 +494,7 @@ $DSH_HOME/.credentials.yaml
 
 **识别协议**：设置页「API 协议」下拉右侧的按钮（只在自己填地址的提供商上出现——预设提供商的协议是已知的，那一块整块不显示）。判定分三步，能不发请求就不发：
 
-1. **静态判定（0 请求）**：地址或模型名能静态匹配到某条协议（例如百炼 Qwen-Image 的主机）就直接给结论；地址命中已知的 OpenAI 兼容主机表（OpenAI 官方、Azure、Together、硅基流动、火山方舟含 `/api/plan/v3`、xAI、智谱、Fireworks、Novita、DeepSeek、MiniMax 两个域名）时直接判 `openai-images`，并按主机带回协议选项与鉴权方式（如方舟的 `edit:'same'`、Azure 的 `auth.mode:'api-key'`）。ComfyUI / A1111 / SwarmUI 没有可静态识别的主机名，只能靠下面的探测表。
+1. **静态判定（0 请求）**。已知地址或模型名可以匹配协议，例如百炼 Qwen-Image。已知 OpenAI Images 主机可带回协议与鉴权默认值，例如方舟的 `edit:'same'` 和 Azure 的 `auth.mode:'api-key'`。ComfyUI、A1111 和 SwarmUI 走下面的读取探测。
 2. **客户端逐条探测**：其余地址只返回一份**探测顺序**，设置页按顺序一条条问宿主；每发一条之前就把「正在尝试访问 /xxx…」写进提示——进度是真的，不是假轮播。
 3. **命中即停**：哪条路径回来的形状能证明某个协议就停；全都不中才落到「自定义」，并预填三条相对地址，提示里带上最后试过的路径。
 
@@ -571,7 +571,9 @@ $DSH_HOME/.credentials.yaml
 
 自定义 API 支持配置文生图、图生图和模型列表三个端点。相对端点追加在 API 地址的路径之后，例如 Base URL 为 `https://gateway.example/api/v2` 时，`render` 指向 `/api/v2/render`。也可填写完整的 HTTP(S) 地址。生成和编辑的端点支持 `{model}` 占位符。图生图端点留空可关闭该操作。
 
-返回格式跟着协议那一组直接摆开（不再单套一层折叠区）：**按操作选择返回预设**，自定义协议在这一行下面还有一份手写 JSON，用来配置请求方法、字段映射与响应解析。内置协议只需要预设——预设已覆盖这些响应形态，不提供手写 JSON；以前手写的值会原样保留，面板里显示为「自定义（来自旧配置）」，重新选一个预设即可覆盖。模型覆盖未填写的选项会继承提供商设置。
+云端预设在提供商与模型两层都隐藏返回格式。本地预设的提供商层也隐藏这组选项。展开本地模型的「输出设置」并解锁后，可选择返回预设。有自定义工作流时，还可填写模型级 `generate.output` 或 `edit.output` 描述符。
+
+「自定义模型 API」提供协议和返回格式控件。选择自定义协议后，可按操作填写请求方式、字段映射和响应解析。请求体里的 `output_format` 一类字段控制上游图片编码，操作的 `output` 描述插件如何从响应里取图。模型未填写的操作设置会继承提供商配置。
 
 ```json
 {
@@ -615,7 +617,8 @@ $DSH_HOME/.credentials.yaml
 | 设置 | 含义 |
 |---|---|
 | `generate`、`edit` | 可选 `path` 覆盖端点，`method` 支持 GET、POST、PUT、PATCH，`transport` 支持 JSON、multipart、URL 编码表单和查询参数 |
-| `input: "explicit"` | 只写入配置的字段映射与参数表中的自定义行。省略时继承现有提示词、尺寸、模型和参考图配置 |
+| `input: "explicit"` | 使用固定 `body`、已配置的字段映射与参数表自定义行。省略时继承现有提示词、尺寸、模型和参考图配置 |
+| `body` | 该操作固定发送的 JSON 字段，例如 `output_format` 或嵌套的选项对象。运行时映射可填入同一对象。模型填写 `body` 时替换对应操作的提供商默认值 |
 | `fields` | 可绑定 `prompt`、`negative`、`model`、`image`、`n`、`quality`、`size`、`width`、`height`、`aspect`、`tier`。参考图映射可选择 multipart、Base64、data URL 或已有 URL |
 | `headers`、`pollHeaders` | 请求和轮询需要的普通协议头。鉴权凭据通过提供商的鉴权设置传入 |
 | `models` | 可选 `path` 覆盖端点。GET 使用端点的查询参数，其他方法可配 JSON `body`。自定义 `output.path` 指向列表，`idPath` 和 `namePath` 相对于列表项 |
@@ -630,7 +633,13 @@ $DSH_HOME/.credentials.yaml
 - `task-location` 从 Location 读取状态 URL。相对值以提交响应的 URL 为基准。 `task-json` 从 JSON 读任务 ID，再查询 `/tasks/{taskId}`。
 - 自定义 `json` 描述符可声明字段路径、候选顺序、筛选和内容类型。自定义 `task` 描述符可声明任务 ID、状态词、轮询地址、成功后读取的路径和额外结果请求。设 `resultAs: "relative"` 可按最终响应 URL 解析图片路径。设 `pollOutput: "binary"` 可在轮询接口直接接收图片。
 
-提供商预设由 `lib/adapters.js` 的目录下发。新的返回格式预设可加到 `lib/provider-operations.js` 中，继续使用 `lib/output-profiles.js` 的描述符校验和解析。配置支持这套声明式能力之外的协议使用专用适配器，例如需要获取会话、上传文件、刷新 OAuth 凭据或编排本地工作流的接口。
+### 新增预设
+
+复用已有协议时，在 `lib/adapters.js` 的 `PROVIDER_PRESETS` 或 `LOCAL_PRESETS` 增加一条记录。常规 OpenAI Images 接口可以使用 `{ id, name, baseUrl, adapter: 'openai-images' }`。按需加入默认模型、鉴权和字段覆盖。宿主会自动发布该记录并根据适配器计算模型列表能力，目录测试也会自动检查它。
+
+请求路径或响应有差异的 HTTP 接口可在同一条预设记录里声明 `operations`，Fireworks 和 Novita 是两个实例。已有解析器能表达的新返回值，可在 `lib/provider-operations.js` 的 `OUTPUT_PRESETS` 增加描述符。会话握手、令牌自动刷新等新协议行为仍需要相应适配器。
+
+Fireworks 和 Novita 的旧配置可以重新从目录添加新版预设以采用新端点。 [Fireworks 官方接口](https://docs.fireworks.ai/api-reference/generate-a-new-image-from-a-text-prompt) · [Novita 官方接口](https://novita.ai/docs/api-reference/model-apis-flux-1-schnell)
 
 ### 异常恢复
 

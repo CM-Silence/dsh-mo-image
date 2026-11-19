@@ -1309,6 +1309,53 @@ test('新建「自定义模型 API」：模型目录 / 路由 / 调度模型平�
   assert.equal(detailsOf(responses, '自定义设置'), undefined, '调度模型也没有折叠区包着');
 });
 
+test('新建「自定义模型 API」：显示名称 → API 地址 → API 密钥 → API 协议', () => {
+  const client = loadClient({ customMode: true });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  }, true);
+
+  const name = collect(node, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
+  const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
+  const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  const protocol = protocolPanelControls(node)['API 协议'];
+  for (const [label, control] of [['显示名称', name], ['API 地址', url], ['API 密钥', key], ['API 协议', protocol]]) {
+    assert.ok(control, label + ' 在');
+  }
+  const order = preorder(formRoot(node));
+  const at = (target) => order.indexOf(target);
+  // 密钥跟着地址 / 协议走：它和「连哪个服务」是同一组信息，不再排在最前。
+  assert.ok(at(name) < at(url), '显示名称在 API 地址之前');
+  assert.ok(at(url) < at(key), 'API 密钥在 API 地址之后');
+  assert.ok(at(key) < at(protocol), 'API 密钥仍在 API 协议之前');
+
+  // 只改这条平铺入口：模型目录的分隔线照旧（编辑页那条才是多余的，见下一条用例）。
+  const directory = collect(node, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(directory, '模型目录在');
+  assert.equal(directory.props.style, undefined, '新建入口的模型目录保留分隔线');
+});
+
+test('编辑页的「自定义设置」：模型目录不再多画一条上边线，折叠区自己的边线保留', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    models: ['m'], names: {}
+  });
+  const settings = detailsOf(node, '自定义设置');
+  assert.ok(settings, '「自定义设置」折叠区在');
+  // 折叠区自身那条线来自 .customized 的 border-top，不是内联样式：别顺手把它也删了。
+  assert.match(String(settings.props.className || ''), /customized/, '折叠区自身样式还在');
+  assert.equal(settings.props.style, undefined, '没有给折叠区加内联样式');
+  // 多余的是模型目录自带的上边线（.modelCatalog 的 border-top，紧贴标题下面）：
+  // 在编辑页它是折叠区第一块，必须显式关掉。
+  const directory = collect(settings, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(directory, '模型目录在「自定义设置」里');
+  assert.equal(directory.props.style && directory.props.style.borderTop, 'none',
+    '模型目录不再带上边线（那条多余的分割线）');
+});
+
 test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
   const client = loadClient();
   client.setCatalog();
@@ -1754,7 +1801,7 @@ test('模型选项分成输入设置与输出设置两块折叠区：默认都�
     'false', '锁图标显示为未锁');
 });
 
-test('预设来源：两块设置区都在但默认锁住，点锁能解锁（解锁状态会落盘）', () => {
+test('云端预设的模型只显示输入设置，且输入默认锁住', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -1764,11 +1811,9 @@ test('预设来源：两块设置区都在但默认锁住，点锁能解锁（�
   const row = expandModelOptions(client, provider, () => renderForm(client, provider));
   const input = modelSection(row, 'data-mo-image-input-settings');
   const output = modelSection(row, 'data-mo-image-output-settings');
-  // 两块都在：预设来源不该把整块藏起来，只该锁住（看得到、改不了）。
   assert.ok(input, '输入设置在');
-  assert.ok(output, '输出设置在');
+  assert.equal(output, null, '云端预设不显示模型级返回设置');
   assert.equal(input.props.open, undefined, '输入设置默认收起');
-  assert.equal(output.props.open, undefined, '输出设置默认收起');
 
   // 输入设置：每个方框的锁都按着，框内控件全部禁用。
   assert.equal(collect(input, (item) => item.props['data-lock-key'] === 'size')[0].props['aria-pressed'], 'true',
@@ -1778,29 +1823,39 @@ test('预设来源：两块设置区都在但默认锁住，点锁能解锁（�
   assert.equal(collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'image')[0]
     .props.disabled, true, '锁住时参考图控件禁用');
 
-  // 输出设置：下拉摆着（看得到当前预设）但禁用，锁图标可按。
-  const outputSelects = collect(output, (item) => item.type === 'select'
-    && item.props['data-mo-image-output-preset']);
-  assert.equal(outputSelects.length, 2, '两个返回格式下拉都在');
-  for (const select of outputSelects) {
-    assert.equal(select.props.disabled, true, '锁住时返回格式下拉禁用');
-  }
-  const lock = collect(output, (item) => item.props['data-lock-key'] === 'operations')[0];
-  assert.ok(lock, '输出设置的锁在标题行');
-  assert.equal(lock.props['aria-pressed'], 'true', '预设来源默认锁住');
+});
 
-  // 点锁解锁：下拉立刻能改，保存时落一句 locked.operations = false（沿用现有 locked，不另造字段）。
+test('本地自定义工作流可解锁并为单个模型编辑输出描述符', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', presetId: 'comfyui',
+    models: ['m'], names: {}, modelOptions: { m: { workflow: '{"1":{"class_type":"SaveImage","inputs":{}}}' } }
+  };
+  const render = () => renderForm(client, provider);
+  const row = expandModelOptions(client, provider, render);
+  const section = (tree) => modelSection(tree, 'data-mo-image-output-settings');
+  const json = (tree) => collect(section(tree), (item) => item.props['data-mo-image-operations-json'] !== undefined)[0];
+  assert.equal(json(row).props.disabled, true);
+  const lock = collect(section(row), (item) => item.props['data-lock-key'] === 'operations')[0];
   lock.props.onClick({ preventDefault() {}, stopPropagation() {} });
-  const unlockedRow = collect(renderForm(client, provider), (item) => item.props && item.props['data-row-key'] === '0')[0];
-  const unlockedOutput = modelSection(unlockedRow, 'data-mo-image-output-settings');
-  const unlockedSelects = collect(unlockedOutput, (item) => item.type === 'select'
-    && item.props['data-mo-image-output-preset']);
-  assert.equal(unlockedSelects.length, 2, '解锁后两个下拉还在');
-  for (const select of unlockedSelects) {
-    assert.notEqual(select.props.disabled, true, '解锁后可改');
-  }
-  assert.equal(collect(unlockedOutput, (item) => item.props['data-lock-key'] === 'operations')[0]
-    .props['aria-pressed'], 'false', '锁图标跟随解锁');
+  assert.equal(json(render()).props.disabled, false);
+  assert.equal(collect(render(), (item) => item.props['data-mo-image-protocol-settings'] !== undefined).length, 0);
+});
+
+test('云端声明式预设也隐藏自定义端点和输出设置', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', adapter: 'custom', presetId: 'fireworks',
+    operations: { generate: { path: 'render', output: 'binary' } }, models: ['m'], names: {}
+  };
+  const render = () => renderForm(client, provider);
+  expandModelOptions(client, provider, render);
+  const tree = render();
+  assert.equal(collect(tree, (item) => item.props['data-mo-image-protocol-settings'] !== undefined).length, 0);
+  assert.equal(collect(tree, (item) => item.props['data-mo-image-output-settings'] !== undefined).length, 0);
+  assert.equal(collect(tree, (item) => item.props.name === 'route-generate').length, 0);
 });
 
 test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保存后原样带回', async () => {

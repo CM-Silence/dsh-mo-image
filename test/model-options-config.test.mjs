@@ -240,7 +240,7 @@ test('normalizeConfig 保存并回读预设来源 presetId', () => {
 });
 
 test('normalizeConfig 丢掉形状不对的 presetId', () => {
-  const bad = ['../etc/passwd', 'has space', 'x'.repeat(80), 42, null, { a: 1 }, ''];
+  const bad = ['../etc/passwd', 'has space', 'x'.repeat(80), 42, null, { a: 1 }];
   for (const value of bad) {
     const config = normalizeConfig({
       version: 1,
