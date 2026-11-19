@@ -18,6 +18,11 @@ import { normalizeConfig, presetIdForProvider } from '../lib/config-store.js';
  *      有占位符，只能靠名字）。
  *   5. 都不唯一 → 不回填。
  *
+ * **adapter 为空**（老配置 / 手动建的提供商）没有组可归，改在**全部预设**里按地址认
+ * 唯一命中；地址认不出再按名称认唯一命中（名称只是次级证据，同样必须唯一）。
+ * 以前这里只兜底「不绑 adapter」的 openai 一份，火山方舟 Agent Plan 这种地址一字不差
+ * 却 adapter 为空的老配置就认不出来。
+ *
  * 回填只回答「这个提供商来自哪份预设」——UI 判据（协议设置整块不渲染）、锁的默认值、
  * 一键配置都读这一个字段；adapter 与用户选过的协议一律原样保留。
  *
@@ -171,22 +176,53 @@ test('azure 的预设地址是占位符：靠名称认（Azure OpenAI）', () =>
 
 /* ------------------------------------- 第 5 步 / 兜底 */
 
-test('空 adapter 不算身份：只按地址在「不绑 adapter」的预设里兜底', () => {
-  // `openai` 这份预设本身没写 adapter（由地址/模型现选），地址对得上就认它。
+test('空 adapter 在全部预设里按地址认：唯一命中就回填', () => {
+  // 实测：火山方舟 Agent Plan 的名称与地址都与预设一字不差，adapter 却是空串
+  // （老配置 / 手动建的）。以前只在「不绑 adapter」的 openai 一份里兜底，它认不出来。
+  assert.equal(presetIdOf({
+    adapter: '', baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', name: '火山方舟 Agent Plan'
+  }), 'volcengine-plan');
+  assert.equal(presetIdOf({ baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3' }), 'volcengine-plan');
+  // 同一组里其他家的地址也认得出，不再只兜底 openai。
+  assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://api.x.ai/v1' }), 'xai');
   assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://api.openai.com/v1' }), 'openai');
-  assert.equal(presetIdOf({ baseUrl: 'https://api.openai.com/v1' }), 'openai');
-  // 地址不像：不填。空白 adapter 当没写。
+  // 地址不像任何预设：不填。空白 adapter 当没写。
   assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://my-relay.example/v1' }), undefined);
   assert.equal(presetIdOf({ adapter: '   ', baseUrl: 'https://my-relay.example/v1' }), undefined);
   // 空地址也不发明来源。
   assert.equal(presetIdOf({ baseUrl: '' }), undefined);
 });
 
-test('兜底只看地址：中转站把自己叫成 OpenAI 也不会被认成预设来源', () => {
-  // 名称是用户随手起的，不能当证据：真按名字认，自建网关会被拽成 openai，
-  // 协议设置整块藏起来——而他正要改的就是那个地址。
+test('空 adapter 地址命中多份预设：不猜，名称唯一才落地', () => {
+  // 127.0.0.1:8080 同时登记了 sd-server 与 LocalAI；百炼两条预设共用一个地址。
+  assert.equal(presetIdOf({ adapter: '', baseUrl: 'http://127.0.0.1:8080/v1', optionalKey: true }), undefined);
+  assert.equal(presetIdOf({
+    adapter: '', baseUrl: 'http://127.0.0.1:8080/v1', name: 'LocalAI', optionalKey: true
+  }), 'localai');
+  assert.equal(presetIdOf({
+    adapter: '', baseUrl: 'https://dashscope.aliyuncs.com/api/v1', name: '阿里云百炼 · 通义万相'
+  }), 'dashscope-wanx');
+});
+
+test('名称是次级证据：地址认不出时按名称唯一命中', () => {
+  // 换过域名 / 私有化部署：地址比不中，显示名还是预设的名字。
+  assert.equal(presetIdOf({
+    adapter: '', baseUrl: 'https://ark-gateway.example/v1', name: '火山方舟 Agent Plan'
+  }), 'volcengine-plan');
+  assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://my-relay.example/v1', name: 'OpenAI' }), 'openai');
+  // 名称只做去空白 + 小写的归一。
+  assert.equal(presetIdOf({
+    adapter: '', baseUrl: 'https://ark-gateway.example/v1', name: '  火山方舟 agent plan  '
+  }), 'volcengine-plan');
+  // 认不出的名字照样不填。
+  assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://my-relay.example/v1', name: 'My Gateway' }), undefined);
+});
+
+test('名称不会越组乱认：adapter 能分组时，名字只在组内当证据', () => {
+  // openai 这份预设不绑 adapter，不在 openai-images 组里：组内按名字认不到它，不填。
   assert.equal(presetIdOf({ adapter: 'openai-images', baseUrl: 'https://my-relay.example/v1', name: 'OpenAI' }), undefined);
-  assert.equal(presetIdOf({ adapter: '', baseUrl: 'https://my-relay.example/v1', name: 'OpenAI' }), undefined);
+  // 组内地址认得出时地址优先，名字不抢。
+  assert.equal(presetIdOf({ adapter: 'openai-images', baseUrl: 'https://api.x.ai/v1', name: 'Together AI' }), 'xai');
 });
 
 test('认不出的 adapter 不进任何组：不回填', () => {
@@ -259,7 +295,9 @@ test('回填幂等：再跑一遍 normalizeConfig，结果一模一样', () => {
     { id: 'p4', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8189', optionalKey: true, models: ['m'] },
     { id: 'p5', adapter: 'openai-images', baseUrl: 'https://res.openai.azure.com/openai/v1', name: 'Azure OpenAI', models: ['m'] },
     { id: 'p6', adapter: 'openai-images', baseUrl: 'http://127.0.0.1:8080/v1', name: 'LocalAI', models: ['m'] },
-    { id: 'p7', baseUrl: 'https://api.openai.com/v1', models: ['m'] }
+    { id: 'p7', baseUrl: 'https://api.openai.com/v1', models: ['m'] },
+    // 实测里那一份：名称与地址都对得上，adapter 是空串。
+    { id: 'p8', baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', name: '火山方舟 Agent Plan', models: ['m'] }
   ];
   const once = normalizeConfig({
     version: 1, providers: providers, active: { providerId: 'p1', model: 'm' },
@@ -268,5 +306,5 @@ test('回填幂等：再跑一遍 normalizeConfig，结果一模一样', () => {
   const twice = normalizeConfig(JSON.parse(JSON.stringify(once)));
   assert.deepEqual(twice, once);
   assert.deepEqual(once.providers.map((provider) => provider.presetId),
-    ['openai', undefined, 'dashscope', 'comfyui', 'azure', 'localai', 'openai']);
+    ['openai', undefined, 'dashscope', 'comfyui', 'azure', 'localai', 'openai', 'volcengine-plan']);
 });

@@ -432,6 +432,30 @@ test('a local deployment still reads Local, not Custom', async () => {
   assert.deepEqual(rowTags(harness.renderRoot()), ['Local']);
 });
 
+test('a custom endpoint keeps the Custom tag and its editor does not warn about a missing preset', async () => {
+  // 实测的 APIYI：列表里带着「自定义」标签，编辑页却红字说「未识别出提供商预设」。
+  // 两处必须是同一份判据：自己填地址的提供商不是「本该有来源」。
+  const config = baseConfig({
+    providers: [{
+      id: 'p1', name: 'APIYI', baseUrl: 'https://api.apiyi.com/v1',
+      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      models: ['alpha-model'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'alpha-model' }
+  });
+  const harness = createHarness({ config });
+  await settle();
+  let tree = harness.renderRoot();
+  assert.deepEqual(rowTags(tree), ['Custom']);
+  findButton(tree, 'Edit').props.onClick();
+  tree = harness.renderRoot();
+  assert.equal(
+    findAll(tree, (node) => node.props && node.props['data-mo-image-provider-notice'] !== undefined).length,
+    0,
+    'the custom endpoint editor must not show the unrecognized-preset notice'
+  );
+});
+
 test('the section header keeps DSH spacing: title row then intro as section children', async () => {
   const harness = createHarness({ config: baseConfig() });
   await settle();

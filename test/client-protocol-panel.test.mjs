@@ -618,39 +618,54 @@ function presetNoticeOf(node) {
 }
 
 test('认不出提供商：表单顶部一句红字，排在 API 密钥上方', () => {
-  // 老配置 / 中转站：没有来源，adapter 也不是用户自己挑的自定义协议 —— 这就是
-  // 「本该是某个已知提供商，但认不出是哪家」的那一档。
-  for (const adapter of ['openai-images', 'comfyui', '']) {
-    const client = loadClient();
-    client.setCatalog();
+  // 「本该是某个已知提供商，但认不出是哪家」的那一档：地址就是内置预设的地址
+  // （api.openai.com），协议却不是预设里的那一条 —— 说不出是哪份预设。
+  const client = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses', models: [], names: {}
+  });
+  const notice = presetNoticeOf(node);
+  assert.ok(notice, '预设地址 + 非预设协议：要有这句提醒');
+  assert.match(text(notice).join(''), /未识别出提供商预设/, '文案走 form.providerUnrecognized');
+  // 位置：表单最顶部（第一个块），API 密钥上方，且不在任何折叠区里。
+  assert.equal(formBlocks(node)[0], notice, '排在表单最顶部');
+  const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
+  assert.ok(key, 'API 密钥在');
+  const order = preorder(node);
+  assert.ok(order.indexOf(notice) < order.indexOf(key), '红字排在 API 密钥上方');
+  assert.equal(insideAnyDetails(node, notice), false, '红字常显，不进折叠区');
+  // 颜色用现有的错误色变量：不新造颜色。
+  assert.match(String(notice.props.style.color), /--dsw-alias-state-error-primary/);
+});
+
+test('自定义 API 不提醒：地址不在任何预设里，列表里就带着「自定义」标签', () => {
+  // 实测的 APIYI：adapter 是空串（不是 'custom'）、编辑页 isNew 为假 —— 旧判据在这里误报。
+  // 判据与列表里的「自定义」标签共用一份：自己填的端点本来就没有预设来源。
+  const client = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE });
+  client.setCatalog();
+  for (const adapter of ['', 'openai-images']) {
     const node = renderForm(client, {
-      id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: adapter, models: [], names: {}
+      id: 'p1', name: 'APIYI', baseUrl: 'https://api.apiyi.com/v1', adapter: adapter, models: [], names: {}
     });
-    const notice = presetNoticeOf(node);
-    assert.ok(notice, (adapter || '(自动)') + '：要有这句提醒');
-    assert.match(text(notice).join(''), /未识别出提供商预设/, '文案走 form.providerUnrecognized');
-    // 位置：表单最顶部（第一个块），API 密钥上方，且不在任何折叠区里。
-    assert.equal(formBlocks(node)[0], notice, '排在表单最顶部');
-    const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
-    assert.ok(key, 'API 密钥在');
-    const order = preorder(node);
-    assert.ok(order.indexOf(notice) < order.indexOf(key), '红字排在 API 密钥上方');
-    assert.equal(insideAnyDetails(node, notice), false, '红字常显，不进折叠区');
-    // 颜色用现有的错误色变量：不新造颜色。
-    assert.match(String(notice.props.style.color), /--dsw-alias-state-error-primary/);
+    assert.equal(presetNoticeOf(node), undefined, (adapter || '(自动)') + '：自定义 API 不该有红字');
   }
 });
 
 test('自定义协议不提醒：adapter 就是用户自己挑的「自定义」，它本来就没有 presetId', () => {
-  const client = loadClient();
+  const client = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE });
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom', models: [], names: {}
   });
   assert.equal(presetNoticeOf(node), undefined, '自定义协议不该有这句红字');
-  // 对照：同一份配置换成具体协议就有了（证明不是「永远没有」）。
+  // 地址恰好是预设地址也一样：请求形状是用户自己写的，不因为地址像谁就变成预设来源。
+  assert.equal(presetNoticeOf(renderForm(client, {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://api.openai.com/v1', adapter: 'custom', models: [], names: {}
+  })), undefined, '自定义协议即使地址像预设也不提醒');
+  // 对照：同一份地址换成非预设的具体协议就有了（证明不是「永远没有」）。
   const other = renderForm(client, {
-    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+    id: 'p1', name: 'Gateway', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses', models: [], names: {}
   });
   assert.ok(presetNoticeOf(other), '换了协议就该提醒');
 });
@@ -663,12 +678,12 @@ test('新建的「自定义模型 API」入口不提醒：那个入口本来就�
     id: '', name: '', baseUrl: 'https://g.example/v1', adapter: '', presetId: '', models: [], names: {}
   }, true);
   assert.equal(presetNoticeOf(node), undefined, '自定义 API 入口不该有红字');
-  // 对照：编辑同样形状（adapter 空、没有来源）的老配置就提醒——证明不是「永远没有」。
-  const editing = loadClient();
+  // 对照：编辑一个地址是预设、协议不是预设的老配置仍然提醒 —— 证明不是「永远没有」。
+  const editing = loadClient({ providerPresets: PROVIDER_PRESET_FIXTURE });
   editing.setCatalog();
   assert.ok(presetNoticeOf(renderForm(editing, {
-    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: '', models: [], names: {}
-  })), '编辑页照旧提醒');
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses', models: [], names: {}
+  })), '预设地址 + 非预设协议：编辑页照旧提醒');
 });
 
 test('预设来源不提醒：有 presetId 就是认出来了', () => {
@@ -679,6 +694,31 @@ test('预设来源不提醒：有 presetId 就是认出来了', () => {
     presetId: 'openai', models: [], names: {}
   });
   assert.equal(presetNoticeOf(node), undefined, '认出来源就没有红字');
+});
+
+test('火山方舟 Agent Plan（旧配置 adapter 为空）回填 volcengine-plan：协议设置整块隐藏', () => {
+  // 实测：名称与地址都和预设一字不差，adapter 却是空串 —— 以前按空 adapter 只兜底 openai，
+  // 认不出来；现在在全部预设里按地址认唯一命中，回填来源。
+  const config = normalizeConfig({
+    version: 1,
+    providers: [{
+      id: 'p1', name: '火山方舟 Agent Plan',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+      adapter: '', protocol: 'openai-images',
+      models: ['doubao-seedream-4-0-250828'], names: {}
+    }],
+    active: { providerId: 'p1', model: 'doubao-seedream-4-0-250828' },
+    defaults: { quality: 'high', auto: true, width: 1024, height: 1024 }
+  });
+  const provider = config.providers[0];
+  assert.equal(provider.presetId, 'volcengine-plan', '地址唯一命中预设');
+
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, provider);
+  assert.equal(presetNoticeOf(node), undefined, '认出来源就没有红字');
+  assert.equal(detailsOf(node, '协议设置'), undefined, '预设来源：整块协议设置不渲染');
+  assert.ok(detailsOf(node, '自定义设置'), '「自定义设置」照旧在');
 });
 
 test('新增从目录选预设：不提醒（选中的就是这个提供商的来源）', () => {
@@ -1046,8 +1086,7 @@ function formSkeleton(node) {
   if (Array.isArray(node)) return node.map(formSkeleton).filter((item) => item !== null);
   if (typeof node !== 'object') return 'text';
   const props = node.props || {};
-  // 顶部那句红字是**条件元素**（认不出来源才出现），不是布局差异：新建「自定义模型 API」
-  // 入口本来就不提醒，编辑同形状的配置会提醒。比对骨架时整棵子树丢掉。
+  // 顶部那句红字是**条件元素**（认不出来源才出现），不是布局差异：比对骨架时整棵子树丢掉。
   if (props['data-mo-image-provider-notice'] !== undefined) return null;
   const marks = Object.keys(props)
     .filter((key) => key === 'className' || key.startsWith('data-'))
