@@ -881,7 +881,7 @@ const paramInput = (tree, key) => findAll(tree, (node) => node.type === 'input'
 const paramLock = (tree, key) => findAll(tree, (node) => node.type === 'button'
   && node.props['data-lock-key'] === key)[0] || null;
 /**
- * 模型选项面板自己的框体：模型行里「高级」那个 details 的 customizedBody。
+ * 模型选项面板自己的框体：模型行里「输入设置」那个 details 的 customizedBody。
  * 不能直接取全树第一个 customizedBody —— 提供商表单自己的折叠区（协议设置 / 自定义设置）
  * 也是同一个类名，而且排在模型行前面。
  */
@@ -927,13 +927,15 @@ test('预设来源的提供商默认全锁，中转站与自定义提供商默�
   assert.notEqual(paramInput(customPanel, 'image').props.disabled, true);
 });
 
-test('锁状态只存与默认不同的键：预设上锁、自配解锁', () => {
+test('锁状态只存与默认不同的键：预设上锁、自配解锁、ComfyUI 的输入键不锁', () => {
   const { api } = createHarness({ config: PRESET_CONFIG });
   // 跨 vm 边界的对象走一趟 JSON：deepEqual 会比对原型，vm 里的 Object 与本进程不是同一个。
   const plain = (value) => JSON.parse(JSON.stringify(value));
-  const preset = { presetId: 'openai' };
+  const preset = { presetId: 'openai', adapter: 'openai-images' };
   const relay = { adapter: '' };
   const custom = { adapter: 'custom' };
+  // ComfyUI 的参数是用户自己接到工作流上的：输入键不锁，但返回格式仍是协议定的，照锁。
+  const comfy = { presetId: 'comfyui', adapter: 'comfyui' };
 
   const customEntry = {};
   api.__test.writeLock(customEntry, 'size', true, custom);
@@ -945,13 +947,16 @@ test('锁状态只存与默认不同的键：预设上锁、自配解锁', () =>
   api.__test.writeLock(presetEntry, 'image', false, preset);
   assert.deepEqual(plain(presetEntry.locked), { image: false }, '预设默认全锁，解锁才写');
   assert.deepEqual(plain(api.__test.lockedMapOf({}, preset)), {
-    size: true, quality: true, prompt: true, negative: true, model: true, n: true, image: true
+    size: true, quality: true, prompt: true, negative: true, model: true, n: true, image: true, operations: true
   });
   for (const provider of [relay, custom]) {
     assert.deepEqual(plain(api.__test.lockedMapOf({}, provider)), {
-      size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false
+      size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false, operations: false
     });
   }
+  assert.deepEqual(plain(api.__test.lockedMapOf({}, comfy)), {
+    size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false, operations: true
+  }, 'ComfyUI：输入参数不锁，输出设置照预设来源锁');
   // 老配置没有 presetId：按自配处理（放宽），一升级不该发现改不了尺寸。
   assert.equal(plain(api.__test.lockedMapOf({}, {})).size, false);
 });
@@ -1071,7 +1076,7 @@ test('「全部解锁」把预设提供商的锁一次全解开', async () => {
   const { harness } = await openEditor(PRESET_CONFIG);
   let opened = openModelPanel(harness);
   const unlock = findButton(opened, (node) => /Unlock all/i.test(textOf(node).join('')));
-  assert.ok(unlock, '「高级」里要有全部解锁');
+  assert.ok(unlock, '「输入设置」里要有全部解锁');
   unlock.props.onClick(fakeEvent());
   opened = harness.renderRoot();
   // 「常规」现在是参数表：prompt 行是代表键，其余三行按字段模板有没有出现。
@@ -1095,19 +1100,19 @@ test('单点自动检测只写未上锁的键，而且不上锁（下次还会�
   assert.equal(entry.locked, undefined, '自动检测不写锁：三种自动上锁里没有它');
 });
 
-test('手填的输入框收在默认折叠的「高级」里', async () => {
+test('手填的输入框收在默认折叠的「输入设置」里', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const details = findAll(panel, (node) => node.type === 'details');
-  assert.equal(details.length, 1, '恰好一个「高级」折叠区');
+  const details = findAll(panel, (node) => node.props && node.props['data-mo-image-input-settings'] !== undefined);
+  assert.equal(details.length, 1, '恰好一个「输入设置」折叠区');
   assert.notEqual(details[0].props.open, true, '默认折叠');
-  assert.match(textOf(findAll(details[0], (node) => node.type === 'summary')[0]).join(''), /Advanced/i);
+  assert.match(textOf(findAll(details[0], (node) => node.type === 'summary')[0]).join(''), /Input settings/);
   // 现有参数的控件都在折叠区里（没有字段模板的行不渲染），锁图标与摘要留在外面。
   for (const key of ['size', 'quality', 'prompt', 'image']) {
     assert.ok(findAll(details[0], (node) => node.props && node.props['data-param-key'] === key).length
       || findAll(details[0], (node) => node.props && node.props['data-lock-key'] === key).length,
-      key + ' 的控件应该收在高级里');
+      key + ' 的控件应该收在输入设置里');
   }
 });
 
@@ -2624,18 +2629,18 @@ test('方框一律占满面板宽度：不再半宽、也不按内容收缩', as
 
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
   const details = findAll(panel, (node) => node.type === 'details')[0];
-  assert.equal(details.props.style.gridColumn, '1 / -1', '「高级」整个折叠区横跨两列');
+  assert.equal(details.props.style.gridColumn, '1 / -1', '「输入设置」整个折叠区横跨两列');
   assert.equal(details.props.style.width, '100%');
   const body = findAll(details, (node) => hasClass(node, 'customizedBody'))[0];
   assert.equal(body.props.style.gridTemplateColumns, 'minmax(0, 1fr)', '框体是单列：每个方框都占满');
 });
 
-test('自动检测与全部解锁挪进「高级」这一行的右端', async () => {
+test('自动检测与全部解锁挪进「输入设置」这一行的右端', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
   const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
   const summary = findAll(panel, (node) => node.type === 'summary')[0];
-  assert.ok(summary, '「高级」的 summary 在');
+  assert.ok(summary, '「输入设置」的 summary 在');
   assert.equal(summary.props.style.justifyContent, 'space-between', 'label 左、两个按钮右');
 
   const detectButton = findAll(summary, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join('')))[0];

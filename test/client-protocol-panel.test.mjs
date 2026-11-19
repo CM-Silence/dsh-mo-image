@@ -32,7 +32,10 @@ const T = {
   'form.authHeader': '请求头名称',
   'form.authPrefix': '前缀',
   'form.advanced': '自定义设置',
+  'form.inputSettings': '输入设置',
+  'form.outputSettings': '输出设置',
   'form.protocolSettings': '协议设置',
+  'form.modelOperationsHint': '在 JSON 里覆盖 generate 或 edit。省略的选项沿用提供商设置。',
   'form.authFollow': '跟随协议',
   'form.modeCatalog': '第三方模型提供商',
   'form.modeCustom': '自定义模型 API',
@@ -1494,7 +1497,62 @@ test('本地模型表单不再显示预设提示：地址下面与密钥下面�
     'API 密钥输入框还在');
 });
 
-test('预设有来源时，模型选项里没有返回格式（返回格式属于预设）', () => {
+/**
+ * 模型选项里的两块折叠区：按 data-* 标记找。
+ * 输入设置的 summary 上还挂着「自动检测 / 全部解锁」两个按钮，按文案匹配不可靠。
+ */
+function modelSection(tree, marker) {
+  return collect(tree, (item) => item.type === 'details'
+    && item.props && item.props[marker] !== undefined)[0] || null;
+}
+
+test('模型选项分成输入设置与输出设置两块折叠区：默认都收起，输入在前', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+    models: ['doubao-seedream-4-0-250828'], names: {}
+  };
+  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+
+  const input = modelSection(row, 'data-mo-image-input-settings');
+  const output = modelSection(row, 'data-mo-image-output-settings');
+  assert.ok(input, '输入设置折叠区在');
+  assert.ok(output, '输出设置折叠区在');
+  // 没写 open 属性 = 浏览器默认收起；写了受控的 open 反而会把用户点开的状态弹回去。
+  assert.equal(input.props.open, undefined, '输入设置默认收起');
+  assert.equal(output.props.open, undefined, '输出设置默认收起');
+
+  const summaryOf = (section) => text(collect(section, (item) => item.type === 'summary')[0]).join('');
+  assert.match(summaryOf(input), /输入设置/);
+  assert.doesNotMatch(summaryOf(input), /高级/, '「高级（手填字段名）」这个名字不再出现');
+  assert.equal(summaryOf(output), '输出设置');
+
+  // 顺序：先填输入，再定返回格式。
+  const order = preorder(row);
+  assert.ok(order.indexOf(input) < order.indexOf(output), '输入设置在输出设置之前');
+
+  // 输入设置里还是原来那一摊：参数表 / 尺寸 / 质量 / 参考图。
+  assert.ok(collect(input, (item) => item.props['data-param-key'] === 'size')[0], '尺寸还在输入设置里');
+  assert.ok(collect(input, (item) => item.props['data-param-key'] === 'image')[0], '参考图还在输入设置里');
+  assert.equal(collect(input, (item) => item.props['data-mo-image-output-presets'] !== undefined).length, 0,
+    '返回格式不在输入设置里');
+  // 内置协议的输出设置就是那两个预设下拉。
+  assert.ok(collect(output, (item) => item.props['data-mo-image-output-presets'] !== undefined)[0],
+    '输出设置里是返回格式');
+  assert.ok(collect(output, (item) => item.props['data-mo-image-output-preset'] === 'generate')[0],
+    '文生图返回格式收在输出设置里');
+  // 自配的网关（没有 presetId）：两块都不锁，直接能改。
+  const sizeInput = collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'size')[0];
+  assert.notEqual(sizeInput.props.disabled, true, '自定义来源的输入设置不锁');
+  const outputSelect = collect(output, (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset'] === 'generate')[0];
+  assert.notEqual(outputSelect.props.disabled, true, '自定义来源的输出设置不锁');
+  assert.equal(collect(output, (item) => item.props['data-lock-key'] === 'operations')[0].props['aria-pressed'],
+    'false', '锁图标显示为未锁');
+});
+
+test('预设来源：两块设置区都在但默认锁住，点锁能解锁（解锁状态会落盘）', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -1502,10 +1560,120 @@ test('预设有来源时，模型选项里没有返回格式（返回格式属�
     presetId: 'openai', models: ['gpt-image-1'], names: {}
   };
   const row = expandModelOptions(client, provider, () => renderForm(client, provider));
-  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length, 0,
-    '预设来源的模型选项里不再有返回格式面板');
-  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-preset'] !== undefined).length, 0,
-    '两个返回格式下拉也一个都不剩');
+  const input = modelSection(row, 'data-mo-image-input-settings');
+  const output = modelSection(row, 'data-mo-image-output-settings');
+  // 两块都在：预设来源不该把整块藏起来，只该锁住（看得到、改不了）。
+  assert.ok(input, '输入设置在');
+  assert.ok(output, '输出设置在');
+  assert.equal(input.props.open, undefined, '输入设置默认收起');
+  assert.equal(output.props.open, undefined, '输出设置默认收起');
+
+  // 输入设置：每个方框的锁都按着，框内控件全部禁用。
+  assert.equal(collect(input, (item) => item.props['data-lock-key'] === 'size')[0].props['aria-pressed'], 'true',
+    '尺寸方框的锁是锁上的');
+  assert.equal(collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'size')[0]
+    .props.disabled, true, '锁住时尺寸输入禁用');
+  assert.equal(collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'image')[0]
+    .props.disabled, true, '锁住时参考图控件禁用');
+
+  // 输出设置：下拉摆着（看得到当前预设）但禁用，锁图标可按。
+  const outputSelects = collect(output, (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset']);
+  assert.equal(outputSelects.length, 2, '两个返回格式下拉都在');
+  for (const select of outputSelects) {
+    assert.equal(select.props.disabled, true, '锁住时返回格式下拉禁用');
+  }
+  const lock = collect(output, (item) => item.props['data-lock-key'] === 'operations')[0];
+  assert.ok(lock, '输出设置的锁在标题行');
+  assert.equal(lock.props['aria-pressed'], 'true', '预设来源默认锁住');
+
+  // 点锁解锁：下拉立刻能改，保存时落一句 locked.operations = false（沿用现有 locked，不另造字段）。
+  lock.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  const unlockedRow = collect(renderForm(client, provider), (item) => item.props && item.props['data-row-key'] === '0')[0];
+  const unlockedOutput = modelSection(unlockedRow, 'data-mo-image-output-settings');
+  const unlockedSelects = collect(unlockedOutput, (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset']);
+  assert.equal(unlockedSelects.length, 2, '解锁后两个下拉还在');
+  for (const select of unlockedSelects) {
+    assert.notEqual(select.props.disabled, true, '解锁后可改');
+  }
+  assert.equal(collect(unlockedOutput, (item) => item.props['data-lock-key'] === 'operations')[0]
+    .props['aria-pressed'], 'false', '锁图标跟随解锁');
+});
+
+test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保存后原样带回', async () => {
+  const client = loadClient();
+  client.setCatalog();
+  const operations = { version: 1, generate: { output: 'binary' } };
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {},
+    modelOptions: {
+      'gpt-image-1': {
+        operations: operations,
+        size: { mode: 'wh-string', field: 'image_size' },
+        fields: { prompt: { path: 'prompt' } },
+        params: [{ name: 'seed', type: 'number', default: '1', description: '' }]
+      }
+    }
+  };
+  let saved = null;
+  const tree = client.render(client.h(client.form(), {
+    provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t
+  }));
+  const save = collect(tree, (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop();
+  assert.ok(save, '保存按钮要存在');
+  await save.props.onClick();
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const entry = plain(saved.modelOptions)['gpt-image-1'];
+  assert.deepEqual(entry.operations, operations, '锁住的返回格式不能因为禁用就被丢掉');
+  assert.deepEqual(entry.size, { mode: 'wh-string', field: 'image_size' }, '锁住的尺寸覆盖也在');
+  assert.deepEqual(entry.fields, { prompt: { path: 'prompt' } }, '字段模板原样带回');
+  assert.deepEqual(entry.params, [{ name: 'seed', type: 'number', default: '1', description: '' }], '参数表原样带回');
+});
+
+test('ComfyUI 例外：预设来源的输入参数默认不锁（工作流是用户自己接的），输出设置照锁', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',
+    presetId: 'comfyui', models: ['flux.safetensors'], names: {}
+  };
+  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+  // 输入参数：工作流的参数映射预设给不了，锁住等于让这个模型配不下去。
+  assert.equal(collect(row, (item) => item.props['data-lock-key'] === 'prompt')[0].props['aria-pressed'], 'false',
+    'ComfyUI 的输入参数不锁');
+  const textarea = collect(row, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
+  assert.ok(textarea.length, '工作流编辑器还在');
+  assert.notEqual(textarea[0].props.disabled, true, '工作流编辑器可用');
+  // 返回格式仍然是协议定的：按预设来源锁。
+  const output = modelSection(row, 'data-mo-image-output-settings');
+  assert.ok(output, '输出设置在');
+  assert.equal(collect(output, (item) => item.props['data-lock-key'] === 'operations')[0].props['aria-pressed'],
+    'true', 'ComfyUI 的返回格式照预设来源锁住');
+});
+
+test('自定义提供商的模型选项两块都在，输出设置里直接是手写 JSON（不再套一层）', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+    models: ['m'], names: {}
+  };
+  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+  const input = modelSection(row, 'data-mo-image-input-settings');
+  const output = modelSection(row, 'data-mo-image-output-settings');
+  assert.ok(input, '输入设置在');
+  assert.ok(output, '输出设置也在');
+  const bodyOfOutput = collect(output, (item) => String(item.props.className || '').includes('customizedBody'))[0];
+  assert.equal(collect(bodyOfOutput, (item) => item.type === 'details').length, 0,
+    '输出设置里不再套一层「请求与返回格式」：两层折叠区只为同一个 JSON 框');
+  const textarea = collect(output, (item) => item.type === 'textarea')[0];
+  assert.ok(textarea, 'JSON 输入框收在输出设置里');
+  assert.notEqual(textarea.props.disabled, true, '自定义来源不锁，直接能改');
+  assert.ok(collect(output, (item) => item.props['data-mo-image-operations'] === 'm')[0],
+    '模型级返回格式的标记还在');
 });
 
 test('自定义模型 API 保留模型选项里的返回格式，两个下拉排在同一行', () => {
@@ -1589,9 +1757,11 @@ function modelRowControlRole(item) {
   return '';
 }
 
-/** 展开面板的种类：返回格式（预设下拉）/ 自定义 JSON / 模型参数。 */
+/** 展开面板的种类：输入设置 / 输出设置 / 自定义 JSON / 模型参数。 */
 function modelRowPanelKind(item) {
   const props = item.props || {};
+  if (props['data-mo-image-input-settings'] !== undefined) return 'inputSettings';
+  if (props['data-mo-image-output-settings'] !== undefined) return 'outputSettings';
   if (props['data-mo-image-output-presets'] !== undefined) return 'outputPresets';
   if (props['data-mo-image-operations'] !== undefined) return 'operations';
   if (String(props.className || '').includes('modelAdvanced')) return 'params';
@@ -1625,8 +1795,8 @@ function modelRowPlacement(row) {
 }
 
 test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，列模板归宿主', () => {
-  // 两种来源各测一遍：内置协议展开的是「返回格式（预设下拉）」面板，自定义协议展开的是
-  // 手写 JSON 的 <details>；两者下面都还挂着「模型参数」面板。
+  // 两种来源各测一遍：展开后都是「模型参数」+「输出设置」两块面板；
+  // 输出设置里的内容随协议走（内置协议是两个预设下拉，自定义协议是手写 JSON）。
   const cases = [
     {
       label: '内置协议',
@@ -1634,7 +1804,8 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
         id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
         models: ['doubao-seedream-4-0-250828'], names: { 'doubao-seedream-4-0-250828': 'Doubao Seedream' }
       },
-      panels: ['outputPresets', 'params']
+      panels: ['outputSettings', 'params'],
+      output: 'data-mo-image-output-presets'
     },
     {
       label: '自定义协议',
@@ -1643,7 +1814,8 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
         customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
         models: ['m'], names: {}
       },
-      panels: ['operations', 'params']
+      panels: ['outputSettings', 'params'],
+      output: 'data-mo-image-operations'
     }
   ];
 
@@ -1694,6 +1866,13 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
         item.label + '：' + modelRowPanelKind(panel) + ' 面板要横跨整行');
       assert.equal(style.minWidth, 0, item.label + '：' + modelRowPanelKind(panel) + ' 面板要能压缩');
     }
+    // 返回格式收在「输出设置」里，内容随协议走；模型参数面板里没有返回格式。
+    const output = panels.find((panel) => modelRowPanelKind(panel) === 'outputSettings');
+    assert.ok(collect(output, (node) => node.props && node.props[item.output] !== undefined)[0],
+      item.label + '：返回格式在输出设置里');
+    const params = panels.find((panel) => modelRowPanelKind(panel) === 'params');
+    assert.equal(collect(params, (node) => node.props && node.props[item.output] !== undefined).length, 0,
+      item.label + '：模型参数面板里没有返回格式');
 
     // b) 展开前后，只占第 1 列的直接子项只有拖动把手一个。
     for (const [state, row] of [['展开前', collapsed], ['展开后', expanded]]) {

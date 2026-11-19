@@ -152,12 +152,25 @@ test('normalizeQuality 保留用户自定义档位', () => {
 
 /* -------------------------------------------- 任务 9'：键锁与质量覆盖落盘 */
 
-test('normalizeModelOptions 只留七个键上的布尔锁', () => {
+test('normalizeModelOptions 只留八个键上的布尔锁', () => {
   const out = normalizeModelOptions({
-    m: { locked: { size: true, quality: false, nope: true, prompt: 'yes' }, size: { mode: 'wh-string', field: 'image_size' } }
+    m: {
+      locked: { size: true, quality: false, nope: true, prompt: 'yes' },
+      size: { mode: 'wh-string', field: 'image_size' }
+    }
   }, ['m']);
   assert.deepEqual(out.m.locked, { size: true, quality: false },
     '不认识的键与非布尔值都要丢掉');
+});
+
+test('「输出设置」的锁也是一个正常的锁键：解锁后能存下来', () => {
+  // 预设来源的返回格式默认锁住；用户点锁解锁 = locked.operations: false，
+  // 和输入设置那七个键走同一条路（宿主这里只做形状校验，不猜默认）。
+  const out = normalizeModelOptions({
+    m: { locked: { operations: false }, operations: { version: 1, generate: { output: 'binary' } } }
+  }, ['m']);
+  assert.deepEqual(out.m.locked, { operations: false }, 'operations 的锁不被当成陌生键丢掉');
+  assert.equal(out.m.operations.generate.output, 'binary', '锁与值是两件事，值照旧保留');
 });
 
 test('normalizeModelOptions 留住「只有锁」的模型条目', () => {
