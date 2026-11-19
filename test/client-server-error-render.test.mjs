@@ -53,7 +53,7 @@ function createHarness() {
   const config = {
     providers: [{
       id: 'p1', name: 'OpenAI production', baseUrl: 'https://api.openai.com/v1',
-      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images',
       models: ['gpt-image-2.5-flare'], names: {}
     }],
     active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },
@@ -81,9 +81,12 @@ function createHarness() {
         return new Response(JSON.stringify(networkError), { status: 502, headers: { 'content-type': 'application/json' } });
       }
       return new Response(JSON.stringify({
-        ok: true, config, adapters: [],
-        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [], website: 'https://platform.openai.com/api-keys' }],
-        localPresets: []
+        ok: true, config,
+        // 协议清单：拉取模型列表要有「这条协议支持列模型」的声明（真机也一样）。
+        adapters: [{ id: 'openai-images', label: 'protocol.openai-images', local: false, supportsModels: true }],
+        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], website: 'https://platform.openai.com/api-keys' }],
+        localPresets: [],
+        outputPresets: ['auto', 'openai', 'binary', 'image-url', 'image-base64', 'task-location', 'task-json']
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
     setTimeout: () => 0, clearTimeout() {}, URL

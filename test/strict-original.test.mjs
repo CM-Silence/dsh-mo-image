@@ -24,7 +24,7 @@ async function harness(t, defaults) {
     version: 1,
     providers: [{
       id: 'p1', name: 'Local', baseUrl: 'https://api.test/v1', apiKeyEnv: 'MO_IMAGE_ORIGINAL_KEY',
-      optionalKey: true, protocol: 'openai-images', adapter: '', models: ['some-image-model'], names: {}
+      optionalKey: true, protocol: 'openai-images', adapter: 'openai-images', models: ['some-image-model'], names: {}
     }],
     active: { providerId: 'p1', model: 'some-image-model' },
     defaults: Object.assign({ quality: 'high', auto: false, width: 128, height: 128, promptOptimization: true }, defaults)

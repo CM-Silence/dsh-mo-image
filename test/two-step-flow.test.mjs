@@ -13,7 +13,7 @@ function config(overrides = {}) {
       {
         id: 'p1', name: 'Local', baseUrl: 'https://api.test/v1',
         apiKeyEnv: 'MO_IMAGE_P1_API_KEY', optionalKey: true, protocol: 'openai-images',
-        adapter: '',
+        adapter: 'openai-images',
         models: ['flux-2-klein-4b.safetensors', 'moss_image_sft_int8_convrot.safetensors'],
         names: {}
       }
@@ -354,6 +354,8 @@ test('a missing model hands over even after the settings were read', async (t) =
 
 test('editing a model that cannot edit reports the capability error, not a handoff', async (t) => {
   const cfg = config();
+  // 协议写明：不能图生图是这条协议 + 这个模型的事，跟「猜哪条协议」无关。
+  cfg.providers[0].adapter = 'dashscope-wanx';
   cfg.providers[0].models = ['wanx2.1-t2i-turbo'];
   cfg.active = { providerId: 'p1', model: 'wanx2.1-t2i-turbo' };
   const { edit, exec, calls, home } = await harness(t, cfg);

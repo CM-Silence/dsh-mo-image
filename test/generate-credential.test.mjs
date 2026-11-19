@@ -15,7 +15,8 @@ test('generation resolves the key from the credentials service without a config 
     version: 1,
     providers: [{
       id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1',
-      apiKeyEnv: 'MO_IMAGE_P1_API_KEY', protocol: 'openai-images',
+      // 真机上这就是从 OpenAI 预设建的提供商：来源（presetId）在，协议是 OpenAI Images。
+      apiKeyEnv: 'MO_IMAGE_P1_API_KEY', protocol: 'openai-images', adapter: 'openai-images', presetId: 'openai',
       models: ['gpt-image-2.5-flare'], names: {}
     }],
     active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },

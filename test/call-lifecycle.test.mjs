@@ -8,17 +8,17 @@ const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8
 
 /* 一次工具调用的生命周期：同 callId 去重、不同 callId 各自执行、上游并发有上限。 */
 
-function makeHome() {
+function makeHome(provider = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), 'mo-image-call-'));
   const state = path.join(home, 'mo-image');
   mkdirSync(state, { recursive: true });
   writeFileSync(path.join(state, 'config.json'), JSON.stringify({
     version: 1,
-    providers: [{
+    providers: [Object.assign({
       id: 'p1', name: 'Test', baseUrl: 'https://api.test/v1',
       apiKeyEnv: 'MO_IMAGE_CALL_KEY', optionalKey: true, protocol: 'openai-images',
-      adapter: '', models: ['some-image-model'], names: {}
-    }],
+      adapter: 'openai-images', models: ['some-image-model'], names: {}
+    }, provider)],
     active: { providerId: 'p1', model: 'some-image-model' },
     defaults: { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true }
   }), 'utf8');
@@ -42,7 +42,7 @@ function fakeContext(tools) {
 }
 
 async function harness(t, options = {}) {
-  const home = makeHome();
+  const home = makeHome(options.provider);
   const work = mkdtempSync(path.join(os.tmpdir(), 'mo-image-call-cwd-'));
   const previousHome = process.env.DSH_HOME;
   process.env.DSH_HOME = home;
@@ -87,6 +87,19 @@ async function harness(t, options = {}) {
     posts: () => calls.filter((call) => String(call.init.method || '').toUpperCase() === 'POST')
   };
 }
+
+test('没有选择 API 协议就不发请求：不再拿 OpenAI 兼容当默认值猜一把', async (t) => {
+  const { generate, exec, calls } = await harness(t, { provider: { adapter: '', protocol: '' } });
+  await assert.rejects(
+    () => generate.execute({ prompt: 'a cat' }, exec),
+    (error) => {
+      // 报错要说清楚下一步做什么，而不是发出去再解释。
+      assert.match(String(error.message), /API 协议/, '报错点名「API 协议」');
+      return true;
+    }
+  );
+  assert.equal(calls.length, 0, '一个请求都没发');
+});
 
 test('the same callId and request run once and both callers get the same result', async (t) => {
   const { generate, exec, posts } = await harness(t, { delayMs: 40 });
@@ -337,7 +350,7 @@ function makeGatewayHome() {
     providers: [{
       id: 'gw', name: 'Gateway', baseUrl: 'https://gateway.test/v1',
       apiKeyEnv: 'MO_IMAGE_GW_KEY', optionalKey: true, protocol: 'openai-images',
-      adapter: '', models: ['gateway-model'], names: {}
+      adapter: 'openai-images', models: ['gateway-model'], names: {}
     }],
     active: { providerId: 'gw', model: 'gateway-model' },
     defaults: { quality: 'high', auto: true, width: 1024, height: 1024, promptOptimization: true }

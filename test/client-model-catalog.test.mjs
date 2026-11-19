@@ -16,8 +16,13 @@ const FETCHED = {
   }
 };
 
+/** 协议清单：拉取模型列表要有「这条协议支持列模型」的声明（真机也一样）。 */
+const DEFAULT_ADAPTERS = [
+  { id: 'openai-images', label: 'protocol.openai-images', local: false, supportsModels: true }
+];
+
 /** A stateful React stand-in, so clicks and drags re-render the settings section. */
-function createHarness({ config, modelsResponse = FETCHED, adapters = [], primitives = null } = {}) {
+function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_ADAPTERS, primitives = null } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -71,7 +76,7 @@ function createHarness({ config, modelsResponse = FETCHED, adapters = [], primit
       }
       return new Response(JSON.stringify({
         ok: true, config, adapters,
-        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [], website: 'https://platform.openai.com/api-keys' }],
+        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], website: 'https://platform.openai.com/api-keys' }],
         localPresets: []
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -232,7 +237,7 @@ function baseConfig(overrides = {}) {
   return {
     providers: [{
       id: 'p1', name: 'OpenAI production', baseUrl: 'https://api.openai.com/v1',
-      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images',
       models: ['alpha-model', 'beta-model'], names: { 'alpha-model': 'Alpha' }
     }],
     active: { providerId: 'p1', model: 'alpha-model' },
@@ -430,7 +435,7 @@ test('a provider with an endpoint of its own keeps the Custom tag', async () => 
   const config = baseConfig({
     providers: [{
       id: 'p1', name: 'My gateway', baseUrl: 'https://gateway.example.com/v1',
-      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images',
       models: ['alpha-model'], names: {}
     }],
     active: { providerId: 'p1', model: 'alpha-model' }
@@ -460,7 +465,7 @@ test('a custom endpoint keeps the Custom tag and its editor does not warn about 
   const config = baseConfig({
     providers: [{
       id: 'p1', name: 'APIYI', baseUrl: 'https://api.apiyi.com/v1',
-      key: '', hasKey: true, adapter: '', protocol: 'openai-images',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images',
       models: ['alpha-model'], names: {}
     }],
     active: { providerId: 'p1', model: 'alpha-model' }
@@ -545,7 +550,10 @@ test('the protocol select keeps common adapters up front and expands the long ta
     { id: 'openai-responses', label: 'protocol.openai-responses', group: 'general', local: false, supportsModels: false },
     { id: 'bfl', label: 'protocol.bfl', group: 'async', local: false, supportsModels: true }
   ];
-  const { harness, tree: edited } = await openProviderEditor(baseConfig(), { adapters });
+  // 「未选择」：adapter 空着，下拉顶上就是那个占位项（它不是「自动」，也不是可选项）。
+  const config = baseConfig();
+  config.providers[0].adapter = '';
+  const { harness, tree: edited } = await openProviderEditor(config, { adapters });
 
   const protocolSelectOf = (tree) => findAll(tree, (node) => node.type === 'select'
     && node.props && node.props['data-mo-image-protocol'] !== undefined)[0];
@@ -557,7 +565,7 @@ test('the protocol select keeps common adapters up front and expands the long ta
   assert.equal(protocolSelect.props.disabled, undefined);
   // 常用协议在前；长尾（bfl）收进「更多协议…」，「自定义」永远在末尾（它不在 manifest 里，由客户端补上）。
   assert.deepEqual(optionValues(protocolSelect), ['', 'openai-responses', 'custom', '__more__']);
-  assert.deepEqual(optionTexts(protocolSelect), ['Auto', 'OpenAI Responses', 'Custom', 'More protocols…']);
+  assert.deepEqual(optionTexts(protocolSelect), ['Not selected', 'OpenAI Responses', 'Custom', 'More protocols…']);
   assert.equal(findAll(edited, (node) => node.type === 'input' && node.props.value === 'gpt-5.2').length, 0);
 
   // 展开：分组列出全部协议，长尾的 bfl 也在；「更多协议…」不写进选择。

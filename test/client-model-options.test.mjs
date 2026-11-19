@@ -89,7 +89,7 @@ function createHarness({ config, primitives = null, analyze = null, params = nul
       }
       return new Response(JSON.stringify({
         ok: true, config, adapters: [],
-        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
+        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [] }],
         localPresets: [],
         // 返回格式预设：宿主每次都会下发，模型选项里的「输出设置」靠它渲染两个下拉。
         outputPresets: ['auto', 'openai', 'binary', 'image-url', 'image-base64', 'task-location', 'task-json'],
@@ -830,7 +830,7 @@ const CUSTOM_RELAY_CONFIG = {
 const PRESET_CONFIG = {
   providers: [{
     id: 'pa', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1',
-    key: '', hasKey: true, adapter: '', protocol: 'openai-images', optionalKey: false,
+    key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images', optionalKey: false,
     presetId: 'openai',
     models: ['gpt-image-2.5-flare'], names: {}
   }],
@@ -842,7 +842,7 @@ const PRESET_CONFIG = {
 const RELAY_CONFIG = {
   providers: [{
     id: 'pb', name: 'Relay', baseUrl: 'https://gateway.example/v1',
-    key: '', hasKey: true, adapter: '', protocol: 'openai-images', optionalKey: false,
+    key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images', optionalKey: false,
     models: ['gpt-image-2.5-flare'], names: {}
   }],
   active: { providerId: 'pb', model: 'gpt-image-2.5-flare' },
@@ -1363,7 +1363,7 @@ function sizedConfig(mode, extra = {}) {
   return {
     providers: [{
       id: 'p7', name: 'Sized Relay', baseUrl: 'https://gateway.example/v1',
-      key: '', hasKey: true, adapter: '', protocol: 'openai-images', optionalKey: false,
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images', optionalKey: false,
       models: ['m1'], names: {},
       modelOptions: { m1: { size: Object.assign({ mode }, extra) } }
     }],

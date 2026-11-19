@@ -15,12 +15,12 @@ function makeHome() {
     providers: [
       {
         id: 'p-active', name: 'Active', baseUrl: 'https://active.test/v1',
-        apiKeyEnv: 'MO_IMAGE_P_ACTIVE_API_KEY', protocol: 'openai-images', adapter: '',
+        apiKeyEnv: 'MO_IMAGE_P_ACTIVE_API_KEY', protocol: 'openai-images', adapter: 'openai-images',
         models: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'], names: {}
       },
       {
         id: 'p-other', name: 'Other', baseUrl: 'https://other.test/v1',
-        apiKeyEnv: 'MO_IMAGE_P_OTHER_API_KEY', protocol: 'openai-images', adapter: '',
+        apiKeyEnv: 'MO_IMAGE_P_OTHER_API_KEY', protocol: 'openai-images', adapter: 'openai-images',
         models: ['some-other-model'], names: {}
       }
     ],

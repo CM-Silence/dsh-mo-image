@@ -12,7 +12,8 @@ const T = {
   'form.routeUnsupported': '不支持',
   'form.protocolRoutes': '协议地址',
   'form.routeHint': '地址由上面的服务地址拼出',
-  'form.protocolAuto': '自动',
+  'form.protocolUnset': '未选择',
+  'form.protocolRequired': '还没有选择 API 协议：先选一条，或用「识别协议」自动识别。',
   'form.protocolMore': '更多协议…',
   'protocol.comfyui': 'ComfyUI',
   'protocol.openai-images': 'OpenAI Images',
@@ -401,6 +402,62 @@ test('协议未知或自定义时不锁这三项：没有「跟随协议」一�
       assert.equal(select.props.value, 'openai', '没设过就显示第一项');
     }
   }
+});
+
+test('没选协议时下拉写「未选择」：那只是当前状态，不是可选项', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: '', models: [], names: {}
+  });
+  const select = protocolPanelControls(node)['API 协议'];
+  assert.equal(select.props.value, '', '空 adapter 就是「未选择」');
+  const options = collect(select, (item) => item.type === 'option');
+  assert.equal(text(options[0]).join(''), '未选择', '不再叫「自动」——它不是什么自动识别');
+  assert.equal(options[0].props.disabled, true, '选不回去：它只是当前状态');
+  // 协议行下面那句提示：说清楚下一步该做什么。
+  const hint = collect(node, (item) => item.props && item.props['data-mo-image-protocol-unset'] !== undefined)[0];
+  assert.ok(hint, '给一句「还没选协议」的提示');
+  assert.match(text(hint).join(''), /还没有选择 API 协议/);
+});
+
+test('没选协议不能保存：保存被拦下并说明原因', async () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: '', models: ['m'], names: {}
+  };
+  let saved = 0;
+  const render = () => client.render(client.h(client.form(), {
+    provider: provider, isNew: false, onSave() { saved += 1; }, onClose() {}, t: t
+  }));
+  const save = (token) => collect(token, (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+
+  await save(render()).props.onClick();
+  assert.equal(saved, 0, '没有协议就不提交');
+  const error = collect(render(), (item) => item.props && item.props.role === 'alert')[0];
+  assert.ok(error, '要在按钮上方说清楚为什么没保存');
+  assert.match(text(error).join(''), /还没有选择 API 协议/);
+
+  // 选中协议之后就能存。
+  protocolPanelControls(render())['API 协议'].props.onChange({ target: { value: 'openai-images' } });
+  await save(render()).props.onClick();
+  assert.equal(saved, 1, '选了协议就放行');
+});
+
+test('没选协议时不给「获取可用模型」：没有协议就没有可猜的列表端点', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const tree = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: '', models: [], names: {}
+  });
+  assert.equal(fetchButton(tree), undefined, '选协议之前不提供拉取按钮');
+  // 对照组：选了协议就回来。
+  const picked = renderForm(client, {
+    id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  assert.ok(fetchButton(picked), '选了协议就能拉模型列表');
 });
 
 test('鉴权方式的取值回显 provider.auth，认不出的值回落到协议默认', () => {
