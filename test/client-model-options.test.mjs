@@ -1118,7 +1118,7 @@ test('「一键配置」在中转站与自定义提供商上出现，预设来�
   assert.ok(!hasBulk((await openEditor(PRESET_CONFIG)).tree), '预设来源开箱即用，不出现');
 });
 
-test('选预设就记 presetId（来源），手改 API 地址就清掉', async () => {
+test('选预设就记 presetId（来源），手改 API 地址不动它', async () => {
   const openNewProvider = async () => {
     const harness = createHarness({ config: { providers: [], active: { providerId: '', model: '' }, defaults: {} } });
     await new Promise((resolve) => setImmediate(resolve));
@@ -1138,7 +1138,9 @@ test('选预设就记 presetId（来源），手改 API 地址就清掉', async 
   assert.equal(lastProvider(await saveAndPosted(first.harness)).presetId, 'openai',
     '从预设创建要记下来源');
 
-  // 换一家网关（手改地址）之后就不该再按预设对待。
+  // 同一家提供商换个地址（反代 / 换域名 / 私有化部署）之后仍然是那份预设：
+  // 来源不跟着地址丢，否则锁默认值与「协议设置整块隐藏」都会翻面。
+  // 真要换一套配置，用户会另建一个提供商。
   const second = await openNewProvider();
   second.presetSelect.props.onChange({ target: { value: 'openai' } });
   const urlInput = findAll(second.harness.renderRoot(), (node) => node.type === 'input'
@@ -1146,8 +1148,8 @@ test('选预设就记 presetId（来源），手改 API 地址就清掉', async 
   assert.ok(urlInput, 'expected the API URL input');
   urlInput.props.onChange({ target: { value: 'https://relay.example.com/v1' } });
   const saved = lastProvider(await saveAndPosted(second.harness));
-  assert.equal(saved.presetId, undefined, '改了地址就不再是预设来源（配置里不落这个字段）');
-  assert.equal(saved.baseUrl, 'https://relay.example.com/v1');
+  assert.equal(saved.presetId, 'openai', '改地址不影响来源');
+  assert.equal(saved.baseUrl, 'https://relay.example.com/v1', '地址照改');
 });
 
 test('一键配置补上质量模板（否则质量永远是死的）', async () => {

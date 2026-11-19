@@ -37,6 +37,10 @@ const T = {
   'form.modeCatalog': '第三方模型提供商',
   'form.modeCustom': '自定义模型 API',
   'form.modeLocal': '本地模型',
+  'form.localDeployer': '本地部署器',
+  'form.keyLocalOptional': '本地无鉴权可留空',
+  'form.keyEnter': '输入 API 密钥',
+  'form.providerUnrecognized': '未识别出提供商预设，将使用通用协议配置；如需零配置体验，请从「第三方模型提供商」里选择。',
   'form.outputPreset.auto': '跟随协议',
   'form.outputPreset.customLegacy': '自定义（来自旧配置）',
   'form.outputPreset.customLegacyHint': '当前值是以前手写的返回配置，原样保留；上面的预设选一个即可覆盖它。'
@@ -608,7 +612,72 @@ test('判据只看 presetId：同一份配置去掉它，就是自己填的网�
   assert.equal(detailsOf(presetNode, '协议设置'), undefined, '加上 presetId 就变回预设来源，整块不渲染');
 });
 
-test('升级前的老配置：normalizeConfig 按地址补上来源，判据就变「预设来源」', () => {
+/** 表单顶部那句「认不出提供商预设」的红字（没有就是 undefined）。 */
+function presetNoticeOf(node) {
+  return collect(node, (item) => item.props && item.props['data-mo-image-provider-notice'] !== undefined)[0];
+}
+
+test('认不出提供商：表单顶部一句红字，排在 API 密钥上方', () => {
+  // 老配置 / 中转站：没有来源，adapter 也不是用户自己挑的自定义协议 —— 这就是
+  // 「本该是某个已知提供商，但认不出是哪家」的那一档。
+  for (const adapter of ['openai-images', 'comfyui', '']) {
+    const client = loadClient();
+    client.setCatalog();
+    const node = renderForm(client, {
+      id: 'p1', name: 'Relay', baseUrl: 'https://relay.example/v1', adapter: adapter, models: [], names: {}
+    });
+    const notice = presetNoticeOf(node);
+    assert.ok(notice, (adapter || '(自动)') + '：要有这句提醒');
+    assert.match(text(notice).join(''), /未识别出提供商预设/, '文案走 form.providerUnrecognized');
+    // 位置：表单最顶部（第一个块），API 密钥上方，且不在任何折叠区里。
+    assert.equal(formBlocks(node)[0], notice, '排在表单最顶部');
+    const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
+    assert.ok(key, 'API 密钥在');
+    const order = preorder(node);
+    assert.ok(order.indexOf(notice) < order.indexOf(key), '红字排在 API 密钥上方');
+    assert.equal(insideAnyDetails(node, notice), false, '红字常显，不进折叠区');
+    // 颜色用现有的错误色变量：不新造颜色。
+    assert.match(String(notice.props.style.color), /--dsw-alias-state-error-primary/);
+  }
+});
+
+test('自定义协议不提醒：adapter 就是用户自己挑的「自定义」，它本来就没有 presetId', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom', models: [], names: {}
+  });
+  assert.equal(presetNoticeOf(node), undefined, '自定义协议不该有这句红字');
+  // 对照：同一份配置换成具体协议就有了（证明不是「永远没有」）。
+  const other = renderForm(client, {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
+  });
+  assert.ok(presetNoticeOf(other), '换了协议就该提醒');
+});
+
+test('预设来源不提醒：有 presetId 就是认出来了', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: [], names: {}
+  });
+  assert.equal(presetNoticeOf(node), undefined, '认出来源就没有红字');
+});
+
+test('新增从目录选预设：不提醒（选中的就是这个提供商的来源）', () => {
+  const client = loadClient({ preserveFormState: true, providerPresets: PROVIDER_PRESET_FIXTURE });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  const presetSelect = collect(node, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'openai').length === 1)[0];
+  presetSelect.props.onChange({ target: { value: 'openai' } });
+  node = renderForm(client, provider, true);
+  assert.equal(presetNoticeOf(node), undefined, '目录入口不提醒');
+});
+
+test('升级前的老配置：normalizeConfig 按分组补上来源，判据就变「预设来源」', () => {
   // 升级前的配置里没有 presetId（那个字段当年还不存在）：面板把它当自定义 API，协议设置冒出来。
   const legacyProvider = {
     id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
@@ -619,7 +688,7 @@ test('升级前的老配置：normalizeConfig 按地址补上来源，判据就�
   assert.ok(detailsOf(renderForm(before, legacyProvider), '协议设置'),
     '没有来源：按自定义 API 渲染，协议设置照旧在');
 
-  // 宿主读配置时按地址身份补上来源（地址就是预设的地址）：同一份配置在面板里变成「预设来源」。
+  // 宿主读配置时按分组补上来源（openai-images 那组里按地址认到了 openai）：同一份配置在面板里变成「预设来源」。
   const config = normalizeConfig({
     version: 1,
     providers: [Object.assign({ apiKeyEnv: 'MO_IMAGE_P1_API_KEY' }, legacyProvider)],
@@ -722,6 +791,48 @@ test('新增本地部署：与云厂商预设同一规则，鉴权 / 返回格�
   assert.ok(collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0], '密钥还在');
 });
 
+test('本地模型的字段顺序：部署器 → 显示名称 → 密钥 →（自定义设置）地址 → 模型目录', () => {
+  // 地址跟着本地部署器走，选完就填好了：常显它只会让人以为还得核对一遍，所以收进折叠区。
+  // 部署器清单里那份 sd-server 无鉴权（optionalKey），密钥的 placeholder 要跟着说清楚。
+  const localPresets = LOCAL_DEPLOYER_FIXTURE.map((item) => ({ ...item, optionalKey: true }));
+  const client = loadClient({ preserveFormState: true, localPresets: localPresets });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  const localButton = collect(node, (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  assert.ok(localButton, '模式开关里要有「本地模型」');
+  localButton.props.onClick();
+  node = renderForm(client, provider, true);
+
+  const deployer = collect(node, (item) => item.type === 'select'
+    && collect(item, (child) => child.type === 'option' && child.props.value === 'sd-server').length === 1)[0];
+  const name = collect(node, (item) => item.type === 'input' && item.props.value === 'sd-server')[0];
+  const key = collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0];
+  const url = collect(node, (item) => item.type === 'input' && item.props.value === 'http://127.0.0.1:8080/v1')[0];
+  const directory = collect(node, (item) => String((item.props || {}).className || '').endsWith('modelCatalog'))[0];
+  const advanced = detailsOf(node, '自定义设置');
+  for (const [label, control] of [['本地部署器', deployer], ['显示名称', name], ['API 密钥', key], ['API 地址', url], ['模型目录', directory]]) {
+    assert.ok(control, label + ' 在');
+  }
+  assert.ok(advanced, '「自定义设置」折叠区在');
+
+  // 折叠区里目前只有地址一个字段，标题沿用同一句「自定义设置」，默认收起。
+  assert.equal(insideOf(advanced, url), true, 'API 地址收在「自定义设置」里');
+  assert.equal(collect(advanced, (item) => item.type === 'input').length, 1, '折叠区里只有地址一个输入框');
+  assert.equal(advanced.props.open, false, '默认收起');
+  assert.equal(key.props.placeholder, '本地无鉴权可留空', '密钥 placeholder 保留');
+
+  // 顺序：部署器 → 显示名称 → 密钥 → 折叠区 → 模型目录；密钥常显在折叠区上方。
+  const order = preorder(node);
+  const at = (target) => order.indexOf(target);
+  assert.ok(at(deployer) < at(name), '本地部署器在最上');
+  assert.ok(at(name) < at(key), '显示名称在密钥之前');
+  assert.ok(at(key) < at(advanced), '密钥排在「自定义设置」之前');
+  assert.ok(at(advanced) < at(directory), '模型目录排在最后');
+  assert.equal(insideAnyDetails(node, key), false, 'API 密钥常显');
+  assert.equal(insideAnyDetails(node, deployer), false, '本地部署器常显');
+});
+
 test('本地预设编辑：与云厂商预设同一规则，整块协议设置都不渲染（含鉴权）', () => {
   for (const local of LOCAL_DEPLOYER_FIXTURE) {
     const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
@@ -772,9 +883,10 @@ test('自定义 API：本地部署清单在场时协议设置五项照样全在�
   }
 });
 
-test('手改 API 地址就不再算预设来源：协议设置重新出现（判据跟着 draft.presetId 走）', () => {
-  // 预设的地址被换掉 = 换成另一家网关：形状未知了，这时候正需要这一块开关。
-  // 判据不是「地址像不像预设」，而是来源有没有被清掉——urlField 改地址时会把 presetId 清掉。
+test('手改 API 地址不动预设来源：协议设置照旧整块不渲染（判据只看 presetId）', () => {
+  // 同一家提供商换个地址（反代、换域名、私有化部署）很常见：它仍然是那份预设带来的
+  // 字段模板与锁，不该被重新当成「自己填的网关」。判据不是「地址像不像预设」，
+  // 而是来源还在不在——urlField 改地址时不碰 presetId。
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -787,9 +899,12 @@ test('手改 API 地址就不再算预设来源：协议设置重新出现（判
   assert.ok(url, 'API 地址输入框在');
   url.props.onChange({ target: { value: 'https://relay.example/v1' } });
   node = renderForm(client, provider);
-  assert.ok(detailsOf(node, '协议设置'), '换了地址就是自己填的网关：协议设置回来');
-  assert.equal(collect(node, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 1,
-    '协议下拉也跟着回来');
+  assert.equal(detailsOf(node, '协议设置'), undefined, '换了地址仍是预设来源：协议设置还是不出现');
+  assert.equal(collect(node, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 0,
+    '协议下拉也不出现');
+  // 地址本身照用户的输入走，只是来源没被连带清掉。
+  assert.ok(collect(node, (n) => n.type === 'input' && n.props.value === 'https://relay.example/v1')[0],
+    'API 地址跟着用户输入');
 });
 
 test('隐藏协议设置不清值：预设来源存在里面的协议 / 鉴权 / 返回格式保存时原样带回', async () => {
