@@ -486,11 +486,13 @@ $DSH_HOME/.credentials.yaml
 
 协议下拉默认只列常用四条（`openai-images` / `openai-chat` / `openai-responses` / `google-gemini`），其余收在「更多协议…」里，按通用 / 兼容网关 / 厂商原生 / 本地部署 / 异步任务分组展开。
 
+**没选协议 = 不发请求**。下拉最上面的「未选择」只是当前状态（一个不可选的占位项，不叫「自动」）：协议决定路径、字段名和响应解析，空着的时候宿主不猜也不发。以前它会拿协议表最后一条 `openai-images` 兜底，所以一个 Gemini 或百炼原生地址也能「成功」发出一个全错的请求。现在这种配置在设置页保存会被拦下（并说明原因），工具调用则直接报「还没有选择 API 协议」；要做的只是选一条，或点右侧的「识别协议」。老配置里 `protocol` 写着具体协议 id 的会在读取时迁到 `adapter`；从预设建的提供商，协议就是预设里那一条（`openai` 预设即 `openai-images`），不落进「未选择」。
+
 交互形态都覆盖：
 
 - **同步**：一次请求直接返回图片
 - **异步入队**：提交后拿到 `task_id` / `polling_url` / `status_url`，轮询到成功再下载；百炼万相、BFL、fal、Replicate、魔搭五家的提交与状态词都收在适配器的 `async` 描述符里
-- **通用兜底自动识别**：自定义 API 和不认识的域名走 `openai-images`，它会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
+- **通用兜底自动识别**：选了 `openai-images` 的提供商（兼容网关大多选它）会自己判断——响应里直接有图就同步返回；有 `task_id`、`poll_url`、`status_url`、`urls.get`、`Location` 之类的任务信号就转轮询。轮询地址优先用响应给的，没给就按常见约定推 `/v1/tasks/{id}`、`/tasks/{id}`、提交地址`/{id}`，前一个 404/405 自动换下一个；状态词认 `SUCCEEDED` / `SUCCESS` / `COMPLETED` / `READY` 和 `FAILED` / `ERROR` / `CANCELED` 等，图出现在 `output_images`、`images`、`data`、`output`、`result` 里都能取到。所以接入新的异步厂商时，通常只要在「自定义模型 API」里填地址、Key 和模型 ID，不用再加适配器。
 
 **识别协议**：设置页「API 协议」下拉右侧的按钮（只在自己填地址的提供商上出现——预设提供商的协议是已知的，那一块整块不显示）。判定分三步，能不发请求就不发：
 
