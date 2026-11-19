@@ -3526,3 +3526,151 @@ test('老形状的质量覆盖（字符串挡位 + 顶层 default）在面板里
   ], '顶层 default 折成那一条上的单选');
 });
 
+/* ───────────── workflow 类适配器（ComfyUI / A1111）：输入设置折叠区 ───────────── */
+
+/**
+ * 预设来源的两条本地部署：presetId 在，但参数归部署端——输入键默认不锁、返回格式照锁
+ * （见 lockDefaultsFor）。拿它们当夹具，「默认未上锁」才不是「碰巧没有 presetId」。
+ */
+const COMFY_PRESET_CONFIG = {
+  providers: [{ ...CONFIG.providers[0], presetId: 'comfyui' }],
+  active: CONFIG.active,
+  defaults: {}
+};
+const A1111_PRESET_CONFIG = {
+  providers: [{ ...A1111_CONFIG.providers[0], presetId: 'a1111' }],
+  active: A1111_CONFIG.active,
+  defaults: {}
+};
+
+/** 展开模型选项后，某个作用域里按锁键找的那个锁按钮。 */
+const lockWithKey = (tree, key) => findAll(tree, (node) => node.type === 'button'
+  && node.props['data-lock-key'] === key)[0] || null;
+
+test('ComfyUI / A1111 的输入内容也收进「输入设置」：标题行与其它协议同一份结构，右端是锁', async () => {
+  const cases = [
+    { label: 'ComfyUI', config: COMFY_PRESET_CONFIG, workflow: true },
+    { label: 'A1111', config: A1111_PRESET_CONFIG, workflow: false }
+  ];
+  for (const item of cases) {
+    const { harness, tree } = await openEditor(item.config);
+    optionsToggle(tree).props.onClick(fakeEvent());
+    const opened = harness.renderRoot();
+    const input = settingsSection(opened, 'data-mo-image-input-settings');
+    assert.ok(input, item.label + '：输入设置折叠区在');
+    // 和另一块一样默认收起：不写受控 open，浏览器默认就是收起。
+    assert.equal(input.props.open, undefined, item.label + '：输入设置默认收起');
+
+    // 标题行就是 settingsSummary 产出的那一行（那个标记只有它会写）：两格、同一套布局。
+    const row = settingsRow(input);
+    assert.equal(row.props['data-mo-image-settings-row'], '', item.label + '：标题行走 settingsSummary');
+    assert.ok(row.props.className, item.label + '：标题行有容器类（内边距归宿主）');
+    assert.equal(row.props.style.display, 'flex');
+    assert.equal(row.props.style.justifyContent, 'space-between');
+    assert.equal(row.props.style.alignItems, 'center');
+    assert.equal(row.props.style.width, '100%');
+    assert.equal(row.children.length, 2, item.label + '：左边标题 + 右边操作区');
+    assert.equal(textOf(row.children[0]).join(''), 'Input settings', item.label + '：标题在左');
+    assert.deepEqual(plainValue(row.children[0].props.style), {
+      minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+    }, item.label + '：标题格截断，长文案不挤操作区');
+    assert.ok(hasClass(row.children[1], 'rowActions'), item.label + '：操作区就是 rowActions 盒子');
+    assert.deepEqual(plainValue(row.children[1].props.style),
+      { display: 'flex', alignItems: 'center', gap: 6, flex: 'none' },
+      item.label + '：操作区同一份样式');
+
+    // 右端只有一把锁（默认未上），没有「自动检测」：workflow 参数不来自规则表。
+    const actions = findAll(row.children[1], (node) => node.type === 'button');
+    assert.equal(actions.length, 1, item.label + '：右端只放一个控件');
+    assert.equal(actions[0].props['data-lock-key'], 'prompt', item.label + '：锁复用「常规」参数表的键');
+    assert.equal(actions[0].props['aria-pressed'], 'false', item.label + '：默认未上锁');
+    assert.equal(textOf(row.children[1]).join(''), '', item.label + '：右端是图标，没有按钮文案');
+    assert.doesNotMatch(textOf(input).join(' '), /Auto-detect/, item.label + '：输入设置里没有自动检测');
+
+    // 输入内容全在 details 里（不留在外面平铺）。
+    assert.ok(findAll(input, (node) => node.props && node.props['data-param-box'] === 'common')[0],
+      item.label + '：常规参数表在 details 里');
+    assert.equal(findAll(input, (node) => node.props && node.props['data-param-box'] === 'size').length, 0,
+      item.label + '：workflow 面板没有尺寸方框');
+    const textareas = findAll(input, (node) => node.type === 'textarea');
+    if (item.workflow) {
+      assert.equal(textareas.length, 1, 'ComfyUI：工作流编辑器在 details 里');
+      assert.notEqual(textareas[0].props.disabled, true, 'ComfyUI：工作流编辑器仍可编辑');
+      // 顺序：工作流编辑器在前、解析出的参数表在后。
+      const inside = findAll(input, () => true);
+      const table = findAll(input, (node) => node.props && node.props['data-param-table'] === 'common')[0];
+      assert.ok(inside.indexOf(textareas[0]) < inside.indexOf(table), 'ComfyUI：编辑器在前、参数表在后');
+    } else {
+      assert.equal(textareas.length, 0, 'A1111：没有工作流编辑器');
+      // A1111 的 sdapi 参数是预置行，也在 details 里。
+      const names = findAll(input, (node) => node.props && node.props['data-param-field'] === 'name');
+      assert.equal(names.length, 6, 'A1111：六行默认参数在 details 里');
+      assert.equal(names[0].props.value, 'steps');
+      assert.match(textOf(input).join(' '), /WebUI/, 'A1111：参数行说明也在 details 里');
+    }
+  }
+});
+
+test('workflow 适配器的输入设置锁默认未上：预设来源也能直接改，点锁才锁住参数表', async () => {
+  const { harness } = await openEditor(A1111_PRESET_CONFIG);
+  let opened = openModelPanel(harness);
+  let input = settingsSection(opened, 'data-mo-image-input-settings');
+  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'false',
+    '标题行的锁默认未上');
+  assert.equal(lockWithKey(commonBox(input), 'prompt').props['aria-pressed'], 'false',
+    '「常规」方框的锁是同一个键，也是未上');
+  const nameInput = () => findAll(input, (node) => node.props
+    && node.props['data-param-field'] === 'name')[0];
+  assert.notEqual(nameInput().props.disabled, true, '没上锁：参数表直接能改');
+
+  // 点标题行的锁：和点「常规」方框的锁是同一个状态（同一个键、同一套落盘）。
+  lockWithKey(settingsRow(input), 'prompt').props.onClick({ preventDefault() {}, stopPropagation() {} });
+  opened = harness.renderRoot();
+  input = settingsSection(opened, 'data-mo-image-input-settings');
+  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'true', '点了就锁上');
+  assert.equal(nameInput().props.disabled, true, '上锁后参数表禁用');
+});
+
+test('ComfyUI 解析出的参数行也收在「输入设置」里，工作流编辑器照旧可编辑并能保存', async () => {
+  const analysis = {
+    ok: true,
+    format: 'api',
+    mapping: { prompt: { node: '18:17', input: 'value' } },
+    candidates: { prompt: [{ node: '18:17', input: 'value', classType: 'PrimitiveStringMultiline' }] },
+    params: [{ name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25 }],
+    warnings: []
+  };
+  const { harness, tree } = await openEditor(CONFIG, { analyze: analysis });
+  optionsToggle(tree).props.onClick(fakeEvent());
+  let opened = harness.renderRoot();
+  let input = settingsSection(opened, 'data-mo-image-input-settings');
+  const textarea = findAll(input, (node) => node.type === 'textarea')[0];
+  assert.ok(textarea, '工作流编辑器在输入设置里');
+  textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
+  opened = harness.renderRoot();
+  const parse = findAll(settingsSection(opened, 'data-mo-image-input-settings'), (node) => node.type === 'button'
+    && /Parse workflow/i.test(textOf(node).join('')))[0];
+  assert.ok(parse, '「解析工作流」也在输入设置里');
+  await parse.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  opened = harness.renderRoot();
+  input = settingsSection(opened, 'data-mo-image-input-settings');
+  const parsed = findAll(input, (node) => node.props && node.props['data-param-grid'] === 'params:row');
+  assert.equal(parsed.length, 1, '解析出的参数行收在输入设置里');
+  assert.equal(findAll(input, (node) => node.props && node.props['data-param-field'] === 'name')[0].props.value,
+    'steps');
+  const editor = findAll(input, (node) => node.type === 'textarea')[0];
+  assert.ok(editor, '工作流编辑器仍在');
+  assert.notEqual(editor.props.disabled, true, '锁只管参数表，工作流编辑器仍可编辑');
+
+  // 保存：工作流与解析结果都照旧落盘。
+  const save = findButton(opened, (node) => /save/i.test(textOf(node).join('')));
+  await save.props.onClick();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST'
+    && call.url.includes('/api/mo-image/config'));
+  const provider = JSON.parse(posted[posted.length - 1].body).config.providers.find((item) => item.id === 'p1');
+  const entry = provider.modelOptions['flux.safetensors'];
+  assert.equal(entry.workflow, '{"1":{"class_type":"KSampler"}}', '工作流照旧保存');
+  assert.equal(entry.params[0].name, 'steps', '解析出的参数照旧保存');
+});
+

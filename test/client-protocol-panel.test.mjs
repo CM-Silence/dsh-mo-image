@@ -1641,9 +1641,14 @@ test('ComfyUI 例外：预设来源的输入参数默认不锁（工作流是用
   };
   const row = expandModelOptions(client, provider, () => renderForm(client, provider));
   // 输入参数：工作流的参数映射预设给不了，锁住等于让这个模型配不下去。
-  assert.equal(collect(row, (item) => item.props['data-lock-key'] === 'prompt')[0].props['aria-pressed'], 'false',
+  // 第一把 prompt 锁现在在「输入设置」标题行（第二把在「常规」方框里，同一个键）。
+  const input = modelSection(row, 'data-mo-image-input-settings');
+  assert.ok(input, 'ComfyUI 的「输入设置」折叠区在');
+  const inputRow = collect(input, (item) => item.type === 'summary')[0];
+  assert.match(text(inputRow).join(''), /输入设置/);
+  assert.equal(collect(inputRow, (item) => item.props['data-lock-key'] === 'prompt')[0].props['aria-pressed'], 'false',
     'ComfyUI 的输入参数不锁');
-  const textarea = collect(row, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
+  const textarea = collect(input, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
   assert.ok(textarea.length, '工作流编辑器还在');
   assert.notEqual(textarea[0].props.disabled, true, '工作流编辑器可用');
   // 返回格式仍然是协议定的：按预设来源锁。
@@ -1651,6 +1656,70 @@ test('ComfyUI 例外：预设来源的输入参数默认不锁（工作流是用
   assert.ok(output, '输出设置在');
   assert.equal(collect(output, (item) => item.props['data-lock-key'] === 'operations')[0].props['aria-pressed'],
     'true', 'ComfyUI 的返回格式照预设来源锁住');
+});
+
+test('workflow 类适配器（ComfyUI / A1111）的输入设置与输出设置同一行结构：左标题、右端是锁', () => {
+  const cases = [
+    { label: 'ComfyUI', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'flux.safetensors' },
+    { label: 'A1111', adapter: 'a1111', baseUrl: 'http://127.0.0.1:7860', model: 'sdxl.safetensors' }
+  ];
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  for (const item of cases) {
+    const client = loadClient({ preserveFormState: true });
+    client.setCatalog();
+    const provider = {
+      id: 'p1', name: item.label, baseUrl: item.baseUrl, adapter: item.adapter,
+      presetId: item.adapter, models: [item.model], names: {}
+    };
+    const row = expandModelOptions(client, provider, () => renderForm(client, provider));
+    const input = modelSection(row, 'data-mo-image-input-settings');
+    const output = modelSection(row, 'data-mo-image-output-settings');
+    assert.ok(input, item.label + '：输入设置折叠区在');
+    assert.ok(output, item.label + '：输出设置折叠区还在（这次没动它）');
+    assert.equal(input.props.open, undefined, item.label + '：输入设置默认收起');
+    assert.equal(output.props.open, undefined, item.label + '：输出设置默认收起');
+
+    // 同一个 settingsSummary：同一个容器类、同一份两端对齐布局、同样两格。
+    const inRow = collect(input, (node) => node.type === 'summary')[0];
+    const outRow = collect(output, (node) => node.type === 'summary')[0];
+    assert.ok(inRow && outRow, item.label + '：两行都在');
+    assert.equal(inRow.props['data-mo-image-settings-row'], '', item.label + '：标题行走 settingsSummary');
+    assert.equal(inRow.props.className, outRow.props.className, item.label + '：同一个容器类');
+    assert.deepEqual(plain(inRow.props.style), plain(outRow.props.style), item.label + '：同一份布局样式');
+    assert.equal(inRow.props.style.display, 'flex');
+    assert.equal(inRow.props.style.justifyContent, 'space-between');
+    assert.equal(inRow.props.style.alignItems, 'center');
+    assert.equal(inRow.children.length, 2, item.label + '：左标题 + 右操作区');
+    assert.deepEqual(plain(inRow.children[0].props.style), plain(outRow.children[0].props.style),
+      item.label + '：标题格同一份样式');
+    assert.equal(inRow.children[1].props.className, outRow.children[1].props.className,
+      item.label + '：操作区同一个盒子');
+    assert.deepEqual(plain(inRow.children[1].props.style), plain(outRow.children[1].props.style),
+      item.label + '：操作区同一份样式');
+
+    // 输入行右端是锁（不是自动检测），默认未上。
+    assert.match(text(inRow.children[0]).join(''), /输入设置/);
+    const actions = collect(inRow.children[1], (node) => node.type === 'button');
+    assert.equal(actions.length, 1, item.label + '：右端只放一个控件');
+    assert.equal(actions[0].props['data-lock-key'], 'prompt', item.label + '：锁复用「常规」参数表的键');
+    assert.equal(actions[0].props['aria-pressed'], 'false', item.label + '：参数归部署端，默认不锁');
+    assert.doesNotMatch(text(inRow).join(' '), /自动检测/, item.label + '：输入行没有自动检测');
+
+    // 输入内容都在 details 里，工作流编辑器（ComfyUI）仍可编辑。
+    assert.ok(collect(input, (node) => node.props && node.props['data-param-box'] === 'common')[0],
+      item.label + '：常规参数表在 details 里');
+    const textareas = collect(input, (node) => node.type === 'textarea');
+    if (item.adapter === 'comfyui') {
+      assert.equal(textareas.length, 1, 'ComfyUI：工作流编辑器在 details 里');
+      assert.notEqual(textareas[0].props.disabled, true, 'ComfyUI：工作流编辑器仍可编辑');
+    } else {
+      assert.equal(textareas.length, 0, 'A1111：没有工作流编辑器');
+    }
+
+    // 输入在前、输出在后（这次只换输入的包法，顺序不变）。
+    const order = preorder(row);
+    assert.ok(order.indexOf(input) < order.indexOf(output), item.label + '：输入设置在输出设置之前');
+  }
 });
 
 test('自定义提供商的模型选项两块都在，输出设置里直接是手写 JSON（不再套一层）', () => {
