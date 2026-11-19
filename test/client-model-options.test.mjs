@@ -328,6 +328,16 @@ test('the model options toggle is enabled for the local ComfyUI deployment', asy
   assert.notEqual(toggle.props.disabled, true, 'local ComfyUI must allow model options');
 });
 
+/**
+ * 模型选项展开后的面板：「输入设置」那个 details 本体。
+ *
+ * 以前它外面还套着一层 div.modelAdvanced（带内边距），比「输出设置」宽出去一截、右端差 4px；
+ * 现在两块都是 .modelRow 的直接子项，所以面板就是 details 本身。
+ */
+const modelSections = (tree) => findAll(tree, (node) => node.type === 'details'
+  && node.props && node.props['data-mo-image-input-settings'] !== undefined);
+const openModelSection = (tree) => modelSections(tree)[0] || null;
+
 test('the model options toggle opens the size panel for a cloud provider', async () => {
   const { harness, tree } = await openEditor(CLOUD_CONFIG);
   const toggle = optionsToggle(tree);
@@ -335,7 +345,7 @@ test('the model options toggle opens the size panel for a cloud provider', async
   assert.notEqual(toggle.props.disabled, true, 'cloud providers can override how the size is sent');
   toggle.props.onClick(fakeEvent());
   const opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   assert.ok(panel, 'the panel opens');
   assert.equal(findAll(panel, (node) => node.type === 'textarea').length, 0,
     'a cloud provider has no workflow to edit');
@@ -352,7 +362,7 @@ test('the workflow textarea is about half the old height', async () => {
   const { harness, tree } = await openEditor();
   optionsToggle(tree).props.onClick(fakeEvent());
   const opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   assert.equal(Number(textarea.props.rows), 4, '8 行 → 4 行');
   assert.equal(Number(textarea.props.style.minHeight), 80, '160px → 80px');
@@ -477,7 +487,7 @@ test('a local provider without a parameter table still opens the size panel', as
   assert.notEqual(toggle.props.disabled, true, 'SwarmUI can still override its size parameter');
   toggle.props.onClick(fakeEvent());
   const opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   assert.ok(panel, 'the size panel opens');
   assert.ok(findAll(panel, (node) => node.type === 'select').length >= 1);
 });
@@ -486,9 +496,9 @@ test('clicking the toggle again closes the panel', async () => {
   const { harness, tree } = await openEditor(CLOUD_CONFIG);
   const toggle = optionsToggle(tree);
   toggle.props.onClick(fakeEvent());
-  assert.equal(findAll(harness.renderRoot(), (node) => hasClass(node, 'modelAdvanced')).length, 1);
+  assert.equal(modelSections(harness.renderRoot()).length, 1);
   optionsToggle(harness.renderRoot()).props.onClick(fakeEvent());
-  assert.equal(findAll(harness.renderRoot(), (node) => hasClass(node, 'modelAdvanced')).length, 0);
+  assert.equal(modelSections(harness.renderRoot()).length, 0);
 });
 
 test('the model row exposes model options as a chevron icon button, not a text button', async () => {
@@ -517,12 +527,12 @@ test('the chevron sits between the model id field and the delete button', async 
 
 test('clicking the chevron reveals the workflow panel inside the row', async () => {
   const { harness, tree } = await openEditor();
-  assert.equal(findAll(tree, (node) => hasClass(node, 'modelAdvanced')).length, 0,
+  assert.equal(modelSections(tree).length, 0,
     'panel stays collapsed until toggled');
   optionsToggle(tree).props.onClick(fakeEvent());
   const opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  assert.ok(panel, 'expected the expanded modelAdvanced panel');
+  const panel = openModelSection(opened);
+  assert.ok(panel, 'expected the expanded input-settings panel');
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   assert.ok(textarea, 'expected a workflow textarea');
 });
@@ -531,7 +541,7 @@ test('editing the workflow and saving sends modelOptions for that model', async 
   const { harness, tree } = await openEditor();
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
@@ -551,7 +561,7 @@ test('the workflow panel can send the pasted graph to the analyze route', async 
   const { harness, tree } = await openEditor();
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
@@ -572,7 +582,7 @@ test('解析参数入口、loading 与候选清单已移除，只留「解析工
   const { harness, tree } = await openEditor(CONFIG);
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const workflowPanel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const workflowPanel = openModelSection(opened);
   findAll(workflowPanel, (node) => node.type === 'textarea')[0]
     .props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
@@ -633,7 +643,7 @@ test('parsing keeps the mapping when the same analyze response also carries para
   const { harness, tree } = await openEditor(CONFIG, { analyze: analysis });
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
@@ -678,7 +688,7 @@ test('the A1111 panel lists sampling parameters unchecked by default', async () 
   const { harness, tree } = await openEditor(A1111_SAMPLING_CONFIG);
   optionsToggle(tree).props.onClick(fakeEvent());
   const opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   assert.ok(panel, 'expected the expanded panel');
   assert.ok(!findAll(panel, (node) => node.type === 'textarea').length, 'A1111 has no workflow box');
   // 参数表现在是唯一一张表：六行 sdapi 字段，每行一个「暴露」开关。
@@ -698,7 +708,7 @@ test('switching an A1111 parameter on persists it on the row, not in the old exp
   const { harness, tree } = await openEditor(A1111_SAMPLING_CONFIG);
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const boxes = findAll(panel, (node) => node.type === 'button'
     && node.props['data-param-field'] === 'expose');
   boxes[0].props.onClick();
@@ -746,7 +756,7 @@ async function openParsed(analysis, config = CONFIG) {
   const { harness, tree } = await openEditor(config, { analyze: analysis });
   optionsToggle(tree).props.onClick(fakeEvent());
   let opened = harness.renderRoot();
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(opened);
   const textarea = findAll(panel, (node) => node.type === 'textarea')[0];
   textarea.props.onChange({ target: { value: '{"1":{"class_type":"KSampler"}}' } });
   opened = harness.renderRoot();
@@ -892,7 +902,7 @@ const paramLock = (tree, key) => findAll(tree, (node) => node.type === 'button'
  * 也是同一个类名，而且排在模型行前面。
  */
 const panelBody = (tree) => {
-  const panel = findAll(tree, (node) => hasClass(node, 'modelAdvanced'))[0];
+  const panel = openModelSection(tree);
   return panel ? findAll(panel, (node) => hasClass(node, 'customizedBody'))[0] : null;
 };
 
@@ -1170,8 +1180,7 @@ test('单点自动检测只写未上锁的键，而且不上锁（下次还会�
 test('手填的输入框收在默认折叠的「输入设置」里', async () => {
   const { harness } = await openEditor(CLOUD_CONFIG);
   const opened = openModelPanel(harness);
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const details = findAll(panel, (node) => node.props && node.props['data-mo-image-input-settings'] !== undefined);
+  const details = modelSections(opened);
   assert.equal(details.length, 1, '恰好一个「输入设置」折叠区');
   assert.notEqual(details[0].props.open, true, '默认折叠');
   assert.match(textOf(findAll(details[0], (node) => node.type === 'summary')[0]).join(''), /Input settings/);
@@ -2694,8 +2703,7 @@ test('方框一律占满面板宽度：不再半宽、也不按内容收缩', as
   }
   assert.equal(paramBox(opened, 'common').props.style.display, 'grid');
 
-  const panel = findAll(opened, (node) => hasClass(node, 'modelAdvanced'))[0];
-  const details = findAll(panel, (node) => node.type === 'details')[0];
+  const details = openModelSection(opened);
   assert.equal(details.props.style.gridColumn, '1 / -1', '「输入设置」整个折叠区横跨两列');
   assert.equal(details.props.style.width, '100%');
   const body = findAll(details, (node) => hasClass(node, 'customizedBody'))[0];
@@ -3608,6 +3616,77 @@ test('ComfyUI / A1111 的输入内容也收进「输入设置」：标题行与�
       assert.equal(names[0].props.value, 'steps');
       assert.match(textOf(input).join(' '), /WebUI/, 'A1111：参数行说明也在 details 里');
     }
+  }
+});
+
+test('输入设置与输出设置是 .modelRow 同一层的兄弟节点：同一份样式，中间不再夹容器', async () => {
+  // 回归：输入设置外面曾多套一层 div.modelAdvanced（带 2px 4px 内边距），输出设置却是直接挂在
+  // .modelRow 上的 details——两边缩进差 4px，右端的控件自然一个偏左、一个偏右。
+  // 现在两块都是 .modelRow 的直接子项，内联样式相同、从右端控件到折叠区那一串祖先逐层同构。
+  const cases = [
+    // 自定义端点：两块折叠区都在（这个夹具里只有自定义协议会派生返回格式面板）。
+    { label: '自定义端点', config: CUSTOM_RELAY_CONFIG }
+  ];
+  for (const item of cases) {
+    const { harness } = await openEditor(item.config);
+    const opened = openModelPanel(harness);
+    const input = settingsSection(opened, 'data-mo-image-input-settings');
+    const output = settingsSection(opened, 'data-mo-image-output-settings');
+    assert.ok(input && output, item.label + '：两块折叠区都在');
+
+    // 从根到目标的祖先链（命中返回 [] 之外的路径；用来取父节点与逐层结构）。
+    const pathTo = (target, node = opened, trail = []) => {
+      if (node === null || node === undefined) return null;
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = pathTo(target, child, trail);
+          if (found) return found;
+        }
+        return null;
+      }
+      if (typeof node !== 'object') return null;
+      if (node === target) return trail;
+      for (const child of node.children || []) {
+        const found = pathTo(target, child, trail.concat([node]));
+        if (found) return found;
+      }
+      return null;
+    };
+    const inPath = pathTo(input);
+    const outPath = pathTo(output);
+    assert.ok(inPath && outPath, item.label + '：两块折叠区都能定位');
+    const inParent = inPath[inPath.length - 1];
+    const outParent = outPath[outPath.length - 1];
+    assert.equal(inParent, outParent, item.label + '：两块折叠区挂在同一个父节点下');
+    assert.ok(hasClass(inParent, 'modelRow'), item.label + '：父节点就是 .modelRow');
+    // 中间没有多余的一层包装：两块 details 的父节点相同 = 同一层兄弟。
+    assert.equal(findAll(opened, (node) => hasClass(node, 'modelAdvanced')).length, 0,
+      item.label + '：div.modelAdvanced 那层包装已经删掉');
+
+    // 样式链对等：同一个 grid 落位、同一份宽度 → 左右边缘重合。
+    assert.deepEqual(plainValue(input.props.style), plainValue(output.props.style),
+      item.label + '：两块折叠区同一份内联样式（grid-column / width / min-width）');
+    assert.equal(input.props.style.gridColumn, '1 / -1', item.label + '：输入设置横跨整行');
+    assert.equal(input.props.style.width, '100%', item.label + '：不靠父容器的内边距凑宽度');
+    assert.equal(input.props.style.minWidth, 0);
+
+    // 锁图标 x 相同 → 从锁往上到折叠区那一串祖先逐层同构（层数、类名、内联样式都一样）。
+    const firstButtonOf = (section) => findAll(section, (node) => node.type === 'button')[0] || null;
+    const inButton = firstButtonOf(settingsRow(input));
+    const outButton = firstButtonOf(settingsRow(output));
+    assert.ok(inButton && outButton, item.label + '：两行右端都有控件');
+    assert.ok(pathTo(inButton).includes(input), item.label + '：输入行的控件在输入设置里');
+    assert.ok(pathTo(outButton).includes(output), item.label + '：输出行的控件在输出设置里');
+    const chainOf = (section, path) => path.slice(path.indexOf(section)).reverse();
+    const inChain = chainOf(input, pathTo(inButton));
+    const outChain = chainOf(output, pathTo(outButton));
+    assert.equal(inChain.length, outChain.length, item.label + '：锁到折叠区的祖先层数相同');
+    const shapeOf = (chain) => chain.map((node) => ({
+      className: String(node.props.className || ''),
+      style: plainValue(node.props.style || {})
+    }));
+    assert.deepEqual(shapeOf(inChain), shapeOf(outChain),
+      item.label + '：从锁到折叠区逐层同构（右端基线因此是同一条线）');
   }
 });
 

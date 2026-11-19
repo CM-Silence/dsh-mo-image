@@ -852,6 +852,7 @@ test('新增本地部署：与云厂商预设同一规则，鉴权 / 返回格�
 
 test('本地模型的字段顺序：部署器 → 显示名称 → 密钥 →（自定义设置）地址 → 模型目录', () => {
   // 地址跟着本地部署器走，选完就填好了：常显它只会让人以为还得核对一遍，所以收进折叠区。
+  // 模型目录同样是「选完部署器就不用再动」的接入细节：跟地址住进同一个折叠区，地址在前。
   // 部署器清单里那份 sd-server 无鉴权（optionalKey），密钥的 placeholder 要跟着说清楚。
   const localPresets = LOCAL_DEPLOYER_FIXTURE.map((item) => ({ ...item, optionalKey: true }));
   const client = loadClient({ preserveFormState: true, localPresets: localPresets });
@@ -875,21 +876,53 @@ test('本地模型的字段顺序：部署器 → 显示名称 → 密钥 →（
   }
   assert.ok(advanced, '「自定义设置」折叠区在');
 
-  // 折叠区里目前只有地址一个字段，标题沿用同一句「自定义设置」，默认收起。
+  // 折叠区里是地址与模型目录两项，顺序 地址 → 模型目录；标题沿用同一句「自定义设置」，默认收起。
   assert.equal(insideOf(advanced, url), true, 'API 地址收在「自定义设置」里');
-  assert.equal(collect(advanced, (item) => item.type === 'input').length, 1, '折叠区里只有地址一个输入框');
+  assert.equal(insideOf(advanced, directory), true, '模型目录也收在「自定义设置」里');
+  const inSection = preorder(advanced);
+  assert.ok(inSection.indexOf(url) < inSection.indexOf(directory), '折叠区里地址在前、模型目录在后');
   assert.equal(advanced.props.open, false, '默认收起');
   assert.equal(key.props.placeholder, '本地无鉴权可留空', '密钥 placeholder 保留');
 
-  // 顺序：部署器 → 显示名称 → 密钥 → 折叠区 → 模型目录；密钥常显在折叠区上方。
+  // 顺序：部署器 → 显示名称 → 密钥 → 折叠区（地址 + 模型目录）；密钥常显在折叠区上方。
   const order = preorder(node);
   const at = (target) => order.indexOf(target);
   assert.ok(at(deployer) < at(name), '本地部署器在最上');
   assert.ok(at(name) < at(key), '显示名称在密钥之前');
   assert.ok(at(key) < at(advanced), '密钥排在「自定义设置」之前');
-  assert.ok(at(advanced) < at(directory), '模型目录排在最后');
+  assert.ok(at(key) < at(directory), '模型目录排在密钥之后');
   assert.equal(insideAnyDetails(node, key), false, 'API 密钥常显');
   assert.equal(insideAnyDetails(node, deployer), false, '本地部署器常显');
+  assert.equal(insideAnyDetails(node, directory), true, '模型目录不再常显');
+});
+
+test('本地模型：模型目录收在「自定义设置」折叠区里，模型行也跟着一起收着', () => {
+  // 本地部署器的模型目录是「这台机器装了哪些 checkpoint」这类接入细节：展开折叠区才看得到，
+  // 不在默认视图里占一屏。判据是「它是折叠区的后代」，不是「它排在折叠区后面」。
+  const client = loadClient({ preserveFormState: true, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  let node = renderForm(client, provider, true);
+  const localButton = collect(node, (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  assert.ok(localButton, '模式开关里要有「本地模型」');
+  localButton.props.onClick();
+  node = renderForm(client, provider, true);
+
+  const advanced = detailsOf(node, '自定义设置');
+  assert.ok(advanced, '「自定义设置」折叠区在');
+  const directory = collect(node, (item) => String((item.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(directory, '模型目录在');
+  assert.equal(insideOf(advanced, directory), true, '模型目录收在「自定义设置」里');
+
+  // 加一行模型：整行（含 ID / 显示名称 / 删除）也在同一个折叠区里，不是只收了个标题。
+  const addModel = collect(node, (item) => item.type === 'button' && text(item).join('').includes('form.addModel'))[0];
+  assert.ok(addModel, '「添加模型」按钮在');
+  addModel.props.onClick();
+  node = renderForm(client, provider, true);
+  const advancedWithRow = detailsOf(node, '自定义设置');
+  const row = collect(node, (item) => item.props && item.props['data-row-key'] === '0')[0];
+  assert.ok(row, '模型行在');
+  assert.equal(insideOf(advancedWithRow, row), true, '模型行跟着模型目录一起收在「自定义设置」里');
 });
 
 test('本地预设编辑：与云厂商预设同一规则，整块协议设置都不渲染（含鉴权）', () => {
@@ -1111,7 +1144,36 @@ function bodySkeleton(node) {
   return blocks.filter((item) => item !== modeBar).map(formSkeleton).filter((item) => item !== null);
 }
 
-test('新增「自定义模型 API」与编辑页是同一套布局：只有模式开关是新面孔', () => {
+/**
+ * 去掉提供商表单的折叠外壳：`<details class="customized"><summary/><div class="customizedBody">…</div></details>`
+ * 换回它 body 里的那串字段（按原顺序摊平）。
+ *
+ * 新建的「自定义模型 API」是平铺的、编辑页是折叠的：两棵树去掉这层壳之后应当逐块相同——
+ * 验证的是「字段顺序只有一处定义」，而不是「两边长得一模一样」。
+ */
+function withoutSections(node) {
+  if (node === null || node === undefined) return null;
+  if (Array.isArray(node)) return node.map(withoutSections).filter((item) => item !== null);
+  if (typeof node !== 'object') return node;
+  const props = node.props || {};
+  const isSection = node.type === 'details' && String(props.className || '').includes('customized');
+  if (isSection) {
+    const body = (node.children || []).find((child) => child && child.type === 'div'
+      && String((child.props || {}).className || '').includes('customizedBody'));
+    return body ? withoutSections(body.children) : null;
+  }
+  // 摊平：Fragment / 数组 / 条件元素（null）都化成同一层，两侧才好逐块比对。
+  const children = [];
+  const append = (value) => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) { for (const item of value) append(item); return; }
+    children.push(value);
+  };
+  for (const child of (node.children || [])) append(withoutSections(child));
+  return { type: node.type, props: props, children: children };
+}
+
+test('新建「自定义模型 API」全部平铺，编辑页仍是两个折叠区：字段顺序来自同一处', () => {
   const cases = [
     {
       label: '内置协议',
@@ -1138,24 +1200,38 @@ test('新增「自定义模型 API」与编辑页是同一套布局：只有模�
     creating.setCatalog();
     const added = renderForm(creating, item.provider, true);
 
-    // 差异只允许在「新建才有的那一排模式开关」上：去掉它，两棵树的骨架必须一模一样
-    // （字段顺序、两个折叠区、按钮行都来自同一段布局代码，改一边忘另一边会先红这条）。
-    assert.deepEqual(bodySkeleton(added), bodySkeleton(edited),
-      item.label + '：新建与编辑的自定义 API 表单结构一致');
+    // 编辑页照旧折叠：这次只动新建的那条入口。
+    assert.ok(detailsOf(edited, '协议设置'), item.label + '：编辑页的「协议设置」还在');
+    assert.ok(detailsOf(edited, '自定义设置'), item.label + '：编辑页的「自定义设置」还在');
+
+    // 新建的自定义 API：两个折叠区都不再出现（自定义协议那块「请求与返回格式」编辑器自带
+    // 一个 details 外壳，它是编辑器本身，不是这次要拆的「协议设置 / 自定义设置」）。
+    assert.equal(detailsOf(added, '协议设置'), undefined, item.label + '：没有「协议设置」折叠区');
+    assert.equal(detailsOf(added, '自定义设置'), undefined, item.label + '：没有「自定义设置」折叠区');
+    assert.deepEqual(collect(formRoot(added), (node) => node.type === 'details'
+      && (node.props['data-mo-image-protocol-settings'] !== undefined
+        || node.props['data-mo-image-advanced'] !== undefined)), [],
+    item.label + '：两个折叠区的标记一个都不剩');
+
+    // 差的只是那层壳：去掉壳之后两棵树逐块相同（字段顺序没有第二份定义）。
+    assert.deepEqual(bodySkeleton(withoutSections(added)), bodySkeleton(withoutSections(edited)),
+      item.label + '：去掉折叠外壳后，新建与编辑逐块相同');
     assert.ok(modeBarOf(formBlocks(added)), item.label + '：新建有「第三方 / 本地 / 自定义」开关');
     assert.equal(modeBarOf(formBlocks(edited)), undefined, item.label + '：编辑页没有模式开关');
   }
 });
 
-test('新建「自定义模型 API」：协议设置默认收起，协议排在鉴权之前', () => {
+test('新建「自定义模型 API」：协议 / 鉴权 / 图生图端点 / 返回格式全部平铺，没有折叠区', () => {
   const client = loadClient({ customMode: true });
   client.setCatalog();
   const node = renderForm(client, {
     id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {}
   }, true);
-  const settings = detailsOf(node, '协议设置');
-  assert.ok(settings, '新建也要有「协议设置」折叠区');
-  assert.equal(settings.props.open, false, '默认收起，与编辑页一致');
+
+  // 两个折叠区都不再出现：这条入口的全部字段一次看全（模型行没展开时一个 details 都没有）。
+  assert.equal(detailsOf(node, '协议设置'), undefined, '不再有「协议设置」折叠区');
+  assert.equal(detailsOf(node, '自定义设置'), undefined, '不再有「自定义设置」折叠区');
+  assert.deepEqual(collect(node, (item) => item.type === 'details'), [], '表单里没有任何 details');
 
   const controls = protocolPanelControls(node);
   assert.deepEqual(Object.keys(controls),
@@ -1163,55 +1239,69 @@ test('新建「自定义模型 API」：协议设置默认收起，协议排在�
     '与编辑页同一组控件、同一个顺序');
   for (const [label, control] of Object.entries(controls)) {
     assert.ok(control, label + ' 在');
-    assert.ok(insideOf(settings, control), label + ' 收在协议设置里');
+    assert.equal(insideAnyDetails(node, control), false, label + ' 不被折叠区包裹');
   }
-  // 顺序：协议 → 鉴权 → 图生图端点 → 返回格式。新建页以前是鉴权在协议上面。
-  const order = preorder(settings);
+
+  // 顺序：协议 → 鉴权 → 图生图端点 → 返回格式。
+  const order = preorder(formRoot(node));
   const at = (target) => order.indexOf(target);
-  assert.ok(at(controls['API 协议']) < at(controls['鉴权方式']), '新建页也是协议在前、鉴权在后');
+  assert.ok(at(controls['API 协议']) < at(controls['鉴权方式']), '协议在前、鉴权在后');
   assert.ok(at(controls['鉴权方式']) < at(controls['图生图端点']), '图生图端点在鉴权之后');
+  assert.ok(at(controls['图生图端点']) < at(controls['文生图返回格式']), '返回格式读的就是上面这套协议，排在最后');
   const detect = collect(node, (n) => n.props && n.props['data-mo-image-detect-protocol'] !== undefined)[0];
   assert.ok(detect, '识别协议按钮在');
-  assert.ok(insideOf(settings, detect), '识别协议按钮跟着协议收在协议设置里');
+  assert.equal(insideAnyDetails(node, detect), false, '识别协议按钮也平铺');
 
-  // 三个主字段常显：密钥 / 显示名称 / API 地址都不在任何折叠区里，且排在两个折叠区之前。
+  // 三个主字段排在协议相关字段之前，同样不被折叠。
   const key = collect(node, (n) => n.type === 'input' && n.props.type === 'password')[0];
   const name = collect(node, (n) => n.type === 'input' && n.props.value === 'Relay')[0];
   const url = collect(node, (n) => n.type === 'input' && n.props.value === 'https://g.example/v1')[0];
-  const whole = preorder(formRoot(node));
   for (const [label, control] of [['API 密钥', key], ['显示名称', name], ['API 地址', url]]) {
     assert.ok(control, label + ' 在');
     assert.equal(insideAnyDetails(node, control), false, label + ' 常显');
-    assert.ok(whole.indexOf(control) < whole.indexOf(settings), label + ' 排在协议设置之前');
+    assert.ok(at(control) < at(controls['API 协议']), label + ' 排在协议之前');
   }
 });
 
-test('新建「自定义模型 API」的「自定义设置」：默认收起，装着模型目录 / 路由 / 调度模型', () => {
+test('新建「自定义模型 API」：模型目录 / 路由 / 调度模型平铺在返回格式之后', () => {
   const client = loadClient({ customMode: true });
   client.setCatalog();
   const gateway = renderForm(client, {
     id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
-    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' }, models: ['m'], names: {}
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+    // 自定义协议 + 旧配置：返回格式是那块手写 JSON 的「请求与返回格式」，它必须只出现一次。
+    operations: { version: 1, generate: { output: 'binary' } },
+    models: ['m'], names: {}
   }, true);
-  const advanced = detailsOf(gateway, '自定义设置');
-  assert.ok(advanced, '自定义设置在');
-  assert.equal(advanced.props.open, false, '默认收起');
+
+  assert.equal(detailsOf(gateway, '自定义设置'), undefined, '不再有「自定义设置」折叠区');
+  const operations = collect(gateway, (n) => n.props && n.props['data-mo-image-operations'] === 'provider')[0];
+  assert.ok(operations, '自定义协议的「请求与返回格式」编辑器在');
+  assert.equal(collect(gateway, (n) => n.type === 'details'
+    && n.props && n.props['data-mo-image-operations'] === 'provider').length, 1,
+  '「请求与返回格式」编辑器只渲染一份，别因为平铺重复一遍');
+  const directory = collect(gateway, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(directory, '模型目录在');
   const route = collect(gateway, (n) => n.type === 'input' && n.props.name === 'route-generate')[0];
   assert.ok(route, '路由输入框在');
-  assert.ok(insideOf(advanced, route), '路由收在自定义设置里');
-  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-protocol'] !== undefined).length, 0,
-    '协议不在自定义设置里（它属于上面的协议设置）');
-  assert.equal(collect(advanced, (n) => n.props && n.props['data-mo-image-auth-mode'] !== undefined).length, 0,
-    '鉴权不在自定义设置里');
+  for (const [label, control] of [['请求与返回格式', operations], ['模型目录', directory], ['路由', route]]) {
+    assert.equal(insideAnyDetails(gateway, control), false, label + ' 平铺');
+  }
+  // 顺序：返回格式 → 模型目录 → 路由（协议相关在前、接入细节在后）。
+  const order = preorder(formRoot(gateway));
+  const at = (target) => order.indexOf(target);
+  assert.ok(at(operations) < at(directory), '模型目录排在返回格式之后');
+  assert.ok(at(directory) < at(route), '路由排在模型目录之后');
 
-  // 调度模型（openai-responses 才有）同样属于「接入细节」。
+  // 调度模型（openai-responses 才有）同样平铺，排在路由之后。
   const responses = renderForm(client, {
     id: 'p2', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
     hostModel: 'gpt-5.2', models: [], names: {}
   }, true);
   const hostModel = collect(responses, (n) => n.type === 'input' && n.props.value === 'gpt-5.2')[0];
   assert.ok(hostModel, '调度模型输入框在');
-  assert.ok(insideOf(detailsOf(responses, '自定义设置'), hostModel), '调度模型属于自定义设置');
+  assert.equal(insideAnyDetails(responses, hostModel), false, '调度模型平铺');
+  assert.equal(detailsOf(responses, '自定义设置'), undefined, '调度模型也没有折叠区包着');
 });
 
 test('识别协议挪到协议下拉右侧，且与问号不在同一个 hover 容器里', () => {
@@ -1722,6 +1812,91 @@ test('workflow 类适配器（ComfyUI / A1111）的输入设置与输出设置�
   }
 });
 
+test('输入设置与输出设置挂在同一个 .modelRow 下：左右边缘与右端锁的 x 相同', () => {
+  // 回归：输入设置曾多套一层 div.modelAdvanced（带 2px 4px 内边距），输出设置却直接挂在
+  // .modelRow 上——两行的左右边缘因此差 4px，右端的锁一个偏左、一个偏右、行高也略有差异。
+  // 现在两块 details 是同一层的兄弟节点：父节点、内联样式、从锁到折叠区那一串祖先都同构。
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const cases = [
+    { label: 'ComfyUI', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'flux.safetensors' },
+    { label: 'A1111', adapter: 'a1111', baseUrl: 'http://127.0.0.1:7860', model: 'sdxl.safetensors' }
+  ];
+  for (const item of cases) {
+    const client = loadClient({ preserveFormState: true });
+    client.setCatalog();
+    const provider = {
+      id: 'p1', name: item.label, baseUrl: item.baseUrl, adapter: item.adapter,
+      presetId: item.adapter, models: [item.model], names: {}
+    };
+    const render = () => renderForm(client, provider);
+    expandModelOptions(client, provider, render);
+    const tree = render();
+    const row = collect(tree, (node) => String((node.props || {}).className || '').includes('modelRow'))[0];
+    assert.ok(row, item.label + '：模型行在');
+    const input = modelSection(tree, 'data-mo-image-input-settings');
+    const output = modelSection(tree, 'data-mo-image-output-settings');
+    assert.ok(input && output, item.label + '：两块折叠区都在');
+
+    // ① 结构对等：父节点就是同一个 .modelRow，中间没有夹任何容器。
+    const inputParent = parentOf(tree, input);
+    const outputParent = parentOf(tree, output);
+    assert.ok(inputParent && outputParent, item.label + '：两块折叠区都有父节点');
+    assert.equal(inputParent, outputParent, item.label + '：两块折叠区挂在同一个父节点下');
+    assert.equal(inputParent, row, item.label + '：父节点就是 .modelRow');
+    assert.equal(collect(row, (node) => String((node.props || {}).className || '').includes('modelAdvanced')).length, 0,
+      item.label + '：div.modelAdvanced 那层包装已经删掉');
+
+    // ② 样式链对等：同一个 grid 落位、同一份宽度 → 左右边缘重合。
+    assert.deepEqual(plain(input.props.style), plain(output.props.style),
+      item.label + '：两块折叠区同一份内联样式（grid-column / width / min-width）');
+    assert.equal(input.props.style.gridColumn, '1 / -1', item.label + '：输入设置横跨整行');
+    assert.equal(input.props.style.width, '100%', item.label + '：宽度不靠父容器的内边距凑');
+    assert.equal(input.props.style.minWidth, 0);
+
+    // ③ 锁的 x 相同：从锁往上到折叠区那一串祖先逐层同构（层数、类名、内联样式都一样）。
+    const pathTo = (target, node = tree, trail = []) => {
+      if (node === null || node === undefined) return null;
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = pathTo(target, child, trail);
+          if (found) return found;
+        }
+        return null;
+      }
+      if (typeof node !== 'object') return null;
+      if (node === target) return trail;
+      for (const child of node.children || []) {
+        const found = pathTo(target, child, trail.concat([node]));
+        if (found) return found;
+      }
+      return null;
+    };
+    const lockOf = (section) => collect(section, (node) => node.type === 'button'
+      && node.props['data-lock-key'] !== undefined)[0] || null;
+    const inLock = lockOf(input);
+    const outLock = lockOf(output);
+    assert.ok(inLock && outLock, item.label + '：两行右端都是锁');
+    const chainOf = (section, lock) => {
+      const path = pathTo(lock);
+      assert.ok(path, item.label + '：锁在树上');
+      return path.slice(path.indexOf(section)).reverse();
+    };
+    const inChain = chainOf(input, inLock);
+    const outChain = chainOf(output, outLock);
+    assert.equal(inChain.length, 3, item.label + '：锁 → 操作区 → 标题行 → 折叠区');
+    assert.equal(inChain.length, outChain.length, item.label + '：两行的祖先层数相同');
+    const shapeOf = (chain) => chain.map((node) => ({
+      className: String(node.props.className || ''),
+      style: plain(node.props.style || {})
+    }));
+    assert.deepEqual(shapeOf(inChain), shapeOf(outChain),
+      item.label + '：从锁到折叠区逐层同构（锁因此在同一条竖线上）');
+    // 锁本身也不带内边距：右边缘与按钮式控件对齐。
+    assert.equal(inLock.props.style.padding, 0, item.label + '：输入行的锁没有按钮内边距');
+    assert.deepEqual(plain(inLock.props.style), plain(outLock.props.style), item.label + '：两把锁同一份样式');
+  }
+});
+
 test('自定义提供商的模型选项两块都在，输出设置里直接是手写 JSON（不再套一层）', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
@@ -1833,7 +2008,6 @@ function modelRowPanelKind(item) {
   if (props['data-mo-image-output-settings'] !== undefined) return 'outputSettings';
   if (props['data-mo-image-output-presets'] !== undefined) return 'outputPresets';
   if (props['data-mo-image-operations'] !== undefined) return 'operations';
-  if (String(props.className || '').includes('modelAdvanced')) return 'params';
   return String(props.className || '') || String(item.type);
 }
 
@@ -1873,7 +2047,7 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
         id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
         models: ['doubao-seedream-4-0-250828'], names: { 'doubao-seedream-4-0-250828': 'Doubao Seedream' }
       },
-      panels: ['outputSettings', 'params'],
+      panels: ['outputSettings', 'inputSettings'],
       output: 'data-mo-image-output-presets'
     },
     {
@@ -1883,7 +2057,7 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
         customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
         models: ['m'], names: {}
       },
-      panels: ['outputSettings', 'params'],
+      panels: ['outputSettings', 'inputSettings'],
       output: 'data-mo-image-operations'
     }
   ];
@@ -1939,7 +2113,7 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
     const output = panels.find((panel) => modelRowPanelKind(panel) === 'outputSettings');
     assert.ok(collect(output, (node) => node.props && node.props[item.output] !== undefined)[0],
       item.label + '：返回格式在输出设置里');
-    const params = panels.find((panel) => modelRowPanelKind(panel) === 'params');
+    const params = panels.find((panel) => modelRowPanelKind(panel) === 'inputSettings');
     assert.equal(collect(params, (node) => node.props && node.props[item.output] !== undefined).length, 0,
       item.label + '：模型参数面板里没有返回格式');
 
