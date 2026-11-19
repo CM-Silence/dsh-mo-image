@@ -36,6 +36,8 @@ const T = {
   'form.outputSettings': '输出设置',
   'form.protocolSettings': '协议设置',
   'form.modelOperationsHint': '在 JSON 里覆盖 generate 或 edit。省略的选项沿用提供商设置。',
+  // 旧折叠区的标题；折叠区没了之后它只剩一个用处——返回格式 JSON 编辑器的 aria-label。
+  'form.operations': '请求与返回格式',
   'form.authFollow': '跟随协议',
   'form.modeCatalog': '第三方模型提供商',
   'form.modeCustom': '自定义模型 API',
@@ -1269,17 +1271,20 @@ test('新建「自定义模型 API」：模型目录 / 路由 / 调度模型平�
   const gateway = renderForm(client, {
     id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
     customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
-    // 自定义协议 + 旧配置：返回格式是那块手写 JSON 的「请求与返回格式」，它必须只出现一次。
+    // 自定义协议 + 旧配置：返回格式是「两个下拉 + 一份手写 JSON」，它必须只出现一次。
     operations: { version: 1, generate: { output: 'binary' } },
     models: ['m'], names: {}
   }, true);
 
   assert.equal(detailsOf(gateway, '自定义设置'), undefined, '不再有「自定义设置」折叠区');
   const operations = collect(gateway, (n) => n.props && n.props['data-mo-image-operations'] === 'provider')[0];
-  assert.ok(operations, '自定义协议的「请求与返回格式」编辑器在');
+  assert.ok(operations, '自定义协议的返回格式面板在');
+  assert.notEqual(operations.type, 'details', '不再套「请求与返回格式」折叠区');
   assert.equal(collect(gateway, (n) => n.type === 'details'
-    && n.props && n.props['data-mo-image-operations'] === 'provider').length, 1,
-  '「请求与返回格式」编辑器只渲染一份，别因为平铺重复一遍');
+    && n.props && n.props['data-mo-image-operations'] !== undefined).length, 0,
+  '没有任何 details 还挂着返回格式的标记');
+  assert.equal(collect(gateway, (n) => n.props && n.props['data-mo-image-operations'] === 'provider').length, 1,
+    '返回格式面板只渲染一份，别因为平铺重复一遍');
   const directory = collect(gateway, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
   assert.ok(directory, '模型目录在');
   const route = collect(gateway, (n) => n.type === 'input' && n.props.name === 'route-generate')[0];
@@ -1424,6 +1429,113 @@ test('自定义操作预览使用实际端点，返回预设可直接写入草�
   const editor = collect(tree, (node) => node.props['data-mo-image-operations'] === 'provider')[0];
   const json = collect(editor, (node) => node.type === 'textarea')[0];
   assert.deepEqual(JSON.parse(json.props.value).generate, { path: 'v1/render', method: 'POST', output: 'binary' });
+});
+
+test('自定义协议的返回格式不再套折叠区：两个下拉直接排开，JSON 编辑器跟在下面', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+    operations: { version: 1, generate: { method: 'POST', path: 'v1/render' } },
+    models: ['m'], names: {}
+  };
+  const node = renderForm(client, provider);
+  const panel = collect(node, (item) => item.props && item.props['data-mo-image-operations'] === 'provider')[0];
+  assert.ok(panel, '返回格式面板在');
+  assert.notEqual(panel.type, 'details', '不再套「请求与返回格式」details');
+  assert.equal(detailsOf(node, '请求与返回格式'), undefined, '没有那个折叠区了');
+  // 位置不变：它是协议这一组的最后一项（协议 → 鉴权 → 图生图端点 → 返回格式）。
+  assert.equal(insideOf(detailsOf(node, '协议设置'), panel), true, '跟着协议设置走');
+
+  // 两个下拉是本面板的第一块，和内置协议一样一行两列。
+  const selects = collect(panel, (item) => item.type === 'select' && item.props['data-mo-image-output-preset']);
+  assert.deepEqual(selects.map((item) => item.props['data-mo-image-output-preset']).sort(), ['edit', 'generate'],
+    '文生图与图生图两个下拉都在');
+  const order = preorder(panel);
+  const at = (target) => order.indexOf(target);
+  // 两个下拉同一行两列：与内置协议同一个排法。
+  const selectRow = ancestorsOf(panel, selects[0])
+    .find((item) => item.props && item.props.style && item.props.style.gridTemplateColumns);
+  assert.ok(selectRow, '两个下拉要有一个横向排布的父容器');
+  assert.equal(collect(selectRow, (item) => item.type === 'select').length, 2, '两个下拉在同一个父容器里');
+  assert.equal(selectRow.props.style.gridTemplateColumns, 'minmax(0, 1fr) minmax(0, 1fr)', '一行两列，各占半宽');
+
+  // 顺序：下拉 → 说明 → JSON。JSON 是自定义协议唯一能定义请求方法 / 字段映射的地方，必须保留。
+  const hint = collect(panel, (item) => item.type === 'p')[0];
+  const json = collect(panel, (item) => item.type === 'textarea' && item.props['data-mo-image-operations-json'] !== undefined)[0];
+  assert.ok(hint, '说明文字还在');
+  assert.ok(json, 'JSON 编辑器在');
+  assert.ok(at(selects[0]) < at(hint), '下拉在前');
+  assert.ok(at(hint) < at(json), 'JSON 跟在说明后面');
+  assert.equal(JSON.parse(json.props.value).generate.method, 'POST', '把草稿里的 operations 回显出来');
+});
+
+test('JSON 编辑器只在自定义协议出现：内置协议的表单里一份都没有', () => {
+  const jsonEditors = (tree) => collect(tree, (item) => item.props
+    && item.props['data-mo-image-operations-json'] !== undefined);
+  const cases = [
+    { label: 'openai-images', provider: { id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: ['gpt-image-1'], names: {} } },
+    { label: 'comfyui', provider: { id: 'p2', name: 'Comfy', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', models: ['flux-dev'], names: {} } },
+    { label: 'a1111', provider: { id: 'p3', name: 'A1111', baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111', models: ['sdxl'], names: {} } },
+    { label: 'openai-responses', provider: { id: 'p4', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses', models: ['gpt-image-1'], names: {} } }
+  ];
+  for (const item of cases) {
+    const client = loadClient();
+    client.setCatalog();
+    const node = renderForm(client, item.provider);
+    assert.deepEqual(jsonEditors(node), [], item.label + '：没有返回格式 JSON 编辑器');
+    assert.equal(collect(node, (child) => child.props && child.props['data-mo-image-operations'] !== undefined).length, 0,
+      item.label + '：也没有那块自定义协议的面板');
+    // 返回格式本身照旧：两个预设下拉。
+    const panel = collect(node, (child) => child.props['data-mo-image-output-presets'] === 'provider')[0];
+    assert.ok(panel, item.label + '：返回格式面板在');
+    assert.equal(collect(panel, (child) => child.type === 'select').length, 2, item.label + '：两个下拉都在');
+  }
+
+  // 自定义协议：有且只有一份。
+  const custom = loadClient();
+  custom.setCatalog();
+  const customNode = renderForm(custom, {
+    id: 'p5', name: 'Gateway', baseUrl: '', adapter: 'custom',
+    customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+    models: ['m'], names: {}
+  });
+  assert.equal(jsonEditors(customNode).length, 1, '自定义协议：一份 JSON 编辑器');
+});
+
+test('自定义协议：老配置里手写的 operations 保存时原样带回', async () => {
+  const client = loadClient();
+  client.setCatalog();
+  // 形如以前手写的那种配置：请求方法 / 字段映射 / 响应解析都在。
+  const operations = {
+    version: 1,
+    generate: { method: 'PATCH', path: 'v1/render', transport: 'json', fields: { prompt: { path: 'input.text' } }, output: 'binary' },
+    edit: { method: 'POST', path: 'v1/edit' },
+    models: { method: 'GET', path: 'v1/catalog' }
+  };
+  let saved = null;
+  const tree = client.render(client.h(client.form(), {
+    provider: {
+      id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom',
+      customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' },
+      operations: operations, models: ['m'], names: {}
+    },
+    isNew: false,
+    onSave(next) { saved = next; },
+    onClose() {},
+    t: t
+  }));
+  const json = collect(tree, (item) => item.type === 'textarea'
+    && item.props['data-mo-image-operations-json'] !== undefined)[0];
+  assert.ok(json, 'JSON 编辑器把老配置回显出来');
+  assert.deepEqual(JSON.parse(json.props.value), operations, '回显的就是原值');
+  const save = collect(tree, (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+  assert.ok(save, '保存按钮要存在');
+  await save.props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.operations)), operations, '没动过就不许改');
+  assert.equal(saved.customEndpoints.generate, 'https://g.example/v1/render', '端点照旧');
 });
 
 /** 按 summary 文案定位折叠区：「协议设置」与「自定义设置」都靠它找。 */
@@ -2137,6 +2249,116 @@ test('模型行展开：面板整行铺开，第 1 列只留给拖动把手，�
       assert.equal(input.props.style.minWidth, 0, item.label + '：输入框能收缩（min-width: 0）');
       assert.equal(input.props.style.textOverflow, undefined,
         item.label + '：input 不支持 text-overflow，不能写');
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 样式常量的等价替换护栏：渲染树里的内联样式必须与抽常量之前一字不差
+// ---------------------------------------------------------------------------
+
+/**
+ * 表单里重复 ≥3 次的样式组合抽成了模块级常量（FIELD_LABEL_ROW_STYLE / PARAM_ROW_STYLE /
+ * FLUSH_TEXT_STYLE / CHOICE_INPUT_STYLE / FIXED_CONTROL_STYLE / ADD_ROW_STYLE，
+ * 以及选区皮肤的 STATIC_ROW_STYLE）。抽常量只许换写法，不许改视觉——值必须逐字段相同。
+ *
+ * 所以这里把三张有代表性的表单各录一份内联样式基线
+ * （test/fixtures/provider-form-styles.baseline.json）：先序遍历渲染树，每个带 style 的节点
+ * 记一行「节点类型|按字段名排序的样式」，重构后逐行比对。任何一条样式的字段或值变了
+ * （哪怕只是 gap 6 → 8），那一行就对不上。
+ *
+ * 覆盖边界：这三张表单走的是「展开模型选项」这条路径，把提供商表单、输入设置（参数表 /
+ * 工作流编辑器 / 质量与尺寸行）与输出设置（预设下拉）的内联样式都录进来了；
+ * 选区皮肤的 cmes-row 由 test/client-selector-skin.test.mjs 单独锁住。
+ *
+ * 重建基线（只在**有意**改视觉时用，且单独提交让基线 diff 能被 review）：
+ *   node --input-type=module -e "import fs from 'node:fs'; import { buildStyleSnapshot } from './test/client-protocol-panel.test.mjs'; fs.writeFileSync('test/fixtures/provider-form-styles.baseline.json', JSON.stringify(buildStyleSnapshot(), null, 2) + '\n')"
+ */
+
+const STYLE_BASELINE_URL = new URL('./fixtures/provider-form-styles.baseline.json', import.meta.url);
+let STYLE_BASELINE = null;
+let STYLE_BASELINE_ERROR = null;
+try {
+  STYLE_BASELINE = JSON.parse(readFileSync(STYLE_BASELINE_URL, 'utf8'));
+} catch (error) {
+  STYLE_BASELINE_ERROR = error;
+}
+
+/** 一条内联样式的稳定写法：字段名排序，值取 JSON 形态（与对象里的类型一一对应）。 */
+function styleLine(type, style) {
+  const plain = JSON.parse(JSON.stringify(style));
+  const fields = Object.keys(plain).sort()
+    .map((name) => name + '=' + JSON.stringify(plain[name])).join(';');
+  return String(type) + '|' + fields;
+}
+
+/** 渲染树里所有内联样式，按先序（= DOM 顺序）拍成行。 */
+function styleLines(node) {
+  return preorder(node)
+    .filter((item) => item.props && item.props.style && typeof item.props.style === 'object')
+    .map((item) => styleLine(item.type, item.props.style));
+}
+
+/**
+ * 三张覆盖不同分支的表单：ComfyUI（工作流编辑器 / 参数提示）、内置 OpenAI Images
+ * （参数表 / 质量与尺寸行 / 预设下拉）、A1111（自己那套参数提示）。
+ */
+const STYLE_CASES = [
+  {
+    name: 'comfyui-expanded',
+    provider: {
+      id: 'p1', name: 'Comfy', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',
+      models: ['flux-dev'], names: {}
+    }
+  },
+  {
+    name: 'openai-images-expanded',
+    provider: {
+      id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
+      models: ['gpt-image-1'], names: {}
+    }
+  },
+  {
+    name: 'a1111-expanded',
+    provider: {
+      id: 'p1', name: 'A1111', baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111',
+      models: ['sdxl'], names: {}
+    }
+  }
+];
+
+/** 新客户端 + 展开模型选项，再取整张表单。 */
+function renderStyleCase(item) {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const render = () => renderForm(client, item.provider);
+  expandModelOptions(client, item.provider, render);
+  return render();
+}
+
+export function buildStyleSnapshot() {
+  const snapshot = {};
+  for (const item of STYLE_CASES) snapshot[item.name] = styleLines(renderStyleCase(item));
+  return snapshot;
+}
+
+test('样式常量是等价替换：渲染树逐节点的内联样式与基线完全一致', () => {
+  assert.equal(STYLE_BASELINE_ERROR, null,
+    '读不到基线 test/fixtures/provider-form-styles.baseline.json：'
+    + (STYLE_BASELINE_ERROR && STYLE_BASELINE_ERROR.message));
+  const snapshot = buildStyleSnapshot();
+  for (const item of STYLE_CASES) {
+    const expected = STYLE_BASELINE[item.name];
+    const actual = snapshot[item.name];
+    assert.ok(Array.isArray(expected), item.name + '：基线里没有这一组');
+    assert.ok(actual.length > 0, item.name + '：一个带样式的节点都没渲染出来');
+    // 先逐行比对，把第一处差异直接说清楚（deepEqual 的 diff 对一行字符串没什么帮助）。
+    const limit = Math.max(actual.length, expected.length);
+    for (let index = 0; index < limit; index += 1) {
+      if (actual[index] === expected[index]) continue;
+      assert.fail(item.name + '：第 ' + index + ' 个带样式的节点变了\n'
+        + '  基线：' + expected[index] + '\n'
+        + '  现在：' + actual[index]);
     }
   }
 });

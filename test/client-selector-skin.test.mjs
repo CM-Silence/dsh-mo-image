@@ -795,6 +795,31 @@ test('the size rows carry an instant help marker', () => {
   );
   assert.ok(after, 'render survives the hover handler');
 });
+
+// 尺寸设置里这些行只是「看一眼 / 填一下」，点了没有任何动作——别让它们显示手型光标。
+// 六处用的是同一个样式常量（STATIC_ROW_STYLE），这里按渲染结果锁住它的值。
+test('the size rows never look clickable', () => {
+  const client = loadClient();
+  const tree = client.render(
+    client.h(client.__test.CodexImageSeat, {
+      t: ct, store: storeFixture(), setStore() {}, qualitySpec: railSpec
+    }),
+    seed({ open: true, pane: 'models', view: 2, subProvider: '__size' })
+  );
+  const rows = collectClass(tree, 'cmes-row');
+  const nonClickable = rows.filter((row) => row.props.style && Object.keys(row.props.style).length);
+  assert.ok(nonClickable.length >= 4, 'the size rows (auto / strict / width / height) carry a style');
+  for (const row of nonClickable) {
+    assert.deepEqual({ ...row.props.style }, { cursor: 'default' }, 'row style stays exactly cursor: default');
+  }
+  const heightRow = rows.find((row) => collectText(row).join('').includes(ct('seat.height')));
+  assert.ok(heightRow && heightRow.props.style, 'the height row is one of them');
+  // 能点的行（模型页的「自动」、提供商页的那一行）没有这条样式，别把它们也弄成不可点。
+  const autoRow = rows.find((row) => collectText(row).join('') === ct('seat.auto'));
+  assert.ok(autoRow, 'the model page auto row renders');
+  assert.equal(autoRow.props.style, undefined, 'clickable rows keep no cursor override');
+});
+
 test('the codex size rows open a menu page instead of a select', () => {
   const client = loadClient();
   client.__test.applyCatalog({
