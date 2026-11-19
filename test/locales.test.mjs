@@ -74,6 +74,24 @@ test('local-preset hint keys are gone from the CSV', () => {
   }
 });
 
+// 返回格式只剩「按操作选预设」：手写 JSON 那一格（以及它下面那句说明）删掉之后，
+// 「跟随协议」也不再是下拉里的一项。这几个键只服务于那两块 UI，留着就是死键。
+test('return-format JSON editor and follow-protocol keys are gone from the CSV', () => {
+  const keys = new Set(parsed.keys);
+  for (const key of [
+    'form.authFollow',
+    'form.outputPreset.auto',
+    'form.operations',
+    'form.modelOperations',
+    'form.operationsHint',
+    'form.modelOperationsHint',
+    'form.operationsInvalidJson',
+    'form.localOutputHint'
+  ]) {
+    assert.equal(keys.has(key), false, key + ' 应已删除');
+  }
+});
+
 // 协议级选项的文案键是客户端拼出来的（form.protocolOption <name> / <value> / Hint），
 // 字面量扫描看不见它们，所以这里按宿主清单（adapterManifest().options）逐项核对。
 test('dynamic protocol option keys exist in the CSV', () => {

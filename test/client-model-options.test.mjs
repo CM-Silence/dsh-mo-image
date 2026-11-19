@@ -91,6 +91,8 @@ function createHarness({ config, primitives = null, analyze = null, params = nul
         ok: true, config, adapters: [],
         providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: '', models: [] }],
         localPresets: [],
+        // 返回格式预设：宿主每次都会下发，模型选项里的「输出设置」靠它渲染两个下拉。
+        outputPresets: ['auto', 'openai', 'binary', 'image-url', 'image-base64', 'task-location', 'task-json'],
         paramDefaults: paramDefaults === null ? PARAM_DEFAULTS : paramDefaults,
         capabilities: capabilities === null ? defaultCapabilities(config) : capabilities
       }), { status: 200, headers: { 'content-type': 'application/json' } });
