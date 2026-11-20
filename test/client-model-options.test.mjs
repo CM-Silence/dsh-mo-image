@@ -875,6 +875,10 @@ function lockKeysFor(config, keys) {
 /** 手动上锁的中转站：预设来源没有面板，锁态只能用这种方式构造。 */
 const LOCKED_RELAY_CONFIG = lockKeysFor(JSON.parse(JSON.stringify(RELAY_CONFIG)), ['size', 'quality', 'prompt', 'image']);
 
+/** 八个键全锁的中转站（整块锁的选中态：`PARAM_KEYS.every(locked)`）。 */
+const ALL_LOCKED_RELAY_CONFIG = lockKeysFor(JSON.parse(JSON.stringify(RELAY_CONFIG)),
+  ['size', 'quality', 'prompt', 'negative', 'model', 'n', 'image', 'operations']);
+
 /** 检测路由的返回：形状与宿主一致（rules 只带 size/quality，字段与命中标记分表）。 */
 const DETECTED_QWEN = {
   ok: true,
@@ -935,7 +939,7 @@ const panelBody = (tree) => {
 };
 
 async function configureAll(harness) {
-  const button = findButton(harness.renderRoot(), (node) => /Configure all/i.test(textOf(node).join('')));
+  const button = findButton(harness.renderRoot(), (node) => /Configure every model/i.test(textOf(node).join('')));
   assert.ok(button, 'expected the one-click configure button');
   await button.props.onClick();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1178,32 +1182,44 @@ test('点锁图标解锁后输入框变回可编辑，再点又锁上', async ()
   assert.equal(paramInput(opened, 'size').props.disabled, true, '再点一次又锁上');
 });
 
-test('「全部解锁」把上锁的键一次全解开', async () => {
-  const { harness } = await openEditor(LOCKED_RELAY_CONFIG);
+test('整块锁：一键全锁 / 一键全解，都走标题行那一把锁', async () => {
+  const { harness } = await openEditor(ALL_LOCKED_RELAY_CONFIG);
   let opened = openModelPanel(harness);
-  const unlock = findButton(opened, (node) => /Unlock all/i.test(textOf(node).join('')));
-  assert.ok(unlock, '「输入设置」里要有全部解锁');
-  unlock.props.onClick(fakeEvent());
+  const masterLock = () => findAll(opened, (node) => node.type === 'button'
+    && node.props['data-mo-image-params-lock'] !== undefined)[0];
+  assert.ok(masterLock(), '「输入设置」标题行上有整块锁');
+  assert.equal(masterLock().props['aria-pressed'], 'true', '这四个键都锁着 → 显示已上锁');
+  masterLock().props.onClick(fakeEvent());
   opened = harness.renderRoot();
   // 「常规」现在是参数表：prompt 行是代表键，其余三行按字段模板有没有出现。
   for (const key of ['size', 'quality', 'prompt', 'image']) {
     assert.notEqual(paramInput(opened, key).props.disabled, true, key + ' 应该已解锁');
   }
+  assert.equal(masterLock().props['aria-pressed'], 'false', '全解开之后显示未上锁');
+
+  // 再点一次：全部锁回去。
+  masterLock().props.onClick(fakeEvent());
+  opened = harness.renderRoot();
+  for (const key of ['size', 'quality', 'prompt', 'image']) {
+    assert.equal(paramInput(opened, key).props.disabled, true, key + ' 应该已锁上');
+  }
 });
 
-test('单点自动检测只写未上锁的键，而且不上锁（下次还会重算）', async () => {
+test('「输入设置」里的「一键配置」只配这一个模型，并且把写过的键锁上', async () => {
   const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: DETECTED_QWEN });
   let opened = openModelPanel(harness);
-  const detectButton = findButton(opened, (node) => /Auto-detect/i.test(textOf(node).join('')));
-  assert.ok(detectButton, '每个模型保留单点自动检测');
-  await detectButton.props.onClick();
+  // 标题行的小字按钮：和模型目录那颗同款（linkButton），文案是「一键配置」。
+  const configure = findButton(opened, (node) => hasClass(node, 'linkButton')
+    && textOf(node).join('') === 'Configure');
+  assert.ok(configure, '每个模型都有一颗「一键配置」');
+  await configure.props.onClick();
   await new Promise((resolve) => setImmediate(resolve));
   const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
-  assert.deepEqual(JSON.parse(asked[asked.length - 1].body).models, ['Qwen/Qwen-Image']);
+  assert.deepEqual(JSON.parse(asked[asked.length - 1].body).models, ['Qwen/Qwen-Image'], '只问这一个模型');
   const config = await saveAndPosted(harness);
   const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
   assert.equal(entry.size.field, 'image_size');
-  assert.equal(entry.locked, undefined, '自动检测不写锁：三种自动上锁里没有它');
+  assert.equal(entry.locked.size, true, '一键配置写过的键顺手锁上');
 });
 
 test('手填的输入框收在默认折叠的「输入设置」里', async () => {
@@ -1221,8 +1237,8 @@ test('手填的输入框收在默认折叠的「输入设置」里', async () =>
   }
 });
 
-test('「一键配置」在中转站与自定义提供商上出现，预设来源不出现', async () => {
-  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure all/i.test(textOf(node).join(''))));
+test('「一键配置所有模型」在中转站与自定义提供商上出现，预设来源不出现', async () => {
+  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure every model/i.test(textOf(node).join(''))));
   assert.ok(hasBulk((await openEditor(RELAY_CONFIG)).tree), 'adapter 为空的中转站最需要一键配置');
   assert.ok(hasBulk((await openEditor(CUSTOM_RELAY_CONFIG)).tree), '自定义协议也要有');
   assert.ok(!hasBulk((await openEditor(PRESET_CONFIG)).tree), '预设来源开箱即用，不出现');
@@ -2407,7 +2423,7 @@ test('方框标题旁的锁：tooltip 走即时气泡，不用原生 title', asy
   qualityLock.props.onPointerEnter();
   opened = harness.renderRoot();
   const tip = tipNodes(paramBox(opened, 'quality'))
-    .find((node) => /bulk configuration may overwrite/i.test(textOf(node).join('')));
+    .find((node) => /bulk configure overwrites it/i.test(textOf(node).join('')));
   assert.ok(tip, '未上锁的锁气泡给出「会被一键配置覆盖」');
 });
 
@@ -2775,19 +2791,25 @@ test('输入设置与输出设置是同一行结构：标题在左、操作区�
   assert.equal(rows[1].children[1].props.style.display, 'flex');
   assert.equal(rows[1].children[1].props.style.alignItems, 'center', '操作区内部也居中');
 
-  // ③ 输入行右边只有「自动检测」，样式直接复用模型目录的「获取可用模型」。
-  const detectButtons = findAll(rows[0], (node) => node.type === 'button');
-  assert.equal(detectButtons.length, 1, '输入行只留一个按钮');
-  const detect = detectButtons[0];
-  assert.match(textOf(detect).join(''), /Auto-detect/);
+  // ③ 输入行右边两个控件：左「一键配置」（小字链接，和「获取可用模型」同款）、右整块锁。
+  const inputButtons = findAll(rows[0], (node) => node.type === 'button');
+  assert.equal(inputButtons.length, 2, '输入行是「一键配置 + 锁」两个控件');
+  const configureOne = inputButtons[0];
+  assert.equal(textOf(configureOne).join(''), 'Configure', '先是一键配置');
   const fetchModelsButton = findButton(opened, (node) => /Fetch available models/i.test(textOf(node).join('')));
   assert.ok(fetchModelsButton, '模型目录里的「获取可用模型」是同一套样式的参照');
-  assert.equal(detect.props.className, fetchModelsButton.props.className, '同一个组件 + 同一个类名');
-  assert.ok(hasClass(detect, 'linkButton'), '就是 linkButton，不是 secondaryButton');
-  assert.equal(findAll(rows[0], (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join(''))).length, 0,
-    '「全部解锁」不再挂在输入行上');
-  // 面板上只此一处自动检测：没有另一份散落的按钮。
-  assert.equal(findAll(opened, (node) => node.type === 'button' && /Auto-detect/.test(textOf(node).join(''))).length, 1);
+  assert.equal(configureOne.props.className, fetchModelsButton.props.className, '同一个组件 + 同一个类名');
+  assert.ok(hasClass(configureOne, 'linkButton'), '就是 linkButton，不是 secondaryButton');
+  // 整块锁紧跟其后，和「输出设置」右端那把同构（同一个图标按钮类）。
+  const masterLock = inputButtons[1];
+  assert.equal(masterLock.props['data-mo-image-params-lock'], '', '整块锁在第二位');
+  assert.equal(masterLock.props.className, rows[1].children[1].children[0].props.className,
+    '与输出行的锁同一个类');
+  assert.equal(findAll(rows[0], (node) => node.type === 'button' && /Unlock all|Lock all/.test(textOf(node).join(''))).length,
+    0, '解锁 / 上锁不再是一颗写字的按钮');
+  // 面板上只此一处一键配置（单模型那颗）：没有第二份散落的按钮。
+  assert.equal(findAll(opened, (node) => node.type === 'button'
+    && textOf(node).join('') === 'Configure').length, 1);
 
   // ④ 输出行右边还是一个锁图标，且不带按钮内边距（右边缘才和按钮对齐）。
   const outputButtons = findAll(rows[1], (node) => node.type === 'button');
@@ -2795,39 +2817,31 @@ test('输入设置与输出设置是同一行结构：标题在左、操作区�
   assert.equal(outputButtons[0].props['data-lock-key'], 'operations');
   assert.equal(outputButtons[0].props.style.padding, 0, '锁图标没有按钮内边距');
 
-  // ⑤ 点「自动检测」照旧只检测、不开合折叠区。
+  // ⑤ 点「一键配置」照旧只配这一个模型、不开合折叠区。
   const calls = { prevented: 0, stopped: 0 };
-  detect.props.onClick({
+  configureOne.props.onClick({
     preventDefault() { calls.prevented += 1; },
     stopPropagation() { calls.stopped += 1; }
   });
   assert.deepEqual(calls, { prevented: 1, stopped: 1 });
   assert.equal(harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length, 1,
-    '自动检测照旧发起请求');
+    '一键配置照旧发起请求');
 });
 
-test('「全部解锁」收进「输入设置」展开后的第一行：提示文字右边，参数表上方', async () => {
+test('「输入设置」展开后直接是参数表：说明与「全部解锁」那一行已经去掉', async () => {
   const { harness } = await openEditor(LOCKED_RELAY_CONFIG);
   const opened = openModelPanel(harness);
   const input = settingsSection(opened, 'data-mo-image-input-settings');
   const body = findAll(input, (node) => hasClass(node, 'customizedBody'))[0];
   assert.ok(body, '「输入设置」的内容区在');
-  const toolbar = body.children[0];
-  assert.equal(toolbar.props.style.justifyContent, 'space-between', '一行里：说明在左、解锁在右');
-
-  const unlock = findButton(toolbar, (node) => /Unlock all/i.test(textOf(node).join('')));
-  assert.ok(unlock, '「全部解锁」在提示行上');
-  assert.ok(hasClass(unlock, 'linkButton'), '小字按钮：和提示同一行，不抢标题栏');
-  assert.match(textOf(toolbar).join(''), /Locked keys survive bulk and single detection/, '解锁的说明就在同一行');
-
-  // 在参数表上方：先看到「锁着也行 / 要改就解锁」，再看到方框。
-  const order = [];
-  walk(body, (node) => order.push(node));
+  // 第一块就是参数表：没有「说明 + 全部解锁」那一条工具条了。
   const firstBox = paramBox(body, 'common');
   assert.ok(firstBox, '参数表还在');
-  assert.ok(order.indexOf(toolbar) < order.indexOf(firstBox), '提示行在参数表之前');
-  // 两行的标题栏里都没有它（标题栏只放一个操作）。
-  assert.equal(findAll(opened, (node) => node.type === 'summary' && /Unlock all/.test(textOf(node).join(''))).length, 0);
+  assert.match(textOf(body.children[0]).join(' '), /General/, '展开后第一块就是「常规」方框');
+  assert.equal(findAll(opened, (node) => node.props && node.props['data-mo-image-unlock-row']).length, 0,
+    '整条工具条都不在了');
+  assert.equal(findAll(opened, (node) => node.type === 'button' && /Unlock all/.test(textOf(node).join(''))).length, 0,
+    '「全部解锁」这颗按钮也没了');
 });
 
 /* ───────── 参考图「传法」：先选传法、后填字段名，不用回来重选 ───────── */
@@ -3304,7 +3318,7 @@ function adapterOnlyConfig(adapter) {
 }
 
 test('「一键配置」不出现在只认工作流参数的协议上，OpenAI 兼容的本地协议照样有', async () => {
-  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure all/i.test(textOf(node).join(''))));
+  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure every model/i.test(textOf(node).join(''))));
   // 这三种的尺寸与质量走工作流参数，规则表里根本没有它们：按钮只会写噪音。
   for (const adapter of ['a1111', 'comfyui', 'swarmui']) {
     const { tree } = await openEditor(adapterOnlyConfig(adapter));

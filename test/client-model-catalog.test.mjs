@@ -323,6 +323,24 @@ test('adopting the selection rewrites the list and fills display names from the 
   );
 });
 
+test('采纳新模型之后自动配一遍：只对刚加进来的那些发一次规则请求', async () => {
+  const { harness, tree: edited } = await openProviderEditor(baseConfig());
+  await findButton(edited, 'Fetch available models').props.onClick();
+  let tree = harness.renderRoot();
+  // 勾上一个还没在列表里的模型，然后再采纳。
+  candidateRows(tree).find((candidate) => candidate.id === 'gamma-model').toggle();
+  tree = harness.renderRoot();
+  const adopt = findButton(tree, 'Update list');
+  assert.ok(adopt);
+  adopt.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
+  assert.equal(asked.length, 1, '采纳之后自动跑一次「一键配置」，不重复问');
+  // 只配新增的：alpha / beta 本来就在列表里（可能被手改过），不再重算。
+  assert.deepEqual(JSON.parse(asked[0].body).models, ['gamma-model']);
+});
+
 test('a fetch result without names leaves untouched rows and empty names alone', async () => {
   const { harness, tree: edited } = await openProviderEditor({
     providers: [{
