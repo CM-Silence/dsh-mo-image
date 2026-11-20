@@ -14,7 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { callImageApi } from '../lib/index.js';
-import { resolveAdapter } from '../lib/adapters.js';
+import { providerPresetManifest, resolveAdapter } from '../lib/adapters.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 // 2x2 红：和 PNG_1PX 字节不同，用来证明「取到的是哪一级的图」。
@@ -39,8 +39,13 @@ function stabilityInput() {
   return { model: 'core', prompt: 'a cat', fitted: FITTED };
 }
 
+function stabilityProvider() {
+  const preset = providerPresetManifest().find((item) => item.id === 'stability');
+  return { ...preset, presetId: preset.id, key: 'k' };
+}
+
 async function stabilityGenerate() {
-  const provider = { baseUrl: 'https://api.stability.ai', key: 'k' };
+  const provider = stabilityProvider();
   const adapter = resolveAdapter(provider, 'core');
   assert.equal(adapter.id, 'stability');
   return callImageApi('generate', adapter, provider, stabilityInput(), new AbortController().signal);
@@ -48,10 +53,14 @@ async function stabilityGenerate() {
 
 /* ------------------------------------------------------------ stability */
 
-test('stability：二进制响应体 → 字节，请求常量 output_format="png" 不变', async (t) => {
+test('Stability Core requests a raw image with the required Accept header', async (t) => {
   let captured = null;
   stubFetch(t, async (url, init) => {
     captured = { url: String(url), init: init };
+    const accept = new Headers(init.headers).get('accept') || '*/*';
+    if (accept !== 'image/*') {
+      return jsonResponse({ errors: ['accept: expected image/* or application/json, but received: ' + accept] }, 400);
+    }
     return imageResponse();
   });
 
@@ -61,6 +70,7 @@ test('stability：二进制响应体 → 字节，请求常量 output_format="pn
   assert.equal(result.contentType, 'image/png');
 
   assert.ok(captured.url.endsWith('/v2beta/stable-image/generate/core'));
+  assert.equal(new Headers(captured.init.headers).get('authorization'), 'Bearer k');
   // multipart 表单：binary:true 这个请求常量必须还在（响应的二进制读法迁走，它不能跟着走）。
   const form = captured.init.body;
   assert.equal(form.get('output_format'), 'png');
@@ -78,13 +88,14 @@ test('stability：JSON {image:"<base64>"} 响应 → 同一份字节（今天两
 });
 
 test('stability 只对 SD3.5 启用编辑，并发送该模式要求的字段', async (t) => {
-  const provider = { baseUrl: 'https://api.stability.ai', key: 'k' };
+  const provider = stabilityProvider();
   const image = { buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'ref.png' };
   const model = 'sd3.5-large';
   const calls = [];
   stubFetch(t, async (url, init) => {
     calls.push(init.body);
     assert.equal(new URL(url).pathname, '/v2beta/stable-image/generate/sd3');
+    assert.equal(new Headers(init.headers).get('accept'), 'image/*');
     assert.equal(init.body.get('model'), model);
     return imageResponse();
   });

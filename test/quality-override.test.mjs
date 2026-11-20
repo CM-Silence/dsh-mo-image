@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 
 import { resolveAdapter, prepareGenerate, qualityOptionsFor, qualityOverrideOf } from '../lib/adapters.js';
 import { normalizeConfig, normalizeModelOptions } from '../lib/index.js';
-import { sanitizeQualityOption } from '../lib/config-store.js';
+import { resolveToolQuality, sanitizeQualityOption } from '../lib/config-store.js';
 
 const MODEL = 'gpt-image-2.5-flare';
 /** 尺寸怎么发跟这里无关：omit 掉，body 里就只剩质量这一件事。 */
@@ -42,6 +42,31 @@ function generateBody(provider, quality, model = MODEL) {
   }, new Set());
   return JSON.parse(prepared.body);
 }
+
+test('official BigModel uses model-specific quality options without sending internal modes', () => {
+  const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'openai-images', presetId: 'bigmodel' };
+  for (const [model, options] of [
+    ['glm-image', ['off', 'hd']],
+    ['cogview-4', ['off', 'standard', 'hd']],
+    ['cogview-4-250304', ['off', 'standard', 'hd']],
+    ['cogview-3-flash', ['off', 'standard', 'hd']],
+    ['vendor/CogView-4-250304:preview', ['off', 'standard', 'hd']]
+  ]) {
+    const adapter = resolveAdapter(provider, model);
+    const spec = qualityOptionsFor(provider, model, adapter);
+    assert.deepEqual(spec?.options.map((item) => item.value), options, model);
+    assert.equal(generateBody(provider, 'off', model).quality, undefined, model);
+    assert.equal(generateBody(provider, 'auto', model).quality, undefined, model);
+    assert.equal(generateBody(provider, 'hd', model).quality, 'hd', model);
+    assert.equal(generateBody(provider, 'high', model).quality, spec.default, model);
+    assert.equal(spec.default, options[1], model);
+  }
+  const glm = resolveAdapter(provider, 'glm-image');
+  assert.throws(() => resolveToolQuality(provider, 'glm-image', { quality: 'auto' }, { quality: 'standard' }, glm), /不支持质量档位/);
+  assert.equal(generateBody(provider, 'hd', 'unknown-image').quality, undefined);
+  const gateway = { adapter: 'openai-images', baseUrl: 'https://gateway.test/v1' };
+  assert.equal(generateBody(gateway, 'hd', 'cogview-4').quality, undefined);
+});
 
 /** 一份「勾选了、也配了挡位」的覆盖，测试里按需改。 */
 function qualityOverride(extra) {

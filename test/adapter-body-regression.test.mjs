@@ -208,6 +208,7 @@ const VARIANTS = {
     model: 'cogview-4',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     options: { edit: 'none' },
+    quality: null, // 重放旧请求时仍省略新支持的质量档位。
     reference: {
       generatePath: '/images/generations',
       generate: {
@@ -343,17 +344,18 @@ function recordVariant(name) {
   const adapter = resolveAdapter(provider, model);
   assert.equal(adapter.id, 'openai-images', name + ' 应该落在合并后的 openai-images 上');
   const spec = qualityOptionsFor(provider, model, adapter);
+  const quality = Object.hasOwn(entry, 'quality') ? entry.quality : (spec?.default ?? null);
   const input = {
     model,
     prompt: FIXED.prompt,
     negativePrompt: FIXED.negativePrompt,
     fitted: fitSize(provider, FIXED.sizeRequest, model),
-    quality: spec ? spec.default : null,
+    quality,
     images: [FIXED.image]
   };
   return {
     model,
-    quality: spec ? spec.default : null,
+    quality,
     options: { ...entry.options },
     generate: recordKind(adapter, provider, input, 'generate'),
     edit: recordKind(adapter, provider, input, 'edit')

@@ -179,14 +179,15 @@ npm run release -- minor --dry-run        # 只看会做什么
 | Stability AI | 隐藏 | 没有 quality |
 | Together AI | 隐藏 | 没有 quality |
 | Fireworks / Novita | 隐藏 | 取决于网关；默认不显示 |
-| SiliconFlow / 火山方舟 / 百炼 / BigModel | 隐藏 | 没有统一的 quality 参数 |
+| 智谱 BigModel | 显示 | GLM-Image 只支持 HD。CogView-4、CogView-4-250304 和 CogView-3-Flash 提供 Standard / HD |
+| SiliconFlow / 火山方舟 / 百炼 | 隐藏 | 没有统一的 quality 参数 |
 | A1111 / ComfyUI / SwarmUI / 本地 OpenAI 兼容 | 隐藏 | 没有统一 quality；用各自的 steps/cfg |
 
 切换模型时，选择器会从目标模型的档位里选一个合法默认值；旧配置里的 `max`、`high` 等值会收敛到目标模型支持的最近档位（例如 GPT-Image 的 `max` → `High`），不会再由对话模型填 `Max`。
 
 模型选项的「质量」方框可以覆盖这张表的判断：勾上 / 取消「支持质量参数」、改参数名（支持 `a.b.c` 嵌套路径）或自定义档位表，都能让一个模型从「隐藏」变成可选，或反过来明确「这个模型不发质量参数」。一键配置不会重新打开你明确关掉的质量开关。
 
-依据：[OpenAI Images API](https://platform.openai.com/docs/api-reference/images/create)（GPT-Image 的 `low/medium/high/auto`、DALL·E 3 的 `standard/hd`）、[Ideogram 3 API](https://developer.ideogram.ai/v2/api-reference/images/generate/ideogram-3)（`rendering_speed`）。Gemini、xAI、Recraft、Stability、Together、本地后端没有统一的官方 quality 字段，所以隐藏质量行。
+依据：[OpenAI Images API](https://platform.openai.com/docs/api-reference/images/create)（GPT-Image 的 `low/medium/high/auto`、DALL·E 3 的 `standard/hd`）、[Ideogram 3 API](https://developer.ideogram.ai/v2/api-reference/images/generate/ideogram-3)（`rendering_speed`）和[智谱图像生成 API](https://docs.bigmodel.cn/api-reference/模型-api/图像生成)（`quality`）。Gemini、xAI、Recraft、Stability、Together、本地后端没有统一的官方 quality 字段，所以隐藏质量行。
 
 ## 提示词优化
 
@@ -294,7 +295,7 @@ $DSH_HOME/.credentials.yaml
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
 | 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 按模型选择异步接口，Wan 2.7 支持参考图 |
 | 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
-| 智谱 BigModel | `openai-images`（`edit:'none'`） | `cogview-4`、`glm-image` | 生成；一次只回一张 |
+| 智谱 BigModel | `openai-images`（`edit:'none'`） | `glm-image`、`cogview-4`、`cogview-4-250304`、`cogview-3-flash` | 只支持文生图。拉取列表找不到时可手动填写模型 ID |
 | **MiniMax**（国际站 `api.minimax.io`） | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | H3-Image 就是 OpenAI Images 形状（生成 + `/images/edits` 收 1–16 张参考图）；`aspect_ratio` + `area`（`1K/2K/4K`），不发 `size` |
 | MiniMax 中国 | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | 同一套接口，基础地址换成 `api.minimax.cn`（现行官方域名） |
 

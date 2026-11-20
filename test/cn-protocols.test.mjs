@@ -47,7 +47,7 @@ test('dashscope qwen-image posts a native multimodality body and reads the outpu
   assert.equal(body.parameters.size, '2048*2048');
 });
 
-test('zhipu omits n and response_format', async (t) => {
+test('zhipu sends the chosen quality and omits n and response_format', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   let captured = null;
@@ -68,7 +68,7 @@ test('zhipu omits n and response_format', async (t) => {
   assert.equal(adapter.endpoints.edit, '');
 
   const result = await callImageApi('generate', adapter, provider, {
-    model: 'cogview-4', prompt: '一座山', fitted
+    model: 'cogview-4', prompt: '一座山', fitted, quality: 'hd'
   }, new AbortController().signal);
 
   assert.ok(result.bytes.length > 0);
@@ -78,6 +78,7 @@ test('zhipu omits n and response_format', async (t) => {
   assert.equal(body.response_format, undefined);
   assert.equal(body.model, 'cogview-4');
   assert.equal(body.size, '1024x1024');
+  assert.equal(body.quality, 'hd');
 });
 
 test('ark sends preset sizes and puts reference images in the image field', () => {
