@@ -2047,43 +2047,37 @@ test('模型选项分成输入设置与输出设置两块折叠区：默认都�
     'false', '锁图标显示为未锁');
 });
 
-test('云端预设的模型只显示输入设置，且输入默认锁住', () => {
+test('云端预设的模型行没有模型选项：预设定死了输入与返回', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
     id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
     presetId: 'openai', models: ['gpt-image-1'], names: {}
   };
-  const row = expandModelOptions(client, provider, () => renderForm(client, provider));
-  const input = modelSection(row, 'data-mo-image-input-settings');
-  const output = modelSection(row, 'data-mo-image-output-settings');
-  assert.ok(input, '输入设置在');
-  assert.equal(output, null, '云端预设不显示模型级返回设置');
-  assert.equal(input.props.open, undefined, '输入设置默认收起');
-
-  // 输入设置：每个方框的锁都按着，框内控件全部禁用。
-  assert.equal(collect(input, (item) => item.props['data-lock-key'] === 'size')[0].props['aria-pressed'], 'true',
-    '尺寸方框的锁是锁上的');
-  assert.equal(collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'size')[0]
-    .props.disabled, true, '锁住时尺寸输入禁用');
-  assert.equal(collect(input, (item) => item.type === 'input' && item.props['data-param-key'] === 'image')[0]
-    .props.disabled, true, '锁住时参考图控件禁用');
-
+  const tree = renderForm(client, provider);
+  const row = collect(tree, (item) => String((item.props || {}).className || '').includes('modelRow'))[0];
+  assert.ok(row, '模型行在');
+  // 连展开箭头都没有：没有可展开的东西。
+  assert.equal(collect(row, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '没有展开箭头');
+  assert.equal(modelSection(tree, 'data-mo-image-input-settings'), null, '没有输入设置');
+  assert.equal(modelSection(tree, 'data-mo-image-output-settings'), null, '没有输出设置');
 });
 
-test('云端声明式预设也隐藏自定义端点和输出设置', () => {
+test('云端声明式预设也隐藏自定义端点、模型选项与协议设置', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
     id: 'p1', name: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', adapter: 'custom', presetId: 'fireworks',
     operations: { generate: { path: 'render', output: 'binary' } }, models: ['m'], names: {}
   };
-  const render = () => renderForm(client, provider);
-  expandModelOptions(client, provider, render);
-  const tree = render();
+  const tree = renderForm(client, provider);
   assert.equal(collect(tree, (item) => item.props['data-mo-image-protocol-settings'] !== undefined).length, 0);
   assert.equal(collect(tree, (item) => item.props['data-mo-image-output-settings'] !== undefined).length, 0);
+  assert.equal(collect(tree, (item) => item.props['data-mo-image-input-settings'] !== undefined).length, 0);
   assert.equal(collect(tree, (item) => item.props.name === 'route-generate').length, 0);
+  assert.equal(collect(tree, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '模型行也没有展开箭头');
 });
 
 test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保存后原样带回', async () => {
@@ -2378,8 +2372,7 @@ test('隐藏的返回格式不清掉老配置：模型上已配过的 output 保
     presetId: 'openai', models: ['gpt-image-1'], names: {},
     modelOptions: { 'gpt-image-1': { operations: operations } }
   };
-  const render = () => renderForm(client, provider);
-  expandModelOptions(client, provider, render);
+  // 预设来源的模型行连面板都没有，这份返回格式在界面上完全看不见——但保存时不能丢。
   let saved = null;
   const tree = client.render(client.h(client.form(), {
     provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t

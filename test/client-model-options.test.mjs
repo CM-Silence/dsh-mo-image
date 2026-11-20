@@ -849,6 +849,27 @@ const RELAY_CONFIG = {
   defaults: {}
 };
 
+/**
+ * 手动上锁一份配置的当前模型。
+ *
+ * 预设来源已经没有「模型选项」面板了（预设定死了输入与返回），所以「锁」现在只剩
+ * 用户自己按上去这一种用法：把 entry.locked 写进夹具，面板就会按锁态渲染。
+ */
+function lockKeysFor(config, keys) {
+  const provider = config.providers[0];
+  const model = config.active.model;
+  const previous = (provider.modelOptions || {})[model] || {};
+  const locked = Object.assign({}, previous.locked);
+  for (const key of keys) locked[key] = true;
+  provider.modelOptions = Object.assign({}, provider.modelOptions, {
+    [model]: Object.assign({}, previous, { locked: locked })
+  });
+  return config;
+}
+
+/** 手动上锁的中转站：预设来源没有面板，锁态只能用这种方式构造。 */
+const LOCKED_RELAY_CONFIG = lockKeysFor(JSON.parse(JSON.stringify(RELAY_CONFIG)), ['size', 'quality', 'prompt', 'image']);
+
 /** 检测路由的返回：形状与宿主一致（rules 只带 size/quality，字段与命中标记分表）。 */
 const DETECTED_QWEN = {
   ok: true,
@@ -923,13 +944,10 @@ async function saveAndPosted(harness) {
   return JSON.parse(posted[posted.length - 1].body).config;
 }
 
-test('预设来源的提供商默认全锁，中转站与自定义提供商默认不锁', async () => {
+test('预设来源没有模型选项：中转站与自定义提供商有，且默认不锁', async () => {
+  // 预设已经把输入与返回定死了，模型行连展开箭头都不该有。
   const preset = await openEditor(PRESET_CONFIG);
-  const presetPanel = openModelPanel(preset.harness);
-  assert.equal(paramInput(presetPanel, 'size').props.disabled, true,
-    '预设来源的尺寸输入必须默认禁用（写的是摘要与锁，不是空格）');
-  assert.equal(paramInput(presetPanel, 'prompt').props.disabled, true);
-  assert.equal(paramLock(presetPanel, 'size').props['aria-pressed'], 'true');
+  assert.equal(optionsToggle(preset.harness.renderRoot()), null, '预设来源：模型行没有展开箭头');
 
   // adapter 为空的中转站是最常见的一档：以前按 adapter 判会把它一起锁死，现在看 presetId。
   const relay = await openEditor(RELAY_CONFIG);
@@ -1033,11 +1051,9 @@ test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是�
     && node.props['data-param-key'] === 'size')[0];
   assert.notEqual(sizeMode.props.disabled, true, 'SwarmUI 的尺寸控件能直接改');
 
-  // sd-server 走 OpenAI 兼容字段：和云端预设一样默认全锁。
+  // sd-server 走 OpenAI 兼容字段：和云端预设同一档，模型行没有可展开的面板。
   const sd = await openEditor(localPresetConfig('sd-server', 'openai-images', 'http://127.0.0.1:8080/v1'));
-  const sdPanel = openModelPanel(sd.harness);
-  assert.equal(paramLock(sdPanel, 'size').props['aria-pressed'], 'true', 'sd-server 的尺寸仍锁');
-  assert.equal(paramLock(sdPanel, 'prompt').props['aria-pressed'], 'true', 'sd-server 的常规表仍锁');
+  assert.equal(optionsToggle(sd.harness.renderRoot()), null, 'sd-server 没有模型选项（预设已经把字段定死了）');
 });
 
 test('一键配置把命中的尺寸与字段写进去，并给写过的键上锁', async () => {
@@ -1140,7 +1156,8 @@ test('展开面板不再渲染规则摘要：规则只活在检测里，面板�
 });
 
 test('点锁图标解锁后输入框变回可编辑，再点又锁上', async () => {
-  const { harness } = await openEditor(PRESET_CONFIG);
+  // 锁态来自用户自己按的那几下（预设来源没有面板了）：夹具里把这几个键上锁。
+  const { harness } = await openEditor(LOCKED_RELAY_CONFIG);
   let opened = openModelPanel(harness);
   assert.equal(paramInput(opened, 'size').props.disabled, true);
   paramLock(opened, 'size').props.onClick(fakeEvent());
@@ -1151,8 +1168,8 @@ test('点锁图标解锁后输入框变回可编辑，再点又锁上', async ()
   assert.equal(paramInput(opened, 'size').props.disabled, true, '再点一次又锁上');
 });
 
-test('「全部解锁」把预设提供商的锁一次全解开', async () => {
-  const { harness } = await openEditor(PRESET_CONFIG);
+test('「全部解锁」把上锁的键一次全解开', async () => {
+  const { harness } = await openEditor(LOCKED_RELAY_CONFIG);
   let opened = openModelPanel(harness);
   const unlock = findButton(opened, (node) => /Unlock all/i.test(textOf(node).join('')));
   assert.ok(unlock, '「输入设置」里要有全部解锁');
@@ -2641,7 +2658,8 @@ test('上锁时框里的输入全部禁用', async () => {
   ];
   for (const [mode, extra, least] of cases) {
     const config = sizedConfig(mode, extra);
-    config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+    // 手动上锁：预设来源没有模型选项了，锁态只能这么构造（见 lockKeysFor）。
+    lockKeysFor(config, ['size']);
     const { harness } = await openEditor(config);
     const opened = openModelPanel(harness);
     const box = paramBox(opened, 'size');
@@ -2779,7 +2797,7 @@ test('输入设置与输出设置是同一行结构：标题在左、操作区�
 });
 
 test('「全部解锁」收进「输入设置」展开后的第一行：提示文字右边，参数表上方', async () => {
-  const { harness } = await openEditor(PRESET_CONFIG);
+  const { harness } = await openEditor(LOCKED_RELAY_CONFIG);
   const opened = openModelPanel(harness);
   const input = settingsSection(opened, 'data-mo-image-input-settings');
   const body = findAll(input, (node) => hasClass(node, 'customizedBody'))[0];
@@ -3182,7 +3200,8 @@ test('老配置读回来能显示成对应策略（只有 path / 只有 multipar
 
 test('上锁时参考图方框里的控件全部禁用', async () => {
   const config = imageConfig({ image: { path: 'image', as: 'dataUrl' } });
-  config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+  // 手动上锁：预设来源没有模型选项了，锁态只能这么构造（见 lockKeysFor）。
+  lockKeysFor(config, ['image']);
   const { harness } = await openEditor(config);
   const opened = openModelPanel(harness);
   assert.equal(paramLock(opened, 'image').props['aria-pressed'], 'true', '这个键是上锁的');
@@ -3509,7 +3528,8 @@ test('上锁时质量方框里的控件全部禁用', async () => {
     field: 'quality',
     options: [{ label: 'High', value: 'high', default: true }]
   });
-  config.providers[0].presetId = 'openai'; // 预设来源的提供商默认全锁
+  // 手动上锁：预设来源没有模型选项了，锁态只能这么构造（见 lockKeysFor）。
+  lockKeysFor(config, ['quality']);
   const { harness } = await openEditor(config);
   const opened = openModelPanel(harness);
   const box = paramBox(opened, 'quality');
