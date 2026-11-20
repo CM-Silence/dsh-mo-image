@@ -407,6 +407,8 @@ test('「插入示例模板」在 label 行右侧，靠右对齐', async () => {
   assert.ok(sample, '示例模板按钮在 label 行');
   assert.equal(textOf(sample).join(''), 'Insert sample template');
   assert.equal(sample.props.style.marginLeft, 'auto', '靠右对齐');
+  // 无边框小字按钮：它只是「给一份能跑的样例」，不是这里的主操作。
+  assert.ok(hasClass(sample, 'linkButton'), '插入示例模板用无边框按钮');
   const labelText = findAll(labelRow, (node) => node.type === 'span'
     && hasClass(node, 'modelFieldLabel'))[0];
   assert.ok(labelText, 'label 文本在');
@@ -590,6 +592,9 @@ test('解析参数入口、loading 与候选清单已移除，只留「解析工
   opened = harness.renderRoot();
   const labels = findAll(opened, (node) => node.type === 'button').map((node) => textOf(node).join(''));
   assert.ok(labels.includes('Parse workflow'), '解析工作流还在');
+  // 有边框按钮（与「添加模型」同一套）：它是工作流那边的主操作。
+  assert.ok(hasClass(findAll(opened, (node) => node.type === 'button'
+    && /Parse workflow/i.test(textOf(node).join('')))[0], 'addModelButton'), '解析工作流用有边框按钮');
   assert.equal(labels.filter((label) => /Parse parameters/i.test(label)).length, 0, '解析参数按钮没了');
   assert.equal(findAll(opened, (node) => node.props['data-param-key'] === 'params:parse').length, 0,
     '入口的定位属性也不在了');
