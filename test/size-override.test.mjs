@@ -99,15 +99,16 @@ test('the user override beats the built-in model family table', () => {
   assert.equal(spec.control, 'wh');
 });
 
-test('without an override the model name still picks a sensible default', () => {
-  const plain = { id: 'p', baseUrl: 'https://api.apiyi.com/v1', adapter: '', protocol: 'openai-images', key: 'k' };
+test('without an override the selected protocol controls the Gemini size fields', () => {
+  const plain = { id: 'p', baseUrl: 'https://gateway.example/v1', adapter: '', protocol: 'openai-images', key: 'k' };
   const adapter = resolveAdapter(plain, MODEL);
   assert.equal('sizeOverride' in adapter, false);
-  // 名字里有 banana：按 nano-banana 的比例 + 档位兜底，用户仍然可以覆盖。
-  assert.equal(sizeSpecFor(plain, MODEL).control, 'aspect');
-  assert.deepEqual(sizeSpecFor(plain, MODEL).tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
-  // 认不出来的模型保持宽高。
-  assert.equal(sizeSpecFor(plain, 'mystery-image-v9').control, 'wh');
+  assert.equal(sizeSpecFor(plain, MODEL, adapter).control, 'wh');
+  assert.equal(sizeSpecFor(plain, 'mystery-image-v9', adapter).control, 'wh');
+  const native = { ...plain, adapter: 'google-gemini' };
+  const spec = sizeSpecFor(native, MODEL, resolveAdapter(native, MODEL));
+  assert.equal(spec.control, 'aspect');
+  assert.deepEqual(spec.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
 });
 
 test('the config sanitiser keeps a size-only model option', () => {

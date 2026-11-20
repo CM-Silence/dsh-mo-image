@@ -65,6 +65,7 @@ test('stability：二进制响应体 → 字节，请求常量 output_format="pn
   const form = captured.init.body;
   assert.equal(form.get('output_format'), 'png');
   assert.equal(form.get('prompt'), 'a cat');
+  assert.equal(form.has('model'), false);
 });
 
 test('stability：JSON {image:"<base64>"} 响应 → 同一份字节（今天两条路都能吃）', async (t) => {
@@ -74,6 +75,30 @@ test('stability：JSON {image:"<base64>"} 响应 → 同一份字节（今天两
 
   assert.deepEqual(result.bytes, Buffer.from(PNG_1PX, 'base64'));
   assert.equal(result.contentType, 'image/png');
+});
+
+test('stability 只对 SD3.5 启用编辑，并发送该模式要求的字段', async (t) => {
+  const provider = { baseUrl: 'https://api.stability.ai', key: 'k' };
+  const image = { buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'ref.png' };
+  const model = 'sd3.5-large';
+  const calls = [];
+  stubFetch(t, async (url, init) => {
+    calls.push(init.body);
+    assert.equal(new URL(url).pathname, '/v2beta/stable-image/generate/sd3');
+    assert.equal(init.body.get('model'), model);
+    return imageResponse();
+  });
+  const input = { ...stabilityInput(), model, images: [image] };
+  const adapter = resolveAdapter(provider, model);
+  await callImageApi('generate', adapter, provider, input);
+  await callImageApi('edit', adapter, provider, input);
+  await assert.rejects(callImageApi('edit', resolveAdapter(provider, 'core'), provider, { ...input, model: 'core' }), /不支持图生图/);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].get('aspect_ratio'), '1:1');
+  assert.equal(calls[1].has('aspect_ratio'), false);
+  assert.equal(calls[1].get('mode'), 'image-to-image');
+  assert.equal(calls[1].get('strength'), '0.5');
+  assert.equal(calls[1].get('image').name, 'ref.png');
 });
 
 /* ----------------------------------------------------------- openai-chat */

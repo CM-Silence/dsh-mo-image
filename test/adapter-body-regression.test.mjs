@@ -79,6 +79,7 @@
  * 过来的，用来证明「合并只改名字、不改线上 body」。`buildBaseline()` 重建时会用当前
  * 代码重录它们——那之后就只是「从现在起不许变」，旧协议的对照点也就没了，
  * 所以要重建时先想清楚是不是真的要丢掉这个对照。
+ * 方舟的连字符版本号修复后，4.0 的固定样例开始使用官方 1K 档位。这里保留其他原始值。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -129,7 +130,7 @@ const MODELS = {
   'ideogram': 'ideogram-4',
   'stability': 'core',
   'dashscope-qwen-image': 'qwen-image-3.0-pro',
-  'dashscope-wanx': 'wan2.6-t2i',
+  'dashscope-wanx': 'wanx2.1-t2i-turbo',
   'a1111': 'sd-cpp-local',
   'comfyui': 'flux2-dev.safetensors',
   'swarmui': 'sdxl-base',
@@ -431,7 +432,7 @@ test('prepareEdit 的抛错情况与基线一致（当前一条都不抛）', ()
   assert.deepEqual(throwing, [], '有协议开始抛错了：要么是回归，要么基线要更新并写清原因');
 });
 
-test('endpoints.edit 为空的 3 条协议：编辑体拼得出来，但 path 是空串，永远发不出去', () => {
+test('样例模型没有编辑端点时：编辑体拼得出来，但 path 为空，永远发不出去', () => {
   const base = baseline();
   const unsupported = Object.entries(base.adapters)
     .filter(([, entry]) => entry.edit.supported === false)
@@ -439,7 +440,7 @@ test('endpoints.edit 为空的 3 条协议：编辑体拼得出来，但 path �
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   // together / localai / xai-imagine / zhipu 合并进 openai-images（edit:'none'）后不再是独立协议，
   // 它们的「没有编辑」形态由 variants 段锁住（legacy/*）。
-  assert.deepEqual(unsupported.map((item) => item.id), ['dashscope-wanx', 'ideogram', 'swarmui']);
+  assert.deepEqual(unsupported.map((item) => item.id), ['dashscope-wanx', 'ideogram', 'stability', 'swarmui']);
   for (const item of unsupported) {
     assert.equal(item.path, '', item.id + ' 的 edit 端点应该还是空的');
     assert.equal(item.hasBody, true, item.id + ' 的编辑体仍然会被拼出来（只是没人发），别把它当成「没有 body」');

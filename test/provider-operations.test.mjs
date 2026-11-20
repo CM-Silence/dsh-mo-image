@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { apply, callImageApi } from '../lib/index.js';
 import { normalizeConfig } from '../lib/config-store.js';
-import { detectProtocolStart, providerPresetManifest, resolveAdapter } from '../lib/adapters.js';
+import { detectProtocolStart, fitSize, providerPresetManifest, resolveAdapter } from '../lib/adapters.js';
 import { normalizeOperations, outputPresetManifest } from '../lib/provider-operations.js';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -52,6 +52,82 @@ test('shipped Fireworks and Novita presets use their documented image APIs', asy
     assert.equal(result.contentType, 'image/png');
   }
   assert.equal(calls.length, 3);
+});
+
+test('Microsoft Foundry serves MAI generation and multipart edits under /mai/v1', async (t) => {
+  const preset = providerPresetManifest().find((entry) => entry.id === 'azure-mai');
+  const model = 'eastus/MAI-Image-2.6-Flash-202611:preview';
+  const provider = normalizeConfig({
+    providers: [{
+      ...preset, presetId: preset.id, key: 'mock-key',
+      baseUrl: 'https://demo.services.ai.azure.com/mai/v1', models: [model]
+    }]
+  }).providers[0];
+  const adapter = resolveAdapter(provider, model);
+  assert.equal(preset.supportsModels, false);
+  assert.equal(adapter.id, 'custom');
+  assert.equal(detectProtocolStart({ baseUrl: provider.baseUrl }, model).done, false);
+  const fitted = fitSize(provider, '8192x384', model, adapter);
+  assert.ok(fitted.width >= 768 && fitted.height >= 768);
+  assert.ok(fitted.width * fitted.height <= 2359296);
+  const calls = stubFetch(t, ({ url, method, headers, body }) => {
+    assert.equal(method, 'POST');
+    assert.equal(headers.get('api-key'), 'mock-key');
+    assert.equal(headers.get('authorization'), null);
+    if (url.pathname === '/mai/v1/images/generations') {
+      assert.deepEqual(JSON.parse(body), { model, prompt: input.prompt, width: fitted.width, height: fitted.height });
+    } else {
+      assert.equal(url.pathname, '/mai/v1/images/edits');
+      assert.equal(body.get('model'), model);
+      assert.equal(body.get('prompt'), input.prompt);
+      assert.deepEqual(body.getAll('image').map((file) => file.name), ['a.png', 'b.png']);
+      assert.equal(body.has('width'), false);
+      assert.equal(body.has('height'), false);
+    }
+    return json({ data: [{ b64_json: PNG }] });
+  });
+  const images = ['a.png', 'b.png'].map((filename) => ({ filename, buffer: Buffer.from(PNG, 'base64'), contentType: 'image/png' }));
+  for (const kind of ['generate', 'edit']) {
+    const result = await callImageApi(kind, adapter, provider, { ...input, model, fitted, images: kind === 'edit' ? images : [] });
+    assert.equal(result.contentType, 'image/png');
+  }
+  await assert.rejects(
+    callImageApi('edit', adapter, provider, { ...input, model, fitted, images: Array(6).fill(images[0]) }),
+    /最多接受 5 张/
+  );
+  await assert.rejects(callImageApi('edit', adapter, provider, {
+    ...input, model, fitted, images: [{ ...images[0], contentType: 'image/webp' }]
+  }), /image\/jpeg、image\/png/);
+  assert.equal(calls.length, 2);
+});
+
+test('Gemini keeps the original model ID and sends nested imageConfig only on the native protocol', async (t) => {
+  const model = 'regional/gemini-3.1-flash-image-preview:latest';
+  const native = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', adapter: 'google-gemini', key: 'native-key' };
+  const compatible = { baseUrl: 'https://gateway.example/v1', adapter: 'openai-images', key: 'relay-key' };
+  const calls = stubFetch(t, ({ url, body, headers }) => {
+    const payload = JSON.parse(body);
+    if (url.hostname === 'gateway.example') {
+      assert.equal(url.pathname, '/v1/images/generations');
+      assert.equal(payload.model, model);
+      assert.equal(payload.size, '1024x1536');
+      assert.equal(Object.hasOwn(payload, 'aspect_ratio'), false);
+      assert.equal(Object.hasOwn(payload, 'generationConfig'), false);
+      return json({ data: [{ b64_json: PNG }] });
+    }
+    assert.equal(url.pathname, '/v1beta/models/' + encodeURIComponent(model) + ':generateContent');
+    assert.equal(headers.get('x-goog-api-key'), 'native-key');
+    assert.deepEqual(payload.generationConfig.imageConfig, { aspectRatio: '2:3', imageSize: '1K' });
+    assert.equal(Object.hasOwn(payload, 'aspect_ratio'), false);
+    return json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG } }] } }] });
+  });
+  for (const provider of [native, compatible]) {
+    const adapter = resolveAdapter(provider, model);
+    const fitted = fitSize(provider, '1024x1536', model, adapter);
+    const result = await callImageApi('generate', adapter, provider, { ...input, model, fitted });
+    assert.equal(result.contentType, 'image/png');
+  }
+  assert.equal(calls.length, 2);
 });
 
 function stubFetch(t, respond) {

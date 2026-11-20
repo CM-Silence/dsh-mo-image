@@ -27,7 +27,10 @@ const DEFAULT_PRESETS = [
 ];
 
 /** A stateful React stand-in, so clicks and drags re-render the settings section. */
-function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_ADAPTERS, primitives = null, presets = DEFAULT_PRESETS } = {}) {
+function createHarness({
+  config, modelsResponse = FETCHED, adapters = DEFAULT_ADAPTERS, primitives = null,
+  presets = DEFAULT_PRESETS, legacyWebView = false
+} = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -73,10 +76,11 @@ function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_AD
     Event: class Event { constructor(type) { this.type = type; } },
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     MutationObserver: class { observe() {} disconnect() {} },
-    AbortSignal: globalThis.AbortSignal, Response: globalThis.Response,
+    AbortSignal: legacyWebView ? {} : globalThis.AbortSignal,
+    AbortController: globalThis.AbortController, Response: globalThis.Response,
     fetch: async (url, init) => {
       const method = (init && init.method) || 'GET';
-      fetchCalls.push({ url: String(url), method: method, body: init && init.body });
+      fetchCalls.push({ url: String(url), method: method, body: init && init.body, signal: init && init.signal });
       if (String(url).endsWith('/api/mo-image/models')) {
         return new Response(JSON.stringify(modelsResponse), { status: 200, headers: { 'content-type': 'application/json' } });
       }
@@ -91,7 +95,9 @@ function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_AD
     },
     setTimeout: () => 0, clearTimeout() {}, URL
   };
-  vm.runInNewContext(source, context, { filename: 'client.js' });
+  vm.createContext(context);
+  if (legacyWebView) vm.runInContext('delete Object.hasOwn', context);
+  vm.runInContext(source, context, { filename: 'client.js' });
   const api = loaded.factory((name) => {
     if (name === 'react') return React;
     if (name === 'react-dom') return { createPortal(node) { return node; } };
@@ -117,7 +123,7 @@ function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_AD
   api.apply({
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {}; },
     slots: { inject(_key, callback) { callback(); }, register(definition, component) { registrations.push({ definition, component }); return () => {}; } },
-    locale
+    locale: legacyWebView ? undefined : locale
   });
 
   function render(node) {
@@ -265,6 +271,25 @@ async function openProviderEditor(config, options = {}) {
   tree = harness.renderRoot();
   return { harness, tree };
 }
+
+test('settings renders and loads providers in an older WebView without the host locale service', async () => {
+  const harness = createHarness({ config: baseConfig(), legacyWebView: true });
+  await settle();
+  const tree = harness.renderRoot();
+
+  const labels = textOf(tree).join(' ');
+  assert.match(labels, /添加模型提供商/);
+  assert.match(labels, /OpenAI production/);
+  const reads = harness.fetchCalls.filter((call) => call.url === '/api/mo-image/config' && call.method === 'GET');
+  assert.equal(reads.length, 1);
+  assert.ok(reads[0].signal instanceof AbortSignal);
+
+  findButton(tree, '编辑').props.onClick();
+  await findButton(harness.renderRoot(), '保存').props.onClick();
+  const writes = harness.fetchCalls.filter((call) => call.url === '/api/mo-image/config' && call.method === 'POST');
+  assert.equal(writes.length, 1);
+  assert.ok(writes[0].signal instanceof AbortSignal);
+});
 
 test('the provider Edit button toggles the detail form and reports aria-expanded', async () => {
   const harness = createHarness({ config: baseConfig() });

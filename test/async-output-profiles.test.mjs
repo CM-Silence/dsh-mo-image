@@ -299,7 +299,7 @@ test('fal：提交 → 轮询两次 status_url（202 待续）→ 二次 GET res
         url: 'https://queue.fal.run/fal-ai/flux-2-pro',
         method: 'POST',
         headers: { Authorization: 'Key k', 'Content-Type': 'application/json' },
-        body: '{"prompt":"a fox","num_images":1,"output_format":"jpeg","image_size":{"width":1024,"height":1024}}'
+        body: '{"prompt":"a fox","output_format":"jpeg","image_size":{"width":1024,"height":1024}}'
       },
       {
         url: 'https://queue.test/s',

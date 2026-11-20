@@ -81,7 +81,7 @@ function createHarness({ config, primitives = null, analyze = null, params = nul
         return new Response(JSON.stringify(params), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (detect && String(url).includes('/detect-model-rule')) {
-        const answer = typeof detect === 'function' ? detect(JSON.parse((init && init.body) || '{}')) : detect;
+        const answer = typeof detect === 'function' ? await detect(JSON.parse((init && init.body) || '{}')) : detect;
         return new Response(JSON.stringify(answer), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (models && String(url).includes('/api/mo-image/models')) {
@@ -1126,6 +1126,69 @@ test('一键配置跳过已上锁的键，只写没上锁的', async () => {
   });
 });
 
+test('地址改动后，等待中的一键配置结果不会写入草稿或上锁', async () => {
+  let finish;
+  const pending = new Promise((resolve) => { finish = resolve; });
+  const { harness, tree } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: () => pending });
+  const configure = findButton(tree, (node) => /Configure every model/i.test(textOf(node).join('')));
+  const running = configure.props.onClick();
+  await configure.props.onClick();
+  assert.equal(harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length, 1);
+  const address = findAll(harness.renderRoot(), (node) => node.type === 'input'
+    && node.props.value === CUSTOM_RELAY_CONFIG.providers[0].baseUrl)[0];
+  address.props.onChange({ target: { value: 'https://other-gateway.example/v1' } });
+  harness.renderRoot();
+  finish(DETECTED_QWEN);
+  await running;
+  const refreshed = harness.renderRoot();
+  assert.equal(findAll(refreshed, (node) => node.props['data-rule-notice'] !== undefined).length, 0);
+  const provider = (await saveAndPosted(harness)).providers[0];
+  assert.equal(provider.baseUrl, 'https://other-gateway.example/v1');
+  assert.equal(provider.modelOptions?.['Qwen/Qwen-Image'], undefined);
+});
+
+test('模型改名后再改回原名也不会应用改名前发起的一键配置', async () => {
+  let finish;
+  const pending = new Promise((resolve) => { finish = resolve; });
+  const { harness, tree } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: () => pending });
+  const configure = findButton(tree, (node) => /Configure every model/i.test(textOf(node).join('')));
+  const running = configure.props.onClick();
+  const rename = (from, to) => findAll(harness.renderRoot(), (node) => node.type === 'input'
+    && node.props.value === from)[0].props.onChange({ target: { value: to } });
+  rename('Qwen/Qwen-Image', 'temporary-model');
+  rename('temporary-model', 'Qwen/Qwen-Image');
+  harness.renderRoot();
+  finish(DETECTED_QWEN);
+  await running;
+  const provider = (await saveAndPosted(harness)).providers[0];
+  assert.deepEqual(provider.models, ['Qwen/Qwen-Image']);
+  assert.equal(provider.modelOptions?.['Qwen/Qwen-Image'], undefined);
+});
+
+test('一键配置超过 200 个模型时会分批处理最后一项', async () => {
+  const models = Array.from({ length: 201 }, (_, index) => 'model-' + index);
+  const config = {
+    ...CUSTOM_RELAY_CONFIG,
+    providers: [{ ...CUSTOM_RELAY_CONFIG.providers[0], models }],
+    active: { providerId: 'p9', model: models[0] }
+  };
+  const { harness } = await openEditor(config, {
+    detect: (body) => ({
+      ok: true,
+      rules: Object.fromEntries(body.models.map((id) => [id, { size: { mode: 'wh-string', field: 'size' } }])),
+      matched: Object.fromEntries(body.models.map((id) => [id, true]))
+    })
+  });
+  await configureAll(harness);
+  const batches = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'))
+    .map((call) => JSON.parse(call.body).models);
+  assert.deepEqual(batches.map((batch) => batch.length), [200, 1]);
+  assert.deepEqual(batches.flat(), models);
+  const provider = (await saveAndPosted(harness)).providers[0];
+  assert.equal(provider.modelOptions['model-200'].size.field, 'size');
+  assert.equal(provider.modelOptions['model-200'].locked.size, true);
+});
+
 test('一键配置只对命中规则的模型写入，未命中的既不写也不锁，结果提示报数', async () => {
   const twoModels = {
     providers: [{
@@ -1368,18 +1431,29 @@ test('一键配置抄规则时带上面板控件 control，mode none 不写', ()
     'mode none 是「不发尺寸」，没有值可写');
 });
 
-test('拉模型列表后，新增的模型自动填未上锁的键（不锁）', async () => {
+test('采纳模型时直接使用完整快照，只检测缺少快照的模型', async () => {
   const fetched = {
-    models: ['Qwen/Qwen-Image', 'flux-1-dev'],
-    allModels: ['Qwen/Qwen-Image', 'flux-1-dev'],
+    models: ['Qwen/Qwen-Image', 'flux-1-dev', 'mystery-image'],
+    allModels: ['Qwen/Qwen-Image', 'flux-1-dev', 'mystery-image'],
     filteredCount: 0,
     names: {},
-    // 宿主只给「本次新增」的模型附规则，形状是 { size, quality }。
     detected: {
-      'flux-1-dev': { size: { mode: 'wh-string', field: 'image_size', separator: 'x' }, quality: null }
+      'mystery-image': { size: { mode: 'wh-string', field: 'legacy_size' } }
+    },
+    detectedSnapshots: {
+      'flux-1-dev': {
+        matched: true, fields: { prompt: { path: 'prompt' } },
+        rule: { size: { mode: 'wh-string', field: 'image_size', separator: 'x' }, quality: null }
+      }
     }
   };
-  const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { models: fetched });
+  const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, {
+    models: fetched,
+    detect: {
+      ok: true, rules: { 'mystery-image': { size: { mode: 'wh-string', field: 'size' } } },
+      matched: { 'mystery-image': false }
+    }
+  });
   const fetchButton = findButton(harness.renderRoot(), (node) => /Fetch available models/i.test(textOf(node).join('')));
   assert.ok(fetchButton, 'expected the fetch models button');
   await fetchButton.props.onClick();
@@ -1393,15 +1467,23 @@ test('拉模型列表后，新增的模型自动填未上锁的键（不锁）',
   const checkbox = findAll(candidate, (node) => node.type === 'input' && node.props.type === 'checkbox')[0];
   assert.ok(checkbox, 'expected a candidate checkbox');
   checkbox.props.onChange();
+  const unknown = findAll(tree, (node) => node.type === 'li' && textOf(node).join('').trim() === 'mystery-image')[0];
+  findAll(unknown, (node) => node.type === 'input' && node.props.type === 'checkbox')[0].props.onChange();
   tree = harness.renderRoot();
   const adopt = findButton(tree, (node) => /Update list/i.test(textOf(node).join('')));
   assert.ok(adopt, 'expected the adopt button');
   adopt.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
   const config = await saveAndPosted(harness);
-  const entry = config.providers.find((item) => item.id === 'p9').modelOptions['flux-1-dev'];
+  const options = config.providers.find((item) => item.id === 'p9').modelOptions;
+  const entry = options['flux-1-dev'];
   assert.ok(entry, '新增模型要自动填规则');
   assert.equal(entry.size.field, 'image_size');
-  assert.equal(entry.locked, undefined, '自动填不是「普通上锁」的三种情况之一');
+  assert.equal(entry.fields.prompt.path, 'prompt');
+  assert.equal(entry.locked.size, true);
+  assert.equal(options['mystery-image'], undefined);
+  const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
+  assert.deepEqual(asked.map((call) => JSON.parse(call.body).models), [['mystery-image']]);
 });
 
 /* ───────────────────── 参数面板的排版：单行 vs 方框（只改布局） ───────────────────── */

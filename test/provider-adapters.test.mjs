@@ -361,6 +361,29 @@ test('Recraft uses the OpenAI-shaped generation endpoint', async (t) => {
   assert.equal(body.size, '1024x1024');
 });
 
+test('Recraft edits use the selected model and require exactly one reference', async (t) => {
+  const provider = { baseUrl: 'https://external.api.recraft.ai/v1', adapter: 'recraft', key: 'test-key' };
+  const image = { buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png', filename: 'ref.png' };
+  const input = { model: 'recraftv3', prompt: 'Change the sky', images: [image] };
+  const adapter = resolveAdapter(provider, input.model);
+  const original = globalThis.fetch;
+  let calls = 0;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url, init) => {
+    calls += 1;
+    assert.equal(new URL(url).pathname, '/v1/images/imageToImage');
+    assert.equal(init.body.get('model'), 'recraftv3');
+    assert.deepEqual(init.body.getAll('image').map((file) => file.name), ['ref.png']);
+    return jsonResponse({ data: [{ b64_json: PNG_1PX }] });
+  };
+  await callImageApi('edit', adapter, provider, input);
+  await assert.rejects(callImageApi('edit', adapter, provider, { ...input, images: [image, image] }), /一张参考图/);
+  for (const model of ['recraftv2', 'recraftv4_1_flash_v2']) {
+    await assert.rejects(callImageApi('edit', resolveAdapter(provider, model), provider, { ...input, model }), /不支持图生图/);
+  }
+  assert.equal(calls, 1);
+});
+
 test('Ideogram sends an Api-Key multipart generation request', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

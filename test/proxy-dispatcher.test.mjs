@@ -71,9 +71,11 @@ async function startOrigin({ tls = false } = {}) {
 /** 标准 CONNECT 代理：只负责打洞，然后双向转发。 */
 async function startConnectProxy() {
   const seen = [];
+  const authorization = [];
   const server = http.createServer((req, res) => { res.writeHead(501); res.end('use CONNECT'); });
   server.on('connect', (req, socket, head) => {
     seen.push(req.url);
+    authorization.push(req.headers['proxy-authorization']);
     const [host, port] = req.url.split(':');
     const upstream = net.connect(Number(port), host, () => {
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
@@ -86,7 +88,7 @@ async function startConnectProxy() {
   });
   trackSockets(server);
   const port = await listen(server);
-  return { server, port, seen, url: 'http://127.0.0.1:' + port };
+  return { server, port, seen, authorization, url: 'http://127.0.0.1:' + port };
 }
 
 /** 只回 502 的 CONNECT 代理，用来验证失败路径。 */
@@ -125,19 +127,36 @@ async function startForwardProxy() {
   return { server, port, seen, url: 'http://127.0.0.1:' + port };
 }
 
-test('tunnels an https request through a CONNECT proxy', { timeout: 10000 }, async (t) => {
+test('tunnels an https request through an authenticated CONNECT proxy', { timeout: 10000 }, async (t) => {
   const origin = await startOrigin({ tls: true });
   const proxy = await startConnectProxy();
   t.after(async () => { await close(proxy.server); await close(origin.server); });
 
-  const dispatcher = createProxyDispatcher({ proxyUrl: proxy.url, tlsOptions: TLS_OPTIONS });
+  const proxyUrl = proxy.url.replace('http://', 'http://fixture-user:fixture%40pass@');
+  const dispatcher = createProxyDispatcher({ proxyUrl, tlsOptions: TLS_OPTIONS });
   const response = await fetch(origin.origin + '/v1/models?pageSize=1000', { dispatcher });
   const body = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(body.url, '/v1/models?pageSize=1000');
   assert.deepEqual(proxy.seen, ['127.0.0.1:' + origin.port]);
+  assert.deepEqual(proxy.authorization, ['Basic ' + Buffer.from('fixture-user:fixture@pass').toString('base64')]);
   assert.equal(origin.seen[0].host, '127.0.0.1:' + origin.port);
+});
+
+test('invalid dispatcher options leave the original authenticated URL out of errors', () => {
+  for (const proxyUrl of [
+    'http://fixture-user:fixture-pass@proxy.test:bad-port',
+    'https://fixture-user:fixture-pass@proxy.test:7897',
+    'http://fixture-user:fixture-pass%FF@proxy.test:7897'
+  ]) {
+    assert.throws(() => createProxyDispatcher({ proxyUrl }), (error) => {
+      assert.match(error.message, /代理/);
+      assert.doesNotMatch(error.stack, /fixture-user|fixture-pass/);
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+  }
 });
 
 test('sends absolute-form requests for plain http targets', { timeout: 10000 }, async (t) => {

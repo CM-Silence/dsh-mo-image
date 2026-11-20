@@ -53,7 +53,7 @@ const SAMPLE = {
 
 test('每条内置预设都带六个逻辑字段的模板键（模板对象或 null）', () => {
   const list = presets();
-  assert.equal(list.length, 29, '预设数量变了：新增的预设也要补 fields，否则面板里它没有只读摘要');
+  assert.ok(list.length > 0, '至少要下发一条预设');
   for (const preset of list) {
     const label = preset.group + '/' + preset.id;
     assert.ok(

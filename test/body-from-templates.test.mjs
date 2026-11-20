@@ -100,8 +100,9 @@ test('嵌套尺寸路径也能被兼容性重试摘掉（drops 里是上游点�
   // 万相的提交体是 { model, input, parameters: { size, n } }：尺寸规则写的是 parameters.size，
   // 但上游报错只会说 "unknown parameter: size"，两条名字都要能命中。
   const provider = { adapter: 'dashscope-wanx', baseUrl: 'https://dashscope.aliyuncs.com/api/v1', key: 'k' };
-  const adapter = resolveAdapter(provider, 'wan2.6-t2i');
-  const input = { model: 'wan2.6-t2i', prompt: 'a cat', fitted: fitSize(provider, '1024x1024', 'wan2.6-t2i') };
+  const model = 'wanx2.1-t2i-turbo';
+  const adapter = resolveAdapter(provider, model);
+  const input = { model, prompt: 'a cat', fitted: fitSize(provider, '1024x1024', model) };
 
   const kept = JSON.parse(prepareAsync(adapter, provider, input, new Set()).body);
   assert.equal(kept.parameters.size, '1024*1024');

@@ -547,9 +547,79 @@ test('models 路由只给本次新增的模型附 detected', async (t) => {
     assert.equal(body.detected['Qwen/Qwen-Image'].size.field, 'image_size');
     assert.equal(body.detected['Qwen/Qwen-Image'].quality, null);
     assert.equal(body.detected['flux-local-a'], undefined);
+    assert.deepEqual(body.detectedSnapshots['Qwen/Qwen-Image'], {
+      rule: body.detected['Qwen/Qwen-Image'],
+      fields: {
+        prompt: { path: 'prompt' }, negative: { path: 'negative_prompt' },
+        model: { path: 'model' }, n: null, image: { path: 'image', as: 'dataUrl' }, quality: null
+      },
+      matched: true
+    });
+    assert.equal(body.detectedSnapshots['flux-local-a'], undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('兼容目录先保留图片模型，规则快照与单次检测一致', async (t) => {
+  const routes = await bootRuleRoutes(t, 8);
+  const catalog = routes.find((item) => item.path === '/api/mo-image/models');
+  const detect = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  const gpt = 'relay/gpt_image_2_6_flare:20261120';
+  const gemini = 'relay/gemini-3.1-flash-image:preview';
+  const mai = 'relay/MAI-Image-2.6-Flash:release';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    data: [
+      ...Array.from({ length: 510 }, (_, index) => ({ id: 'text-' + index })),
+      { id: gemini, name: 'Gemini Image' }, { id: gpt }, { id: gpt }, { id: mai }
+    ]
+  });
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const provider = { baseUrl: 'https://gateway.example/v1', adapter: 'openai-images', optionalKey: true };
+  const result = makeRes();
+  await catalog.handler(jsonReq('POST', JSON.stringify(provider)), result);
+  assert.equal(result.status, 200, result.body);
+  const listed = JSON.parse(result.body);
+  assert.deepEqual(listed.models, [gemini, gpt, mai]);
+  assert.equal(listed.allModels.length, 500);
+  assert.equal(listed.filteredCount, 497);
+  assert.equal(listed.names[gemini], 'Gemini Image');
+  assert.equal(listed.detectedSnapshots[gemini].matched, false);
+  assert.equal(listed.detectedSnapshots[gemini].rule.size.field, 'size');
+  assert.equal(listed.detectedSnapshots[mai].matched, false);
+  assert.equal(listed.detectedSnapshots[gpt].rule.quality.options.includes('xhigh'), true);
+  const batch = makeRes();
+  await detect.handler(jsonReq('POST', JSON.stringify({ ...provider, models: listed.models })), batch);
+  assert.equal(batch.status, 200, batch.body);
+  const checked = JSON.parse(batch.body);
+  for (const id of listed.models) {
+    assert.deepEqual(listed.detectedSnapshots[id], {
+      rule: checked.rules[id], fields: checked.fields[id], matched: checked.matched[id]
+    });
+  }
+});
+
+test('一键配置保持提示词尺寸协议与显式自定义输入', async (t) => {
+  const routes = await bootRuleRoutes(t, 9);
+  const detect = routes.find((item) => item.path === '/api/mo-image/detect-model-rule');
+  const base = { baseUrl: 'https://gateway.example/v1', model: 'relay/gpt-image-2.6-flare:latest' };
+  const chat = makeRes();
+  await detect.handler(jsonReq('POST', JSON.stringify({ ...base, adapter: 'openai-chat' })), chat);
+  assert.equal(chat.status, 200, chat.body);
+  const chatSnapshot = JSON.parse(chat.body);
+  assert.equal(chatSnapshot.size.mode, 'prompt');
+  assert.equal(chatSnapshot.quality, null);
+  const custom = makeRes();
+  await detect.handler(jsonReq('POST', JSON.stringify({
+    ...base, adapter: 'custom',
+    operations: { generate: { path: '/render', input: 'explicit', fields: { prompt: { path: 'request.text' } } } }
+  })), custom);
+  assert.equal(custom.status, 200, custom.body);
+  const customSnapshot = JSON.parse(custom.body);
+  assert.equal(customSnapshot.matched, false);
+  assert.equal(customSnapshot.size, null);
+  assert.equal(customSnapshot.fields, null);
 });
 
 test('models 路由没传 known 时按已保存的模型列表判断新增', async (t) => {

@@ -279,9 +279,9 @@ $DSH_HOME/.credentials.yaml
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **魔搭 ModelScope** | `modelscope` | `Qwen/Qwen-Image-2.1`、`Qwen/Qwen-Image-Edit` | 异步任务；提交带 `X-ModelScope-Async-Mode`，轮询 `/v1/tasks/{id}` |
 | **xAI Grok Imagine** | `openai-images`（`edit:'none'`） | `grok-imagine-image-2.0` | 预设提供文生图，使用 `aspect_ratio` 和 `resolution` |
-| **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 生成 + `imageToImage` 编辑 |
+| **Recraft** | `recraft` | `recraftv4_1`、`recraftv4`、`recraftv3`、`recraftv2` | 文生图。V3、V4、V4.1 的兼容模型支持单张参考图编辑 |
 | **Ideogram** | `ideogram` | `ideogram-3`、`ideogram-4`、`ideogram-4-5`、`ideogram-4-transparent` | 生成；模型写在路径里，4 收 JSON+像素枚举，4-5 只收 `size`，3/transparent 收字母 `x` 的比例 |
-| **Stability AI** | `stability` | `core` | 生成 + 编辑（multipart） |
+| **Stability AI** | `stability` | `core`、`sd3.5-large` | Core 支持文生图，SD3.5 支持文生图和单图编辑（multipart） |
 | **Together AI** | `openai-images`（`edit:'none'`） | `black-forest-labs/FLUX.1-schnell`、`FLUX.1-dev` | 原生 width/height 请求；生成 |
 | **Fireworks AI** | 声明式 HTTP | `flux-1-schnell-fp8` | FLUX.1 Schnell FP8 专用端点，读取二进制图片 |
 | **Novita AI** | 声明式 HTTP | `flux-1-schnell` | FLUX.1 Schnell 专用端点，下载响应中的图片链接 |
@@ -289,7 +289,7 @@ $DSH_HOME/.credentials.yaml
 | 火山方舟 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成；档位按模型分（5.x 是 `1K/1.5K/2K`，lite 是 `2K/3K/4K`，4.5 是 `2K/4K`），也收任意宽高 |
 | 火山方舟 Agent Plan | `openai-images`（`edit:'same'`） | 手动/获取 | 与火山方舟同协议，基础地址换成 `/api/plan/v3` |
 | 阿里云百炼 · Qwen-Image | `dashscope-qwen-image` | `qwen-image-3.0-pro`、`qwen-image-3.0` | 原生多模态同步接口 |
-| 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 异步入队任务；只有 wan2.7 认 `1K/2K/4K` 档位 |
+| 阿里云百炼 · 通义万相 | `dashscope-wanx` | `wan2.6-t2i`、`wan2.7-image-pro`、`wan2.7-image`、`wanx2.1-t2i-turbo` | 按模型选择异步接口，Wan 2.7 支持参考图 |
 | 硅基流动 | `openai-images`（`edit:'same'`） | 手动/获取 | 生成 + 单图编辑 |
 | 智谱 BigModel | `openai-images`（`edit:'none'`） | `cogview-4`、`glm-image` | 生成；一次只回一张 |
 | **MiniMax**（国际站 `api.minimax.io`） | `openai-images` | `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | H3-Image 就是 OpenAI Images 形状（生成 + `/images/edits` 收 1–16 张参考图）；`aspect_ratio` + `area`（`1K/2K/4K`），不发 `size` |
@@ -402,7 +402,7 @@ $DSH_HOME/.credentials.yaml
 
 完整的模型模板、场景模板和自检清单在 `skills/mo-image-generation/SKILL.md` 与 `skills/mo-image-editing/SKILL.md`。插件会把这两个技能注册成运行时技能，模型按需加载；提示词写法表在 `lib/prompt-profiles.js`。
 
-`negative_prompt` 只在支持它的适配器白名单里发送（Stability、硅基流动、通义万相、通用兼容）；GPT-Image、DALL·E 3、FLUX、Seedream、Nano Banana 不支持，传了会被白名单过滤或触发上游报错后自动摘掉。
+是否发送独立的 `negative_prompt` 由协议和模型决定。稳定扩散、硅基流动和万相 2.6 等模型支持独立字段，万相 2.7 把要避免的内容合并进提示词。
 
 参考的模型侧提示词指南：
 
@@ -444,7 +444,7 @@ $DSH_HOME/.credentials.yaml
 | 厂商原生 | `ideogram` | Ideogram（模型写在路径里） | `/generate` / — / — |
 | 厂商原生 | `stability` | Stability AI（multipart） | `/v2beta/stable-image/generate/core` / `/v2beta/stable-image/generate/sd3` / — |
 | 厂商原生 | `dashscope-qwen-image` | 百炼 Qwen-Image 原生多模态 | `/services/aigc/multimodal-generation/generation` / 同左 / — |
-| 厂商原生 | `dashscope-wanx` | 百炼通义万相（异步入队） | `/services/aigc/text2image/image-synthesis` / — / — |
+| 厂商原生 | `dashscope-wanx` | 百炼通义万相（异步入队） | 旧版走 `/services/aigc/text2image/image-synthesis`，Wan 2.6/2.7 走 `/services/aigc/image-generation/generation` |
 | 本地部署 | `a1111` | A1111 / Forge / SD.Next / Draw Things | `/sdapi/v1/txt2img` / `/sdapi/v1/img2img` / `/sdapi/v1/sd-models` |
 | 本地部署 | `comfyui` | ComfyUI（工作流） | `/prompt` / `/prompt` / `/object_info` |
 | 本地部署 | `swarmui` | SwarmUI | `/API/GenerateText2Image` / — / `/API/ListModels` |
@@ -559,7 +559,7 @@ $DSH_HOME/.credentials.yaml
 
 兼容网关按所选协议和已知的接口规则发尺寸。Gemini / Nano Banana 的原生比例与档位配置只用于 `google-gemini` 协议。网关要求 `width` / `height`、`image_size` 或其他字段时，可以在模型的「输入设置」中覆盖。
 
-如果旧版一键配置曾为兼容网关的 Gemini 模型保存 `aspect_ratio`，该覆盖会继续生效。要使用新版默认值，在「输入设置 → 尺寸」解锁，选择「跟随默认」并清空尺寸参数名，再保存。
+从 Gemini 原生协议切换到 OpenAI Images 后，插件会识别并清理旧版一键配置留下的原生提示词和尺寸组合。单独设置的 `aspect_ratio` 等网关映射仍然生效。如需恢复默认尺寸字段，在「输入设置 → 尺寸」解锁，选择「跟随默认」并清空尺寸参数名，再保存。
 
 **一键配置与锁**：三条入口共用同一个动作——「输入设置」标题行那颗只配这一个模型，「模型目录」右侧的「一键配置所有模型」对列表每一项各跑一次，从「获取可用模型」采纳新模型之后也会对刚加进来的那些自动跑一次。它按规则表把**尺寸 / 质量 / 字段模板**写进模型。**「认得出」= 规则表里有这个模型的专门规则**：质量规则、字段模板规则，或者一条**不是兜底**的尺寸规则——只知道尺寸怎么发的模型（`doubao-seedream-5-5`、`flux-2-flex` 这类）也算认得出，否则它连自己认识的尺寸都写不进去。兜底那条 `.*`（OpenAI 兼容发 `size`）匹配一切，所以**不算**认得出，否则每个模型都会被算成命中。没有专门规则的模型不写、也不锁，提示里会说明「按协议默认发送」；ComfyUI / A1111 / SwarmUI 的规则表里没有尺寸与质量，不给这个按钮）。八个键（尺寸、质量、提示词、负面词、模型、张数、参考图、返回格式）可以单独上锁，**锁住的键不会被一键配置改动**，解锁后才能手填；「输入设置」标题行那把整块锁一次锁上 / 解开全部输入键，行级锁（表格操作列里的锁）语义相同，只挡自动写入、不挡手动编辑。从预设创建的提供商默认全锁；自配网关与老配置默认不锁；**ComfyUI / A1111 / SwarmUI 的输入键默认不锁**（参数清单由部署端决定：装了哪个 sampler、模型目录里有哪几个 checkpoint，预设给不了映射），返回格式仍按预设来源锁——sd-server / localai / openai-gateway 走 OpenAI 兼容字段，和云端预设一样全锁。一键配置配好一个模型后会把它的**整块输入设置锁上**（七个输入键一次到位，返回格式那个键不动）——配好了就定了，要手改先解锁，否则下一次一键配置又按规则盖回去；没命中规则的模型不锁，下次还会重试；你在「质量」/「参考图」里明确取消过的，也不会被重新打开。
 

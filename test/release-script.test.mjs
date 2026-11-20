@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag,
-  upsertChangelog, notesForRelease
+  upsertChangelog, notesForRelease, isPreparedRelease, publishReleaseArtifacts
 } from '../scripts/release.mjs';
 
 test('release notes prefer the changelog section over generated commits', () => {
@@ -98,11 +98,33 @@ test('renderNotes groups commits by type', () => {
   assert.doesNotMatch(notes, /release v0\.4\.0/);
 });
 
-test('releasePlan keeps a spaced commit message inside one argument', () => {
+test('releasePlan commits only the release files and atomically pushes the tagged commit and the single tag', () => {
   const plan = releasePlan('0.4.0');
-  assert.deepEqual(plan.map((step) => step.command), ['git', 'git', 'git', 'git', 'git']);
+  assert.deepEqual(plan.map((step) => step.command), ['git', 'git', 'git']);
   const commit = plan.find((step) => step.args[0] === 'commit');
-  assert.deepEqual(commit.args, ['commit', '-m', 'chore(release): v0.4.0']);
+  assert.deepEqual(commit.args, ['commit', '--only', '-m', 'chore(release): v0.4.0', '--', 'package.json', 'CHANGELOG.md']);
   const tag = plan.find((step) => step.args[0] === 'tag');
   assert.deepEqual(tag.args, ['tag', '-a', 'v0.4.0', '-m', 'v0.4.0']);
+  assert.deepEqual(plan.at(-1).args, [
+    'push', '--atomic', 'origin', 'refs/tags/v0.4.0^{commit}:refs/heads/master', 'refs/tags/v0.4.0:refs/tags/v0.4.0'
+  ]);
+});
+
+test('an explicit current version resumes only from the matching tagged HEAD', () => {
+  const version = nextVersion('0.4.1-rc2', 'v0.4.1-rc2');
+  assert.equal(version, '0.4.1-rc2');
+  assert.ok(isPreparedRelease('0.4.1-rc2', version, 'abc', 'abc'));
+  assert.equal(isPreparedRelease('0.4.1-rc2', version, 'abc', 'def'), false);
+  assert.equal(isPreparedRelease('0.4.1-rc2', version, '', ''), false);
+  assert.equal(isPreparedRelease('0.4.1-rc1', version, 'abc', 'abc'), false);
+});
+
+test('failed requested npm publication prevents a GitHub announcement', () => {
+  const calls = [];
+  const npm = (version) => { calls.push(['npm', version]); return false; };
+  const github = (version, notes) => { calls.push(['github', version, notes]); return true; };
+  assert.equal(publishReleaseArtifacts('0.4.0', 'notes', { npm, github, publish: true }), 'npm-failed');
+  assert.deepEqual(calls, [['npm', '0.4.0']]);
+  assert.equal(publishReleaseArtifacts('0.4.0', 'notes', { npm, github }), 'released');
+  assert.deepEqual(calls.at(-1), ['github', '0.4.0', 'notes']);
 });

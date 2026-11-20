@@ -31,6 +31,19 @@ test('readReferences rejects when the total reference size exceeds the limit', a
   await assert.rejects(() => readReferences([file], new AbortController().signal, 1), /大小超过/);
 });
 
+test('readReferences accepts the encoded local Markdown image path from a previous result', async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mo-image-refs-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, '角色 set #1%.png');
+  writeFileSync(file, Buffer.from(PNG_1PX, 'base64'));
+  const parent = dir.replaceAll('\\', '/').split('/').map((segment) => (
+    /^[a-z]:$/i.test(segment) ? segment : encodeURIComponent(segment).replaceAll('(', '%28').replaceAll(')', '%29')
+  )).join('/');
+  const [image] = await readReferences([parent + '/%E8%A7%92%E8%89%B2%20set%20%231%25.png']);
+  assert.equal(image.filename, path.basename(file));
+  assert.deepEqual(image.buffer, Buffer.from(PNG_1PX, 'base64'));
+});
+
 test('referenceLimitFor separates multipart and JSON edit budgets', () => {
   assert.equal(referenceLimitFor({ transport: { edit: 'multipart' } }), 48 * 1024 * 1024);
   assert.equal(referenceLimitFor({ transport: { edit: 'json' } }), 10 * 1024 * 1024);

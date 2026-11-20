@@ -111,6 +111,15 @@ test('resolveProxyForTarget accepts an explicit proxy override', () => {
   assert.equal(target.source, 'override');
 });
 
+test('resolveProxyForTarget falls back when a proxy authority has invalid credential encoding', () => {
+  const target = resolveProxyForTarget('https://api.sudocode.chat/v1/models', {
+    env: { MO_IMAGE_PROXY: 'http://fixture-user:fixture-pass%FF@ignored.test:9000', HTTPS_PROXY: 'http://proxy.test:8080' },
+    systemProxy: null
+  });
+  assert.equal(target.proxyUrl, 'http://proxy.test:8080');
+  assert.equal(target.source, 'env');
+});
+
 test('resolveProxyForTarget ignores non-http targets and malformed URLs', () => {
   assert.equal(resolveProxyForTarget('file:///tmp/x.png', { env: { HTTPS_PROXY: 'http://p.test:1' }, systemProxy: null }).proxyUrl, null);
   assert.equal(resolveProxyForTarget('not a url', { env: { HTTPS_PROXY: 'http://p.test:1' }, systemProxy: null }).proxyUrl, null);

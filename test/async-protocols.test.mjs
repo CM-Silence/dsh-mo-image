@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { callImageApi } from '../lib/index.js';
-import { resolveAdapter } from '../lib/adapters.js';
+import { adapterSupportsKind, resolveAdapter } from '../lib/adapters.js';
 import { resetAsyncSchemaCache } from '../lib/adapters/async.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -549,7 +549,7 @@ test('a sync-only adapter that receives a task envelope points at the async prot
 
 test('dashscope-wanx 的输出描述符钉住 task 分支的字段名（后面三家异步照着它写）', () => {
   const providerDef = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-wanx', key: 'k' };
-  const adapter = resolveAdapter(providerDef, 'wan2.6-t2i');
+  const adapter = resolveAdapter(providerDef, 'wanx2.1-t2i-turbo');
   assert.equal(adapter.poll, undefined, '新写法只留 output，不留 poll');
   assert.equal(adapter.output.kind, 'task');
   assert.deepEqual(Object.keys(adapter.output).sort(), [
@@ -580,11 +580,11 @@ test('dashscope-wanx submits, polls output.task_status and downloads output.resu
   };
 
   const providerDef = { baseUrl: 'https://dashscope.aliyuncs.com/api/v1', adapter: 'dashscope-wanx', key: 'k' };
-  const adapter = resolveAdapter(providerDef, 'wan2.6-t2i');
+  const adapter = resolveAdapter(providerDef, 'wanx2.1-t2i-turbo');
   assert.equal(adapter.id, 'dashscope-wanx');
 
   const result = await callImageApi('generate', adapter, providerDef, {
-    model: 'wan2.6-t2i', prompt: 'a cat', fitted
+    model: 'wanx2.1-t2i-turbo', prompt: 'a cat', fitted
   }, new AbortController().signal);
 
   assert.deepEqual(result.bytes, Buffer.from(PNG_1PX, 'base64'));
@@ -597,4 +597,73 @@ test('dashscope-wanx submits, polls output.task_status and downloads output.resu
   assert.equal(poll.init.headers.Authorization, 'Bearer k', '同源轮询带提交用的 Key');
   const download = calls.find((call) => call.url === 'https://cdn.test/wanx.png');
   assert.equal(download.init.headers, undefined, '跨源 CDN 下载不带凭据');
+});
+
+test('Wan 2.6 T2I and Wan 2.7 use the modern DashScope submission and result fields', async (t) => {
+  const providerDef = {
+    baseUrl: 'https://workspace.cn-beijing.maas.aliyuncs.com/api/v1',
+    adapter: 'dashscope-wanx',
+    key: 'k',
+    modelOptions: { 'wan2.7-image-pro': { fields: { prompt: { path: 'input.prompt' } } } }
+  };
+  const submit = providerDef.baseUrl + '/services/aigc/image-generation/generation';
+  const poll = providerDef.baseUrl + '/tasks/task-27';
+  const cdn = 'https://assets.example/wan.png';
+  const bytes = Buffer.from(PNG_1PX, 'base64');
+  const reference = { buffer: bytes, contentType: 'image/png' };
+  const calls = [];
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    calls.push({ target, init });
+    if (target === submit) return jsonResponse({ output: { task_id: 'task-27', task_status: 'PENDING' } });
+    if (target === poll) return jsonResponse({
+      output: {
+        task_status: 'SUCCEEDED',
+        choices: [{ message: { content: [{ text: 'ready' }, { image: cdn }] } }]
+      }
+    });
+    if (target === cdn) return pngResponse();
+    throw new Error('unexpected url ' + target);
+  };
+
+  const models = [
+    ['wan2.6-t2i', 'generate', { width: 1280, height: 1280, size: '1280x1280' }, '1280*1280'],
+    ['wan2.7-image-pro', 'generate', { width: 4096, height: 4096, size: '4K' }, '4K'],
+    ['wan2.7-image', 'edit', { width: 2048, height: 2048, size: '2K' }, '2K']
+  ];
+  for (const [model, kind, fittedSize, size] of models) {
+    calls.length = 0;
+    const adapter = resolveAdapter(providerDef, model);
+    assert.equal(resolveAdapter({ ...providerDef, adapter: '' }, model).id, 'dashscope-wanx');
+    assert.equal(adapterSupportsKind(adapter, 'edit'), model !== 'wan2.6-t2i');
+    const result = await callImageApi(kind, adapter, providerDef, {
+      model, prompt: 'a cat', negativePrompt: 'cars', fitted: fittedSize,
+      ...(kind === 'edit' ? { images: [reference] } : {})
+    });
+    assert.deepEqual(result.bytes, bytes);
+    assert.deepEqual(calls.map(({ target, init }) => [target, init.method || 'GET']), [
+      [submit, 'POST'], [poll, 'GET'], [cdn, 'GET']
+    ]);
+    assert.equal(new Headers(calls[0].init.headers).get('x-dashscope-async'), 'enable');
+    assert.equal(new Headers(calls[1].init.headers).get('authorization'), 'Bearer k');
+    assert.equal(new Headers(calls[2].init.headers).get('authorization'), null);
+    const textOnly = model === 'wan2.6-t2i';
+    assert.deepEqual(JSON.parse(calls[0].init.body), {
+      model,
+      input: { messages: [{ role: 'user', content: [
+        ...(kind === 'edit' ? [{ image: 'data:image/png;base64,' + PNG_1PX }] : []),
+        { text: textOnly ? 'a cat' : 'a cat\n\nAvoid: cars' }
+      ] }] },
+      parameters: { n: 1, size, ...(textOnly ? { negative_prompt: 'cars' } : {}) }
+    });
+  }
+
+  calls.length = 0;
+  const model = 'wan2.7-image-pro';
+  await assert.rejects(callImageApi('edit', resolveAdapter(providerDef, model), providerDef, {
+    model, prompt: 'a cat', images: [reference], fitted: { width: 4096, height: 4096, size: '4K' }
+  }), /最高支持 2K/);
+  assert.deepEqual(calls, [], 'an unsupported edit size must not submit a job');
 });

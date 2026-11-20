@@ -66,7 +66,7 @@ async function harness(t, options = {}) {
     peak = Math.max(peak, active);
     try {
       await new Promise((resolve) => setTimeout(resolve, Number(options.delayMs) || 10));
-      return new Response(JSON.stringify({ data: [{ b64_json: PNG_1PX }] }), {
+      return new Response(JSON.stringify({ data: [{ b64_json: options.encodedImage || PNG_1PX }] }), {
         status: 200, headers: { 'content-type': 'application/json' }
       });
     } finally {
@@ -112,6 +112,32 @@ test('the same callId and request run once and both callers get the same result'
   assert.equal(posts().length, 1, 'only one paid POST for one call identity');
   assert.equal(first.path, second.path);
   assert.equal(first.model, 'some-image-model');
+});
+
+test('a blocked output directory rejects before submission and the same call can be retried after repair', async (t) => {
+  const { generate, exec, posts } = await harness(t);
+  const out = path.join(exec.agent.session.header.cwd, 'generated-images');
+  writeFileSync(out, 'an existing file blocks the output directory');
+  const args = { prompt: 'a cat' };
+
+  await assert.rejects(() => generate.execute(args, exec), (error) => {
+    assert.equal(error.code, 'output_unavailable');
+    assert.equal(error.submissionState, 'rejected');
+    return true;
+  });
+  assert.equal(posts().length, 0);
+
+  rmSync(out);
+  const result = await generate.execute(args, exec);
+  assert.equal(posts().length, 1);
+  assert.deepEqual(readdirSync(out), [path.basename(result.path)]);
+});
+
+test('saved output uses the image bytes when an upstream data URL mislabels the format', async (t) => {
+  const { generate, exec } = await harness(t, { encodedImage: 'data:image/jpeg;base64,' + PNG_1PX });
+  const result = await generate.execute({ prompt: 'a cat' }, exec);
+  assert.equal(path.extname(result.path), '.png');
+  assert.deepEqual(readFileSync(result.path), Buffer.from(PNG_1PX, 'base64'));
 });
 
 test('the same callId with a different request is a conflict, not a silent reuse', async (t) => {
@@ -326,6 +352,17 @@ test('resuming a saved job returns the existing file without touching the networ
   assert.equal(fetched, 0);
   assert.equal(resumed.path, first.path);
   assert.equal(resumed.jobId, first.jobId);
+  assert.equal(resumed.workspaceFile, true);
+  assert.equal(generateAfterRestart.output.render({}, resumed)[0].text, generate.output.render({}, first)[0].text);
+
+  const otherWorkspace = path.join(work, 'another-project');
+  mkdirSync(otherWorkspace);
+  const elsewhere = await generateAfterRestart.execute({ resume_job_id: first.jobId }, {
+    ...execAfterRestart, callId: 'resume-from-other-project', agent: { session: { header: { cwd: otherWorkspace } } }
+  });
+  assert.equal(elsewhere.path, first.path);
+  assert.match(generateAfterRestart.output.render({}, elsewhere)[0].text, /\/api\/mo-image\/preview\//);
+  assert.equal(fetched, 0);
 });
 
 test('an unknown resume id is a clear error, not a new submission', async (t) => {

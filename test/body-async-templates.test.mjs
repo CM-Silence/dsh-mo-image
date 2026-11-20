@@ -142,7 +142,7 @@ test('bfl 提交体：FLUX 3 没有参考图时不发 images', async () => {
 
 const falProvider = () => ({ baseUrl: 'https://queue.fal.run', adapter: 'fal', key: 'k' });
 
-test('fal 提交体：prompt + num_images + output_format + image_size', async () => {
+test('fal FLUX.2 Pro 文生图提交 prompt、output_format 和 image_size', async () => {
   const provider = falProvider();
   const adapter = resolveAdapter(provider, 'fal-ai/flux-2-pro');
   assert.equal(adapter.id, 'fal');
@@ -155,10 +155,25 @@ test('fal 提交体：prompt + num_images + output_format + image_size', async (
   assert.equal(out.path, '/fal-ai/flux-2-pro');
   assert.deepEqual(out.body, {
     prompt: 'a fox',
-    num_images: 1,
     output_format: 'jpeg',
     image_size: { width: 1024, height: 768 }
   });
+});
+
+test('fal FLUX.2 Pro 编辑使用 /edit，单张和多张参考图都是数组', async () => {
+  const provider = falProvider();
+  for (const [model, count] of [['fal-ai/flux-2-pro', 1], ['fal-ai/flux-2-pro/edit', 2]]) {
+    const out = await submitted(resolveAdapter(provider, model), provider, {
+      model, prompt: 'watercolor', fitted, images: images(count)
+    });
+    assert.equal(out.path, '/fal-ai/flux-2-pro/edit');
+    assert.deepEqual(out.body, {
+      prompt: 'watercolor',
+      output_format: 'jpeg',
+      image_size: { width: 1024, height: 1024 },
+      image_urls: Array(count).fill(DATA_URL)
+    });
+  }
 });
 
 test('fal 提交体：负面词拼进 prompt', async () => {
@@ -172,7 +187,7 @@ test('fal 提交体：负面词拼进 prompt', async () => {
   assert.equal(out.body.prompt, 'a fox\n\nAvoid: blurry');
 });
 
-test('fal 提交体：单图走 image_url', async () => {
+test('fal FLUX.1 Kontext Pro 单图编辑走 image_url', async () => {
   const provider = falProvider();
   const adapter = resolveAdapter(provider, 'fal-ai/flux-pro/kontext');
 
@@ -180,25 +195,55 @@ test('fal 提交体：单图走 image_url', async () => {
     model: 'fal-ai/flux-pro/kontext', prompt: 'watercolor', fitted, images: images(1)
   });
 
+  assert.equal(out.path, '/fal-ai/flux-pro/kontext');
   assert.deepEqual(out.body, {
     prompt: 'watercolor',
     num_images: 1,
     output_format: 'jpeg',
-    image_size: { width: 1024, height: 1024 },
+    aspect_ratio: '1:1',
     image_url: DATA_URL
   });
 });
 
-test('fal 提交体：多图走 image_urls 数组，不再发 image_url', async () => {
+test('fal FLUX.1 Kontext Pro 多图端点始终使用 image_urls 数组', async () => {
   const provider = falProvider();
-  const adapter = resolveAdapter(provider, 'fal-ai/flux-pro/kontext');
+  for (const [model, count] of [['fal-ai/flux-pro/kontext', 3], ['fal-ai/flux-pro/kontext/multi', 1]]) {
+    const out = await submitted(resolveAdapter(provider, model), provider, {
+      model, prompt: 'watercolor', fitted, images: images(count)
+    });
+    assert.equal(out.path, '/fal-ai/flux-pro/kontext/multi');
+    assert.equal(out.body.image_url, undefined);
+    assert.deepEqual(out.body.image_urls, Array(count).fill(DATA_URL));
+    assert.equal(out.body.image_size, undefined);
+    assert.equal(out.body.aspect_ratio, '1:1');
+  }
+});
 
-  const out = await submitted(adapter, provider, {
-    model: 'fal-ai/flux-pro/kontext', prompt: 'watercolor', fitted, images: images(3)
+test('fal FLUX.1 Kontext Pro 文生图使用 /text-to-image 和比例', async () => {
+  const provider = falProvider();
+  const model = ' /fal-ai/flux-pro/kontext/text-to-image ';
+  const out = await submitted(resolveAdapter(provider, model), provider, {
+    model, prompt: 'a fox', fitted: { width: 1280, height: 720 }
   });
+  assert.equal(out.path, '/fal-ai/flux-pro/kontext/text-to-image');
+  assert.deepEqual(out.body, {
+    prompt: 'a fox',
+    num_images: 1,
+    output_format: 'jpeg',
+    aspect_ratio: '16:9'
+  });
+});
 
-  assert.equal(out.body.image_url, undefined);
-  assert.deepEqual(out.body.image_urls, [DATA_URL, DATA_URL, DATA_URL]);
+test('fal 自定义端点包含预设模型路径时仍保留原样', async () => {
+  const provider = falProvider();
+  for (const model of ['custom/fal-ai/flux-2-pro', 'fal-ai/flux-2-pro/custom']) {
+    const out = await submitted(resolveAdapter(provider, model), provider, {
+      model, prompt: 'watercolor', fitted, images: images(1)
+    });
+    assert.equal(out.path, '/' + model);
+    assert.equal(out.body.image_url, DATA_URL);
+    assert.equal(out.body.image_urls, undefined);
+  }
 });
 
 test('fal 提交体：没有尺寸时不发 image_size', async () => {
@@ -208,7 +253,7 @@ test('fal 提交体：没有尺寸时不发 image_size', async () => {
   const out = await submitted(adapter, provider, { model: 'fal-ai/flux-2-pro', prompt: 'a fox' });
 
   assert.equal(out.body.image_size, undefined);
-  assert.deepEqual(out.body, { prompt: 'a fox', num_images: 1, output_format: 'jpeg' });
+  assert.deepEqual(out.body, { prompt: 'a fox', output_format: 'jpeg' });
 });
 
 /* ------------------------------------------------------------ Replicate */

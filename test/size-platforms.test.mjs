@@ -103,6 +103,7 @@ test('wan2.7 is the one wanx model with 1K/2K/4K tiers', () => {
   assert.deepEqual(pro.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
   assert.equal(pro.maxPixels, 16777216);
   const plain = sizePolicyFor(providerFor('https://dashscope.aliyuncs.com/api/v1', { adapter: 'dashscope-wanx' }), 'wan2.7-image');
+  assert.deepEqual(plain.tiers.map((tier) => tier.value), ['1K', '2K']);
   assert.equal(plain.maxPixels, 4194304);
 });
 

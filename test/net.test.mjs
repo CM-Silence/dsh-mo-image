@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 
 import { request, setNetworkLogger, resetNetworkState } from '../lib/net.js';
+import { errorBody } from '../lib/localized-error.js';
 
 function stubFetch(t, handler) {
   resetNetworkState();
@@ -121,8 +123,76 @@ test('logs proxy usage once per host so support can see what happened', async (t
   t.after(() => setNetworkLogger(null));
   stubFetch(t, () => new Response('{}', { status: 200 }));
 
-  await request('https://api.sudocode.chat/v1/models', {}, { env: {}, systemProxy: SYSTEM_PROXY });
-  await request('https://api.sudocode.chat/v1/models', {}, { env: {}, systemProxy: SYSTEM_PROXY });
+  const options = {
+    env: { HTTPS_PROXY: 'http://fixture-user:fixture%40pass@proxy.test:7897' },
+    systemProxy: null
+  };
+  await request('https://api.sudocode.chat/v1/models', {}, options);
+  await request('https://api.sudocode.chat/v1/models', {}, options);
 
-  assert.equal(lines.filter((line) => line.includes('api.sudocode.chat')).length, 1);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /api\.sudocode\.chat.*http:\/\/proxy\.test:7897.*env/);
+  assert.doesNotMatch(lines[0], /fixture-user|fixture%40pass/);
+});
+
+test('proxy failures retain cause codes without logging or returning private transport details', async (t) => {
+  const lines = [];
+  setNetworkLogger((message) => lines.push(String(message)));
+  t.after(() => setNetworkLogger(null));
+  const proxyUrl = 'http://fixture-user:fixture%40pass@proxy.test:7897';
+  const authorization = 'Basic ' + Buffer.from('fixture-user:fixture@pass').toString('base64');
+  stubFetch(t, () => {
+    const cause = Object.assign(new Error('proxy rejected ' + authorization), { code: 'ECONNREFUSED' });
+    throw Object.assign(new TypeError('fetch failed via ' + proxyUrl, { cause }), { input: proxyUrl });
+  });
+
+  await assert.rejects(
+    request('https://api.sudocode.chat/v1/models', {}, { env: { HTTPS_PROXY: proxyUrl }, systemProxy: null }),
+    (error) => {
+      assert.equal(error.localized.code, 'network.failed');
+      assert.equal(error.localized.params.cause, 'ECONNREFUSED');
+      assert.equal(error.localized.params.hint, 'connection');
+      assert.equal(error.cause.cause.code, 'ECONNREFUSED');
+      const diagnostic = inspect([errorBody(error), error], { depth: null });
+      assert.doesNotMatch(diagnostic, /fixture-user|fixture%40pass|fixture@pass/);
+      assert.equal(diagnostic.includes(authorization), false);
+      return true;
+    }
+  );
+  assert.match(lines[1], /api\.sudocode\.chat.*http:\/\/proxy\.test:7897.*env.*ECONNREFUSED/);
+  assert.doesNotMatch(lines.join('\n'), /fixture-user|fixture%40pass|fixture@pass/);
+  assert.equal(lines.join('\n').includes(authorization), false);
+});
+
+test('invalid proxy configuration and proxied aborts preserve error classification without revealing credentials', async (t) => {
+  const lines = [];
+  setNetworkLogger((message) => lines.push(String(message)));
+  t.after(() => setNetworkLogger(null));
+  const proxyUrl = 'http://fixture-user:fixture-pass@proxy.test:7897';
+  const calls = stubFetch(t, () => {
+    throw Object.assign(new Error('cancelled ' + proxyUrl), { name: 'AbortError' });
+  });
+  await assert.rejects(
+    request('https://api.sudocode.chat/v1/models', {}, {
+      env: {},
+      systemProxy: { https: 'https://fixture-user:fixture-pass@proxy.test:7897', bypass: [] }
+    }),
+    (error) => {
+      assert.equal(error.localized.code, 'network.routeInvalid');
+      assert.doesNotMatch(inspect(error), /fixture-user|fixture-pass/);
+      return true;
+    }
+  );
+  assert.equal(calls.length, 0);
+  await assert.rejects(
+    request('https://api.sudocode.chat/v1/models', {}, { env: { HTTPS_PROXY: proxyUrl }, systemProxy: null }),
+    (error) => {
+      assert.equal(error.name, 'AbortError');
+      assert.equal(error.localized.code, 'network.timeout');
+      assert.doesNotMatch(inspect(error), /fixture-user|fixture-pass/);
+      return true;
+    }
+  );
+  assert.match(lines[0], /api\.sudocode\.chat.*proxy\.test:7897.*system/);
+  assert.doesNotMatch(lines.join('\n'), /fixture-user|fixture-pass/);
 });

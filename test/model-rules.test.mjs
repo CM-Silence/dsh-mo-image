@@ -115,9 +115,11 @@ test('seedream 在火山方舟线上发档位名而不是宽高', () => {
   assert.deepEqual(size.domain.tiers.map((tier) => tier.value), ['1K', '1.5K', '2K']);
   assert.equal(size.domain.maxPixels, 4624220);
 
-  // 方舟的分叉正则用的是字面点（原声明即如此），连字符 id 落到方舟的基础档位表。
   const hyphen = detectSizeRule('doubao-seedream-5-0-250828', ARK);
-  assert.deepEqual(hyphen.domain.tiers.map((tier) => tier.value), ['2K', '3K', '4K']);
+  assert.deepEqual(hyphen.domain.tiers.map((tier) => tier.value), ['1K', '1.5K', '2K']);
+  const documented = detectSizeRule('regional/doubao-seedream-5-5-261028:preview', ARK);
+  assert.equal(documented.size.mode, 'tier');
+  assert.deepEqual(documented.domain.tiers.map((tier) => tier.value), ['1K', '1.5K', '2K']);
 });
 
 /* ---------------------------------------------------- nano-banana / gemini */
@@ -125,9 +127,11 @@ test('seedream 在火山方舟线上发档位名而不是宽高', () => {
 test('nano-banana / gemini image 走比例 + 档位', () => {
   const banana = detectSizeRule('gemini-3-pro-image-preview');
   assert.equal(banana.size.mode, 'aspect');
-  assert.equal(banana.size.field, 'aspect_ratio');
+  assert.equal(banana.size.field, 'generationConfig.imageConfig.aspectRatio');
+  assert.equal(banana.size.second.field, 'generationConfig.imageConfig.imageSize');
   assert.deepEqual(banana.domain.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
   assert.equal(banana.domain.aspects.includes('21:9'), true);
+  assert.equal(banana.domain.aspects.includes('8:1'), false);
 
   const flash = detectSizeRule('gemini-3.1-flash-image-preview');
   assert.deepEqual(flash.domain.tiers.map((tier) => tier.value), ['512', '1K', '2K', '4K']);
@@ -135,6 +139,19 @@ test('nano-banana / gemini image 走比例 + 档位', () => {
   const generic = detectSizeRule('nano-banana-2.1');
   assert.equal(generic.size.mode, 'aspect');
   assert.equal(generic.domain.aspects.length, 14);
+  assert.deepEqual(generic.domain.tiers.map((tier) => tier.value), ['1K', '2K', '4K']);
+  const lite = detectSizeRule('regional/gemini_3_1_flash_lite_image:production');
+  assert.deepEqual(lite.domain.tiers.map((tier) => tier.value), ['1K']);
+});
+
+test('Gemini 模型使用带前后缀的 ID，只有原生协议匹配专用字段', () => {
+  for (const model of ['publisher/gemini-3.1-flash-image-release:latest', 'publisher/nano_banana_2_1-v2']) {
+    const native = detectSizeRule(model, 'https://gemini-gateway.example/v1beta', 'google-gemini');
+    assert.equal(native.size.field, 'generationConfig.imageConfig.aspectRatio');
+    const compatible = detectSizeRule(model, 'https://images-gateway.example/v1', 'openai-images');
+    assert.equal(compatible.generic, true);
+    assert.equal(compatible.size.field, 'size');
+  }
 });
 
 test('gemini 2.5 flash image 不发尺寸字段', () => {

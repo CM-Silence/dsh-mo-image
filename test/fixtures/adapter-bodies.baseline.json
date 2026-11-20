@@ -92,20 +92,18 @@
           "$multipart": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text",
-            "model": "core",
             "output_format": "png",
             "aspect_ratio": "1:1"
           }
         }
       },
       "edit": {
-        "supported": true,
-        "path": "/v2beta/stable-image/generate/sd3",
+        "supported": false,
+        "path": "",
         "body": {
           "$multipart": {
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text",
-            "model": "core",
             "output_format": "png",
             "aspect_ratio": "1:1",
             "image": {
@@ -138,7 +136,7 @@
       }
     },
     "dashscope-wanx": {
-      "model": "wan2.6-t2i",
+      "model": "wanx2.1-t2i-turbo",
       "quality": null,
       "covers": "prepare-async",
       "generate": {
@@ -149,7 +147,7 @@
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text"
           },
-          "model": "wan2.6-t2i",
+          "model": "wanx2.1-t2i-turbo",
           "parameters": {
             "n": 1,
             "size": "1024*1024"
@@ -164,7 +162,7 @@
             "prompt": "a cat sitting on a windowsill, soft morning light",
             "negative_prompt": "blurry, watermark, text"
           },
-          "model": "wan2.6-t2i",
+          "model": "wanx2.1-t2i-turbo",
           "parameters": {
             "n": 1,
             "size": "1024*1024"
@@ -583,7 +581,7 @@
           "response_format": "url",
           "watermark": false,
           "n": 1,
-          "size": "1024x1024"
+          "size": "1K"
         }
       },
       "edit": {
@@ -595,7 +593,7 @@
           "response_format": "url",
           "watermark": false,
           "n": 1,
-          "size": "1024x1024",
+          "size": "1K",
           "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
         }
       }
