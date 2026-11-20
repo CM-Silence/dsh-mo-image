@@ -118,6 +118,21 @@ test('a host without prompt variables gets the same state computed inline', asyn
   assert.match(prompt.section.text({ agent: { session } }), /配置状态：和上次读到的一致/);
 });
 
+test('after compaction the marker leads directly to a full image-tool handoff', async (t) => {
+  const { marker, session, exec, settings, generate } = await harness(t);
+  session.surface = { contentGeneration: 0 };
+  const first = await settings.execute({}, exec);
+  session.surface.contentGeneration++;
+  const update = marker({ agent: { session } });
+  assert.match(update, /直接调用生图\/改图工具接收完整配置/);
+  assert.doesNotMatch(update, /mo_image_settings/);
+
+  const handoff = await generate.execute({ prompt: 'a harbor' }, exec);
+  assert.equal(handoff.needsSettings, true);
+  assert.deepEqual(handoff.settings, first);
+  assert.match(marker({ agent: { session } }), /一致/);
+});
+
 test('a failed variable registration falls back to the inline state', async (t) => {
   const { prompt, exec } = await harness(t, { variableThrows: true });
   const text = prompt.section.text({ agent: { session: exec.agent.session } });

@@ -133,7 +133,8 @@ test('each config state explains whether the settings tool has to be read', () =
   assert.match(configStateText('unread'), /还没读过/);
   assert.match(configStateText('unread'), /mo_image_settings/);
   assert.match(configStateText('stale'), /改过/);
-  assert.match(configStateText('stale'), /mo_image_settings/);
+  assert.match(configStateText('stale'), /直接调用生图\/改图工具接收增量/);
+  assert.match(configStateText('refresh'), /直接调用生图\/改图工具接收完整配置/);
   assert.match(configStateText('fresh'), /一致/);
   assert.match(configStateText('fresh'), /不用再读/);
   assert.equal(configStateText('nonsense'), configStateText('unread'), 'an unknown state must fail safe');

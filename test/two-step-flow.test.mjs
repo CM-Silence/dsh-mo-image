@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { SETTINGS_REFRESH_TURNS } from '../lib/settings-memory.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -43,7 +44,10 @@ function fakeContext(tools) {
     inject(_deps, callback) { callback(fake); },
     tools: { register(def) { tools.push(def); return () => {}; }, guard() { return () => {}; } },
     webServer: { register(route) { return () => route; }, getOrigin() { return 'http://127.0.0.1:1'; } },
-    get(name) { return name === 'credentials' ? credentials : undefined; }
+    get(name) {
+      if (name === 'credentials') return credentials;
+      if (name === 'agents') return { turnBoundaryOf: (session) => ({ lastTurn: session.turn }) };
+    }
   };
   return fake;
 }
@@ -74,7 +78,7 @@ async function harness(t, cfg = config()) {
 
   const exec = {
     signal: new AbortController().signal,
-    agent: { session: { header: { cwd: os.tmpdir() } } }
+    agent: { session: { header: { cwd: os.tmpdir() }, turn: 1, surface: { contentGeneration: 0 } } }
   };
   const tool = (name) => tools.find((item) => item.name === name);
   return {
@@ -91,7 +95,7 @@ test('the settings tool returns a minimal json with the model and a one-line hin
   assert.equal(settings.parameters.required, undefined, 'the settings tool takes no arguments');
 
   const result = await settings.execute({}, exec);
-  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'qualityMode', 'sizeMode', 'strict']);
+  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'qualityMode', 'revision', 'sizeMode', 'strict']);
   assert.equal(result.provider, 'p1', 'the provider is reported by id only');
   assert.equal(result.model, 'flux-2-klein-4b.safetensors');
   assert.equal(result.promptOptimization, true);
@@ -155,19 +159,19 @@ test('Auto candidate details are scoped, reusable and refreshed when size or par
   cfg.providers[0].models.push('another-candidate');
   writeFileSync(file, JSON.stringify(cfg), 'utf8');
   const expanded = await settings.execute({}, exec);
-  assert.ok(expanded.models.includes('another-candidate'));
+  assert.ok(expanded.changes.models.includes('another-candidate'));
   assert.equal((await settings.execute({ model }, exec)).unchanged, true, 'an unrelated catalog change does not repeat these details');
 
   cfg.defaults.height = 1536;
   writeFileSync(file, JSON.stringify(cfg, null, 2), 'utf8');
   const reloaded = await settings.execute({}, exec);
-  assert.equal(reloaded.model, 'auto', 'fixed dimension changes invalidate the Auto catalog read');
+  assert.deepEqual(reloaded.changes, { size: '1024x1536' }, 'unmodified directory is omitted');
   const resized = await settings.execute({ model }, exec);
-  assert.equal(resized.size, '1024x1536');
+  assert.deepEqual(resized.changes, { size: '1024x1536' });
   cfg.providers[0].modelOptions[model].params[0].default = '24';
   writeFileSync(file, JSON.stringify(cfg, null, 4), 'utf8');
   const changed = await settings.execute({ model }, exec);
-  assert.equal(changed.params[0].default, '24');
+  assert.equal(changed.changes.params[0].default, '24');
   assert.equal(calls.length, 0);
 });
 
@@ -186,7 +190,9 @@ test('selector guards fixed model, size and quality while automatic settings per
   assert.ok(generate.parameters.properties.quality);
   assert.ok(edit.parameters.properties.quality);
   await assert.rejects(() => generate.execute({ prompt: 'test', model: cfg.providers[0].models[1] }, exec), /只能由用户/);
-  await assert.rejects(() => generate.execute({ prompt: 'test', quality: 'unsupported-tier' }, exec), /不支持质量档位/);
+  await assert.rejects(() => generate.execute({ prompt: 'test', quality: 'unsupported-tier' }, exec), {
+    code: 'image_settings_mismatch', message: /不支持质量档位.*refresh/
+  });
   assert.equal(calls.length, 0);
 
   const reference = path.join(home, 'reference.png');
@@ -205,9 +211,10 @@ test('selector guards fixed model, size and quality while automatic settings per
   cfg.defaults = { ...cfg.defaults, auto: false, quality: 'high', width: 1024, height: 1024 };
   writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(cfg, null, 2));
   const fixed = await settings.execute({}, exec);
-  assert.equal(fixed.qualityMode, 'fixed');
-  assert.equal(fixed.quality, 'high');
-  assert.equal(fixed.sizeMode, 'fixed');
+  assert.equal(fixed.changes.qualityMode, 'fixed');
+  assert.equal(fixed.changes.quality, 'high');
+  assert.equal(fixed.changes.sizeMode, 'fixed');
+  assert.ok(fixed.removed.includes('qualityOptions'));
   await generate.execute({ prompt: 'keep picker settings', quality: 'low', size: '1024x1536' }, exec);
   const pinned = JSON.parse(calls[3].init.body);
   assert.equal(pinned.quality, 'high');
@@ -300,7 +307,7 @@ test('switching the model after reading hands over the new config', async (t) =>
 
   const handoff = await generate.execute({ prompt: 'a classroom' }, exec);
   assert.equal(handoff.needsSettings, true);
-  assert.equal(handoff.settings.model, 'moss_image_sft_int8_convrot.safetensors', 'the handoff carries the new model');
+  assert.equal(handoff.settings.changes.model, 'moss_image_sft_int8_convrot.safetensors', 'the handoff carries the new model');
 
   await generate.execute({ prompt: 'a classroom' }, exec);
 });
@@ -340,7 +347,7 @@ test('a config change reverted before the next step still counts as unchanged', 
   assert.equal(calls.length, 1);
 });
 
-test('a read made after a config change returns the new payload', async (t) => {
+test('a read made after a config change returns only differences', async (t) => {
   const { settings, exec, home } = await harness(t);
   await settings.execute({}, exec);
 
@@ -350,8 +357,10 @@ test('a read made after a config change returns the new payload', async (t) => {
   writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(next, null, 2), 'utf8');
 
   const result = await settings.execute({}, exec);
-  assert.equal(result.model, 'moss_image_sft_int8_convrot.safetensors');
-  assert.equal(result.unchanged, undefined, 'a changed config is reported in full');
+  assert.equal(result.changes.model, 'moss_image_sft_int8_convrot.safetensors');
+  assert.equal(result.changes.provider, undefined);
+  assert.equal(result.baseRevision, 1);
+  assert.equal(result.revision, 2);
 });
 
 test('refresh brings the full payload back when the conversation lost it', async (t) => {
@@ -362,6 +371,54 @@ test('refresh brings the full payload back when the conversation lost it', async
   assert.equal(again.unchanged, undefined, 'an explicit refresh skips the unchanged marker');
   assert.equal(again.model, 'flux-2-klein-4b.safetensors');
   assert.match(again.hint, /30–80 词/, 'the full writing hint comes back');
+});
+
+test('switching away from Auto removes obsolete catalog and size fields', async (t) => {
+  const next = config();
+  next.active.model = 'auto';
+  next.defaults = { ...next.defaults, auto: false, width: 1024, height: 1024 };
+  const { settings, exec, home } = await harness(t, next);
+  const initial = await settings.execute({}, exec);
+  const before = JSON.parse(settings.output.render({}, initial)[0].text);
+  assert.equal(before.editModelIndexes, 'all');
+
+  next.active.model = next.providers[0].models[0];
+  next.defaults.auto = true;
+  writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(next, null, 2), 'utf8');
+  const delta = await settings.execute({}, exec);
+  assert.deepEqual(delta.removed.sort(), ['editModelIndexes', 'models', 'size']);
+  assert.equal(delta.baseRevision, before.revision);
+  const reconstructed = { ...before, ...delta.changes, revision: delta.revision };
+  for (const key of delta.removed) delete reconstructed[key];
+  const full = await settings.execute({ refresh: true }, exec);
+  assert.deepEqual(reconstructed, JSON.parse(settings.output.render({}, full)[0].text));
+});
+
+test('the first image call after the turn interval returns a full checkpoint before submitting', async (t) => {
+  const { settings, generate, exec, calls } = await harness(t);
+  const before = await settings.execute({}, exec);
+  exec.agent.session.turn += SETTINGS_REFRESH_TURNS;
+  const handoff = await generate.execute({ prompt: 'a harbor' }, { ...exec, callId: 'checkpoint' });
+  assert.equal(handoff.needsSettings, true);
+  assert.deepEqual(handoff.settings, before);
+  assert.equal(calls.length, 0);
+  assert.equal((await settings.execute({}, exec)).unchanged, true);
+  await generate.execute({ prompt: 'a harbor' }, { ...exec, callId: 'after-checkpoint' });
+  assert.equal(calls.length, 1);
+});
+
+test('context replacement forces a full snapshot and blocks sibling image calls', async (t) => {
+  const { settings, generate, exec, calls } = await harness(t);
+  const before = await settings.execute({}, exec);
+  exec.agent.session.surface.contentGeneration++;
+  const step = { ...exec, toolSet: {} };
+  assert.deepEqual(await settings.execute({}, step), before);
+  const sibling = await generate.execute({ prompt: 'a harbor' }, step);
+  assert.equal(sibling.needsSettings, true);
+  assert.equal(sibling.settings, undefined);
+  assert.equal(calls.length, 0);
+  await generate.execute({ prompt: 'a harbor' }, { ...exec, toolSet: {} });
+  assert.equal(calls.length, 1);
 });
 
 test('a handoff in one session does not unlock another session', async (t) => {
@@ -392,7 +449,10 @@ test('a failed request keeps the settings read valid', async (t) => {
   };
   t.after(() => { globalThis.fetch = healthy; });
 
-  await assert.rejects(generate.execute({ prompt: 'a harbor' }, exec));
+  await assert.rejects(generate.execute({ prompt: 'a harbor' }, exec), (error) => {
+    assert.doesNotMatch(error.message, /配置不匹配|refresh/);
+    return true;
+  });
   const retry = await generate.execute({ prompt: 'a harbor' }, exec);
   assert.equal(retry.needsSettings, undefined, 'a failed request must not consume the read');
   assert.equal(calls.length, 1);
@@ -411,7 +471,7 @@ test('a config change between the handoff and the retry hands over again', async
 
   const second = await generate.execute({ prompt: 'a harbor' }, exec);
   assert.equal(second.needsSettings, true, 'the config moved again before the retry');
-  assert.equal(second.settings.model, 'moss_image_sft_int8_convrot.safetensors');
+  assert.equal(second.settings.changes.model, 'moss_image_sft_int8_convrot.safetensors');
 
   await generate.execute({ prompt: 'a harbor' }, exec);
   assert.equal(calls.length, 1);
@@ -490,7 +550,7 @@ test('a config change while a request is in flight invalidates the next call', a
 
   const handoff = await generate.execute({ prompt: 'a harbor' }, exec);
   assert.equal(handoff.needsSettings, true, 'the in-flight change is noticed on the next call');
-  assert.equal(handoff.settings.model, 'moss_image_sft_int8_convrot.safetensors');
+  assert.equal(handoff.settings.changes.model, 'moss_image_sft_int8_convrot.safetensors');
 });
 
 test('configuration handed off once per step blocks sibling generation and editing', async (t) => {
@@ -510,7 +570,7 @@ test('configuration handed off once per step blocks sibling generation and editi
   assert.ok(results.every((result) => result.needsSettings && result.path === ''));
   const handedOff = results.filter((result) => result.settings);
   assert.equal(handedOff.length, 1);
-  assert.equal(handedOff[0].settings.promptOptimization, false);
+  assert.equal(handedOff[0].settings.changes.promptOptimization, false);
   assert.match(handedOff[0].note, /沿用用户原话/);
   assert.equal(calls.length, 0);
   assert.equal((await settings.execute({}, exec)).unchanged, true);
@@ -534,7 +594,7 @@ test('image tools do not use settings read by a sibling call in the same step', 
 });
 
 for (const kind of ['generate', 'edit']) {
-  test(`${kind} replays a handoff without submitting and forwards the prepared prompt on a new call`, async (t) => {
+  test(`${kind} replays safely and recovers from stale arguments after a delta`, async (t) => {
     const harnessResult = await harness(t);
     const { settings, exec, home, calls } = harnessResult;
     const tool = harnessResult[kind];
@@ -568,7 +628,20 @@ for (const kind of ['generate', 'edit']) {
     await assert.rejects(tool.execute(args, actual), { code: 'call_conflict' });
     assert.equal(calls.length, 1);
     const changed = await tool.execute(args, { ...exec, callId: 'changed' });
-    assert.equal(changed.settings.model, next.active.model);
+    assert.equal(changed.settings.changes.model, next.active.model);
     assert.equal(calls.length, 1);
+
+    await assert.rejects(tool.execute({ ...args, model: next.providers[0].models[0] }, { ...exec, callId: 'stale-model' }), {
+      code: 'image_settings_mismatch', message: /生图配置不匹配（未提交）.*refresh.*只重试一次/
+    });
+    assert.equal(calls.length, 1, 'old tool arguments are rejected before submitting');
+
+    const full = await settings.execute({ refresh: true }, exec);
+    assert.equal(full.model, next.active.model);
+    assert.equal(full.revision, changed.settings.revision);
+    assert.equal(full.changes, undefined);
+    const recovered = await tool.execute(args, { ...exec, callId: 'repaired' });
+    assert.equal(recovered.model, full.model);
+    assert.equal(calls.length, 2, 'the corrected call submits once');
   });
 }

@@ -257,7 +257,8 @@ test('settingsPayload says the size is fixed so the model leaves it alone', () =
     sizeMode: 'fixed', size: '768x1024'
   });
   assert.equal(payload.sizeMode, 'fixed');
-  assert.match(payload.hint, /768x1024/);
+  assert.equal(payload.size, '768x1024');
+  assert.match(payload.hint, /不要填 size/);
 });
 
 test('the prompt section points at exposed params without repeating their names', () => {

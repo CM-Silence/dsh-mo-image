@@ -1,49 +1,85 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createSettingsMemory, settingsSnapshot, SETTINGS_REFRESH_TURNS } from '../lib/settings-memory.js';
 
-import { settingsSignature, rememberSettings, settingsState } from '../lib/settings-memory.js';
+const first = settingsSnapshot({ provider: 'p1', model: 'flux', size: '512x512', hint: 'FLUX' });
+const second = settingsSnapshot({ provider: 'p1', model: 'flux', size: '1024x1024', hint: 'FLUX' });
+const context = {
+  get(name) {
+    if (name === 'agents') return { turnBoundaryOf: (session) => ({ lastTurn: session.turn }) };
+  }
+};
 
-test('a session that never read the settings is unread', () => {
-  assert.equal(settingsState({ id: 'fresh-session' }, 'sig-1'), 'unread');
+test('snapshots are isolated and only changed fields update the current revision', () => {
+  const memory = createSettingsMemory(context);
+  const one = { turn: 1 };
+  const two = { turn: 1 };
+  assert.equal(memory.state(one, first.signature), 'unread');
+  assert.equal(memory.read(one, first).reply.revision, 1);
+  assert.equal(memory.state(one, first.signature), 'fresh');
+  assert.equal(memory.state(one, second.signature), 'stale');
+  assert.equal(memory.state(two, second.signature), 'unread');
+  assert.deepEqual(memory.read(one, second).reply, {
+    baseRevision: 1, revision: 2, changes: { size: '1024x1024' }, hint: '应用变更，保留其余字段。'
+  });
+  assert.equal(memory.read(one, second).reply.unchanged, true);
+  assert.equal(memory.read(two, second).reply.size, '1024x1024');
+  assert.equal(memory.read(null, second).reply.size, '1024x1024');
 });
 
-test('a remembered snapshot stays fresh while the payload is identical', () => {
+test('turn expiry measures from the last full snapshot and resets after a refresh', () => {
+  const memory = createSettingsMemory(context);
+  const session = { turn: 1 };
+  memory.read(session, first);
+  session.turn += SETTINGS_REFRESH_TURNS - 1;
+  assert.equal(memory.read(session, second).reply.baseRevision, 1);
+  assert.equal(memory.read(session, second).reply.unchanged, true);
+
+  session.turn++;
+  assert.equal(memory.state(session, second.signature), 'refresh');
+  const full = memory.read(session, second).reply;
+  assert.equal(full.size, '1024x1024');
+  assert.equal(full.revision, 2);
+  assert.equal(memory.read(session, second).reply.unchanged, true);
+
+  session.turn++;
+  memory.read(session, second, { refresh: true });
+  session.turn += SETTINGS_REFRESH_TURNS - 1;
+  assert.equal(memory.read(session, second).reply.unchanged, true);
+});
+
+test('legacy host expiry counts unique steps and ignores repeated reads in the same step', () => {
+  const memory = createSettingsMemory({});
   const session = {};
-  rememberSettings(session, 'sig-1');
-  assert.equal(settingsState(session, 'sig-1'), 'fresh');
-  assert.equal(settingsState(session, 'sig-2'), 'stale');
+  const step = {};
+  memory.read(session, first, { step });
+  for (let i = 0; i < SETTINGS_REFRESH_TURNS; i++) {
+    assert.equal(memory.read(session, first, { step }).reply.unchanged, true);
+  }
+  for (let i = 1; i < SETTINGS_REFRESH_TURNS; i++) {
+    assert.equal(memory.read(session, first, { step: {} }).reply.unchanged, true);
+  }
+  assert.equal(memory.read(session, first, { step: {} }).reply.model, 'flux');
 });
 
-test('changing a value and changing it back counts as no change', () => {
-  const session = {};
-  rememberSettings(session, settingsSignature({ model: 'flux' }));
-  // 用户改成别的值，又改回原值，中间没有对话：比较的是快照而不是变更次数。
-  assert.equal(settingsState(session, settingsSignature({ model: 'moss' })), 'stale');
-  assert.equal(settingsState(session, settingsSignature({ model: 'flux' })), 'fresh');
+test('candidate baselines are independent across providers and refresh after a context change', () => {
+  const memory = createSettingsMemory(context);
+  const session = { turn: 1, surface: { contentGeneration: 0 } };
+  const candidate = { candidate: true };
+  const other = settingsSnapshot({ ...first.payload, provider: 'p2' });
+  memory.read(session, first, candidate);
+  assert.equal(memory.read(session, other, candidate).reply.provider, 'p2');
+  assert.equal(memory.read(session, first, candidate).reply.unchanged, true);
+  assert.equal(memory.state(session, first.signature), 'unread');
+  session.surface.contentGeneration++;
+  assert.equal(memory.read(session, second, candidate).reply.size, '1024x1024');
 });
 
-test('the signature is the stable rendering of the payload', () => {
-  const payload = { provider: 'p1', model: 'flux', promptOptimization: true };
-  assert.equal(settingsSignature(payload), settingsSignature({ ...payload }));
-  assert.notEqual(settingsSignature(payload), settingsSignature({ ...payload, model: 'moss' }));
-});
-
-test('sessions never share a snapshot', () => {
-  const one = {};
-  const two = {};
-  rememberSettings(one, 'sig-1');
-  assert.equal(settingsState(two, 'sig-1'), 'unread');
-  assert.equal(settingsState(one, 'sig-1'), 'fresh');
-});
-
-test('a script call without a session has nothing to compare', () => {
-  assert.equal(settingsState(null, 'sig-1'), 'unread');
-  assert.equal(settingsState(undefined, 'sig-1'), 'unread');
-  rememberSettings(null, 'sig-1');
-  rememberSettings(undefined, 'sig-1');
-});
-
-test('a non-object session key is ignored instead of throwing', () => {
-  assert.doesNotThrow(() => rememberSettings('session-id', 'sig-1'));
-  assert.equal(settingsState('session-id', 'sig-1'), 'unread');
+test('catalog reordering updates model-facing editable indexes', () => {
+  const memory = createSettingsMemory(context);
+  const session = { turn: 1 };
+  const catalog = { provider: 'p1', model: 'auto', models: ['a', 'b'], editModels: ['a'], hint: 'Auto' };
+  memory.read(session, settingsSnapshot(catalog));
+  const reordered = settingsSnapshot({ ...catalog, models: ['b', 'a'] });
+  assert.deepEqual(memory.read(session, reordered).reply.changes, { models: ['b', 'a'], editModelIndexes: [1] });
 });

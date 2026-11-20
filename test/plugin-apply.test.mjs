@@ -65,7 +65,8 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(edit);
   assert.ok(settings, 'the model needs a tool that reads the current settings');
   assert.match(settings.description, /配置状态/, 'the description ties the read to the per-session marker');
-  assert.match(settings.description, /Reuse settings already in context, including a needsSettings result/);
+  assert.match(settings.description, /let the image tool return updates via needsSettings/);
+  assert.match(settings.description, /Apply changes to baseRevision, delete keys in removed/);
   assert.match(settings.description, /unchanged/, 'the description says an unchanged read answers briefly');
   assert.match(generate.description, /needsSettings/, 'the description says an outdated read gets a config handoff instead of an image');
   assert.ok(generate.parameters.properties.negative_prompt);

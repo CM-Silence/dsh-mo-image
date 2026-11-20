@@ -71,7 +71,7 @@ test('the plugin exposes a tool that reports the current settings as one small j
 
   const result = await tool.execute({}, { signal: new AbortController().signal });
 
-  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'qualityMode', 'sizeMode', 'strict'],
+  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'qualityMode', 'revision', 'sizeMode', 'strict'],
     'outside auto mode the payload carries no model list and no display names');
   assert.equal(result.provider, 'p-local', 'the provider is an id, not a name');
   assert.equal(result.model, 'flux-2-klein-4b.safetensors');
