@@ -1070,7 +1070,7 @@ test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是�
   assert.equal(sdToggle.props.disabled, true, 'sd-server：只是禁用');
 });
 
-test('一键配置把命中的尺寸与字段写进去，并给写过的键上锁', async () => {
+test('一键配置把命中的尺寸与字段写进去，并把整块输入设置锁上', async () => {
   const { harness, tree } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: DETECTED_QWEN });
   const opened = await configureAll(harness);
   assert.ok(opened);
@@ -1090,8 +1090,11 @@ test('一键配置把命中的尺寸与字段写进去，并给写过的键上�
   assert.equal(entry.fields.model.path, 'model');
   assert.deepEqual(entry.fields.image, { path: 'image', as: 'dataUrl' });
   assert.equal(entry.fields.n, undefined, '规则说 n 不发（null），就不该落盘一条空模板');
-  // 写进去的键全部上锁；没写的不上锁（下次点还会重试）。
-  assert.deepEqual(entry.locked, { size: true, prompt: true, negative: true, model: true, image: true });
+  // 配好的模型整块输入设置锁上（七个输入键都锁），返回格式那个键不跟着动。
+  assert.deepEqual(entry.locked, {
+    size: true, quality: true, prompt: true, negative: true, model: true, n: true, image: true
+  });
+  assert.equal(entry.locked.operations, undefined, '输出设置的锁不归一键配置管');
   // 一键配置不动用户填的地址。
   assert.equal(provider.baseUrl, 'https://api.siliconflow.cn/v1');
   assert.equal(provider.customEndpoints.generate, 'https://api.siliconflow.cn/v1/images/generations');
@@ -1119,7 +1122,7 @@ test('一键配置跳过已上锁的键，只写没上锁的', async () => {
     '上锁的尺寸不能被一键配置改写');
   assert.equal(entry.fields.prompt.path, 'prompt', '没上锁的提示词照写');
   assert.deepEqual(entry.locked, {
-    size: true, prompt: true, negative: true, model: true, image: true
+    size: true, quality: true, prompt: true, negative: true, model: true, n: true, image: true
   });
 });
 
@@ -1205,7 +1208,7 @@ test('整块锁：一键全锁 / 一键全解，都走标题行那一把锁', as
   }
 });
 
-test('「输入设置」里的「一键配置」只配这一个模型，并且把写过的键锁上', async () => {
+test('「输入设置」里的「一键配置」只配这一个模型，并把整块输入设置锁上', async () => {
   const { harness } = await openEditor(CUSTOM_RELAY_CONFIG, { detect: DETECTED_QWEN });
   let opened = openModelPanel(harness);
   // 标题行的小字按钮：和模型目录那颗同款（linkButton），文案是「一键配置」。
@@ -1214,8 +1217,13 @@ test('「输入设置」里的「一键配置」只配这一个模型，并且�
   assert.ok(configure, '每个模型都有一颗「一键配置」');
   await configure.props.onClick();
   await new Promise((resolve) => setImmediate(resolve));
+  opened = harness.renderRoot();
   const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
   assert.deepEqual(JSON.parse(asked[asked.length - 1].body).models, ['Qwen/Qwen-Image'], '只问这一个模型');
+  // 配好的模型整块输入设置锁上：锁图标变成「已上锁」，框里的控件随之禁用。
+  assert.equal(findAll(opened, (node) => node.props && node.props['data-mo-image-params-lock'] !== undefined)[0]
+    .props['aria-pressed'], 'true', '配完显示已上锁');
+  assert.equal(paramInput(opened, 'size').props.disabled, true, '框里的控件跟着禁用');
   const config = await saveAndPosted(harness);
   const entry = config.providers.find((item) => item.id === 'p9').modelOptions['Qwen/Qwen-Image'];
   assert.equal(entry.size.field, 'image_size');
