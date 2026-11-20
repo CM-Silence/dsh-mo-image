@@ -1152,7 +1152,8 @@ test('一键配置只对命中规则的模型写入，未命中的既不写也�
   const opened = await configureAll(harness);
   const notice = findAll(opened, (node) => node.props && node.props['data-rule-notice'] !== undefined);
   assert.equal(notice.length, 1, '要给个结果提示');
-  assert.equal(textOf(notice[0]).join(''), 'Configured 1 model(s) — 1 did not match a rule');
+  assert.equal(textOf(notice[0]).join(''),
+    'Configured 1 model(s); 1 have no specific rule and use protocol defaults (not written, not locked)');
   const config = await saveAndPosted(harness);
   const options = config.providers.find((item) => item.id === 'p9').modelOptions;
   assert.ok(options['Qwen/Qwen-Image'], '命中的模型写进去了');

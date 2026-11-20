@@ -439,15 +439,28 @@ test('detect-model-rule 批量模式：认不出的网关仍发兜底尺寸，�
 
   const res = makeRes();
   await route.handler(jsonReq('POST', JSON.stringify({
-    baseUrl: 'https://gateway.example/v1', models: ['flux-1-dev']
+    baseUrl: 'https://gateway.example/v1', models: ['some-unknown-model']
   })), res);
   assert.equal(res.status, 200, res.body);
   const body = JSON.parse(res.body);
   // 兜底规则让尺寸永远有值：面板据此知道「按 OpenAI 兼容发 size」。
-  assert.equal(body.rules['flux-1-dev'].size.mode, 'wh-string');
-  assert.equal(body.rules['flux-1-dev'].size.field, 'size');
-  assert.equal(body.rules['flux-1-dev'].quality, null);
-  assert.equal(body.matched['flux-1-dev'], false);
+  assert.equal(body.rules['some-unknown-model'].size.mode, 'wh-string');
+  assert.equal(body.rules['some-unknown-model'].size.field, 'size');
+  assert.equal(body.rules['some-unknown-model'].quality, null);
+  assert.equal(body.matched['some-unknown-model'], false, '兜底不算认出');
+
+  // 反过来：有专门尺寸规则、但网关不认识（中转站）的模型算认出——一键配置要给它写尺寸。
+  const known = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    baseUrl: 'https://gateway.example/v1', models: ['flux-1-dev', 'doubao-seedream-5-5-261028']
+  })), known);
+  const knownBody = JSON.parse(known.body);
+  assert.equal(knownBody.matched['flux-1-dev'], true, 'FLUX 在兼容网关上就是 size');
+  assert.equal(knownBody.rules['flux-1-dev'].size.field, 'size');
+  assert.equal(knownBody.matched['doubao-seedream-5-5-261028'], true, 'seedream 有自己的尺寸规则');
+  assert.equal(knownBody.rules['doubao-seedream-5-5-261028'].size.field, 'size');
+  assert.deepEqual(knownBody.rules['doubao-seedream-5-5-261028'].size.domain.tiers.map((item) => item.value),
+    ['1K', '1.5K', '2K']);
 
   // 模型列表空了就是请求本身有问题，和单模型模式的「没填模型」同一档。
   const empty = makeRes();
