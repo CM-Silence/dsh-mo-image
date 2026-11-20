@@ -2071,26 +2071,6 @@ test('云端预设的模型只显示输入设置，且输入默认锁住', () =>
 
 });
 
-test('本地自定义工作流可解锁并为单个模型选返回预设', () => {
-  const client = loadClient({ preserveFormState: true });
-  client.setCatalog();
-  const provider = {
-    id: 'p1', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', presetId: 'comfyui',
-    models: ['m'], names: {}, modelOptions: { m: { workflow: '{"1":{"class_type":"SaveImage","inputs":{}}}' } }
-  };
-  const render = () => renderForm(client, provider);
-  const row = expandModelOptions(client, provider, render);
-  const section = (tree) => modelSection(tree, 'data-mo-image-output-settings');
-  const select = (tree) => collect(section(tree), (item) => item.type === 'select'
-    && item.props['data-mo-image-output-preset'] === 'generate')[0];
-  assert.equal(select(row).props.disabled, true, '预设来源默认锁住');
-  const lock = collect(section(row), (item) => item.props['data-lock-key'] === 'operations')[0];
-  lock.props.onClick({ preventDefault() {}, stopPropagation() {} });
-  assert.equal(select(render()).props.disabled, false, '解锁后能改');
-  assert.equal(collect(render(), (item) => item.props['data-mo-image-protocol-settings'] !== undefined).length, 0,
-    '协议那一块仍然不渲染（预设来源）');
-});
-
 test('云端声明式预设也隐藏自定义端点和输出设置', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
@@ -2137,7 +2117,7 @@ test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保�
   assert.deepEqual(entry.params, [{ name: 'seed', type: 'number', default: '1', description: '' }], '参数表原样带回');
 });
 
-test('ComfyUI 例外：预设来源的输入参数默认不锁（工作流是用户自己接的），输出设置照锁', () => {
+test('预设来源的 ComfyUI：输入参数默认不锁，但没有「输出设置」入口', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -2156,14 +2136,35 @@ test('ComfyUI 例外：预设来源的输入参数默认不锁（工作流是用
   const textarea = collect(input, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
   assert.ok(textarea.length, '工作流编辑器还在');
   assert.notEqual(textarea[0].props.disabled, true, '工作流编辑器可用');
-  // 返回格式仍然是协议定的：按预设来源锁。
-  const output = modelSection(row, 'data-mo-image-output-settings');
-  assert.ok(output, '输出设置在');
-  assert.equal(collect(output, (item) => item.props['data-lock-key'] === 'operations')[0].props['aria-pressed'],
-    'true', 'ComfyUI 的返回格式照预设来源锁住');
+  // 输出设置没有入口：预设来源的返回格式是协议定的，而这三条协议的读法是手写描述符
+  // （ComfyUI 两跳 /history → /view），预设表里那几项一个都表达不了——给下拉只会把读法换坏。
+  assert.equal(modelSection(row, 'data-mo-image-output-settings'), null, '预设来源没有输出设置');
+  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length,
+    0, '连返回格式下拉都不渲染');
 });
 
-test('workflow 类适配器（ComfyUI / A1111）的输入设置与输出设置同一行结构：左标题、右端是锁', () => {
+test('自配的 ComfyUI 才给「输出设置」：不锁，选完就回显', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  // 没有预设来源（自己填的地址）：返回格式归用户自己，锁默认不上。
+  const provider = {
+    id: 'p1', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',
+    models: ['m'], names: {}, modelOptions: { m: { workflow: '{"1":{"class_type":"SaveImage","inputs":{}}}' } }
+  };
+  const render = () => renderForm(client, provider);
+  const row = expandModelOptions(client, provider, render);
+  const section = (tree) => modelSection(tree, 'data-mo-image-output-settings');
+  const select = (tree) => collect(section(tree), (item) => item.type === 'select'
+    && item.props['data-mo-image-output-preset'] === 'generate')[0];
+  assert.ok(section(row), '自配来源：输出设置在');
+  assert.notEqual(select(row).props.disabled, true, '自配来源不锁，直接能改');
+  select(row).props.onChange({ target: { value: 'binary' } });
+  assert.equal(select(render()).props.value, 'binary', '选过的值回显');
+});
+
+test('两行结构只在自配来源下存在：输入设置与输出设置同一行、同一份样式', () => {
+  // 预设来源只剩「输入设置」那一块（输出设置没有入口，见上一条），所以两行的对齐关系
+  // 在自配来源上验证——那里两块都在。
   const cases = [
     { label: 'ComfyUI', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'flux.safetensors' },
     { label: 'A1111', adapter: 'a1111', baseUrl: 'http://127.0.0.1:7860', model: 'sdxl.safetensors' }
@@ -2174,13 +2175,13 @@ test('workflow 类适配器（ComfyUI / A1111）的输入设置与输出设置�
     client.setCatalog();
     const provider = {
       id: 'p1', name: item.label, baseUrl: item.baseUrl, adapter: item.adapter,
-      presetId: item.adapter, models: [item.model], names: {}
+      models: [item.model], names: {}
     };
     const row = expandModelOptions(client, provider, () => renderForm(client, provider));
     const input = modelSection(row, 'data-mo-image-input-settings');
     const output = modelSection(row, 'data-mo-image-output-settings');
     assert.ok(input, item.label + '：输入设置折叠区在');
-    assert.ok(output, item.label + '：输出设置折叠区还在（这次没动它）');
+    assert.ok(output, item.label + '：输出设置折叠区在（自配来源才有）');
     assert.equal(input.props.open, undefined, item.label + '：输入设置默认收起');
     assert.equal(output.props.open, undefined, item.label + '：输出设置默认收起');
 
@@ -2231,6 +2232,7 @@ test('输入设置与输出设置挂在同一个 .modelRow 下：左右边缘与
   // 回归：输入设置曾多套一层 div.modelAdvanced（带 2px 4px 内边距），输出设置却直接挂在
   // .modelRow 上——两行的左右边缘因此差 4px，右端的锁一个偏左、一个偏右、行高也略有差异。
   // 现在两块 details 是同一层的兄弟节点：父节点、内联样式、从锁到折叠区那一串祖先都同构。
+  // 两块同时存在的只有自配来源（预设来源没有输出设置这一块）。
   const plain = (value) => JSON.parse(JSON.stringify(value));
   const cases = [
     { label: 'ComfyUI', adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'flux.safetensors' },
@@ -2241,7 +2243,7 @@ test('输入设置与输出设置挂在同一个 .modelRow 下：左右边缘与
     client.setCatalog();
     const provider = {
       id: 'p1', name: item.label, baseUrl: item.baseUrl, adapter: item.adapter,
-      presetId: item.adapter, models: [item.model], names: {}
+      models: [item.model], names: {}
     };
     const render = () => renderForm(client, provider);
     expandModelOptions(client, provider, render);
