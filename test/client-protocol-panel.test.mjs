@@ -757,7 +757,7 @@ const convertBoxOf = (node) => collect(node, (item) => item.props
 const convertStepOf = (box, step) => collect(box, (item) => item.type === 'button'
   && item.props['data-mo-image-convert-step'] === step)[0];
 
-test('编辑页的预设来源：「自定义设置」下面有「切换为自定义API」', () => {
+test('编辑页的预设来源：「自定义设置」折叠区里最后一块是「切换为自定义API」', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -768,12 +768,17 @@ test('编辑页的预设来源：「自定义设置」下面有「切换为自�
   assert.ok(box, '「切换为自定义API」在');
   const button = convertStepOf(box, 'idle');
   assert.equal(text(button).join(''), 'form.convertToCustom', '按钮文案走 i18n');
+  // 无边框按钮：和「取消」同一套 linkButton，不是那种带底色的按钮。
+  assert.ok(String(button.props.className || '').includes('linkButton'), '用 linkButton（无边框）');
   assert.match(text(box).join(' '), /form.convertToCustomHint/, '旁边写着它会做什么');
-  // 位置：在「自定义设置」折叠区下面，而且不在折叠区里。
-  const order = preorder(node);
+  // 位置：在「自定义设置」折叠区里面，而且是它最后一块——收起时整块都看不见。
   const fold = detailsOf(node, '自定义设置');
-  assert.ok(order.indexOf(fold) < order.indexOf(box), '排在「自定义设置」之后');
-  assert.equal(insideAnyDetails(node, box), false, '它自己不在折叠区里');
+  assert.equal(fold.props.open, false, '折叠区默认收起');
+  assert.equal(insideOf(fold, box), true, '在「自定义设置」里（收起就看不见）');
+  assert.equal(insideAnyDetails(node, box), true, '确实被折叠区包着');
+  const order = preorder(node);
+  const directory = collect(node, (item) => String((item.props || {}).className || '').endsWith('modelCatalog'))[0];
+  assert.ok(order.indexOf(directory) < order.indexOf(box), '排在模型目录（其它接入细节）之后');
   // 默认只有一步：没有确认按钮，也没有那句黄字警告。
   assert.equal(convertStepOf(box, 'confirm'), undefined, '默认不是确认态');
   assert.equal(collect(box, (item) => item.props
