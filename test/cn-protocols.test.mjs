@@ -81,6 +81,20 @@ test('zhipu sends the chosen quality and omits n and response_format', async (t)
   assert.equal(body.quality, 'hd');
 });
 
+test('official GLM-Image requests no watermark by default and honors explicit settings', () => {
+  const provider = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', adapter: 'openai-images' };
+  const model = 'glm-image';
+  const bodyFor = (config, id = model) => JSON.parse(prepareGenerate(
+    resolveAdapter(config, id), config, { model: id, prompt: '一座山', fitted }, new Set()
+  ).body);
+
+  assert.equal(bodyFor(provider).watermark_enabled, false);
+  const modelOptions = { [model]: { params: [{ name: 'watermark_enabled', type: 'boolean', default: 'true' }] } };
+  assert.equal(bodyFor({ ...provider, modelOptions }).watermark_enabled, true);
+  assert.equal(bodyFor(provider, 'cogview-4').watermark_enabled, undefined);
+  assert.equal(bodyFor({ ...provider, baseUrl: 'https://gateway.test/v1' }).watermark_enabled, undefined);
+});
+
 test('ark sends preset sizes and puts reference images in the image field', () => {
   const provider = { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', adapter: 'volcengine-ark', key: 'k' };
   const adapter = resolveAdapter(provider, 'doubao-seedream-4-0-250828');
