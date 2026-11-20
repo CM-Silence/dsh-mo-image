@@ -149,6 +149,7 @@ test('volcengine agent plan preset uses the merged openai-images protocol', () =
   const preset = providerPresetManifest().find((item) => item.id === 'volcengine-plan');
   assert.ok(preset, 'expected the volcengine-plan preset');
   assert.equal(preset.name, '火山方舟 Agent Plan');
+  assert.equal(preset.website, 'https://console.volcengine.com/ark/region:cn-beijing/subscription/agent-plan');
   assert.equal(preset.baseUrl, 'https://ark.cn-beijing.volces.com/api/plan/v3');
   assert.equal(preset.adapter, 'openai-images');
   assert.deepEqual(preset.protocolOptions, { edit: 'same' });
