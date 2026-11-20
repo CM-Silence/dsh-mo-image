@@ -749,6 +749,90 @@ test('判据只看 presetId：同一份配置去掉它，协议项就回到「�
     '加上 presetId 就变回预设来源，协议项整块不渲染');
 });
 
+/** 编辑页那块「转为自定义」（没有就是 undefined）。 */
+const convertBoxOf = (node) => collect(node, (item) => item.props
+  && item.props['data-mo-image-convert-custom'] !== undefined)[0];
+
+test('编辑页的预设来源：API 密钥上方有「转为自定义」', () => {
+  const client = loadClient();
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {}
+  });
+  const box = convertBoxOf(node);
+  assert.ok(box, '「转为自定义」在');
+  const button = collect(box, (item) => item.type === 'button')[0];
+  assert.equal(text(button).join(''), 'form.convertToCustom', '按钮文案走 i18n');
+  // 位置：API 密钥上方，而且不在折叠区里（它是这一页唯一的入口级动作）。
+  const key = collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0];
+  const order = preorder(node);
+  assert.ok(order.indexOf(box) < order.indexOf(key), '排在 API 密钥之前');
+  assert.equal(insideAnyDetails(node, box), false, '不在「自定义设置」里');
+  assert.match(text(box).join(' '), /form.convertToCustomHint/, '按钮旁写清后果');
+});
+
+test('点「转为自定义」：协议组与模型选项当场出现，保存后来源变成空串', async () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {}
+  };
+  let saved = null;
+  const render = () => client.render(client.h(client.form(), {
+    provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t
+  }));
+
+  // 转之前：预设来源——协议那一组不渲染，模型行没有展开箭头。
+  let tree = render();
+  assert.equal(collect(tree, (item) => item.props
+    && item.props['data-mo-image-protocol'] !== undefined).length, 0, '协议组藏起来了');
+  assert.equal(collect(tree, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '模型行没有选项箭头');
+
+  collect(convertBoxOf(tree), (item) => item.type === 'button')[0].props.onClick();
+  tree = render();
+
+  // 转之后：按钮消失，协议下拉与模型选项当场出现，折叠区也替用户打开了。
+  assert.equal(convertBoxOf(tree), undefined, '转完按钮就没了');
+  assert.ok(collect(tree, (item) => item.type === 'select'
+    && item.props['data-mo-image-protocol'] !== undefined)[0], '协议下拉出现了');
+  assert.ok(collect(tree, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean')[0], '模型行有了展开箭头');
+  assert.equal(detailsOf(tree, '自定义设置').props.open, true, '转完把「自定义设置」打开');
+
+  // 别的字段一个都没动：地址、协议、模型都还在（转的只是「来源」）。
+  assert.equal(collect(tree, (item) => item.type === 'input'
+    && item.props.value === 'https://api.openai.com/v1').length, 1, '地址原样');
+  const save = collect(tree, (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+  await save.props.onClick();
+  assert.equal(saved.presetId, '', '落盘：presetId 变成空串 = 自己配的');
+  assert.deepEqual(saved.models, ['gpt-image-1'], '模型留着');
+  assert.equal(saved.adapter, 'openai-images', '协议也留着');
+});
+
+test('新建页没有「转为自定义」：目录 / 本地两条入口本来就是选预设', () => {
+  const client = loadClient({ customMode: true });
+  client.setCatalog();
+  const node = renderForm(client, {
+    id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {}
+  }, true);
+  assert.equal(convertBoxOf(node), undefined, '新建页不提供这个动作');
+});
+
+test('本来就是自定义的提供商没有「转为自定义」', () => {
+  const client = loadClient();
+  client.setCatalog();
+  for (const provider of [
+    { id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', presetId: '', models: [], names: {} },
+    { id: 'p2', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom', models: [], names: {} }
+  ]) {
+    assert.equal(convertBoxOf(renderForm(client, provider)), undefined, provider.name + '：已经没有来源可转');
+  }
+});
+
 /** 表单顶部那句「认不出提供商预设」的红字（没有就是 undefined）。 */
 function presetNoticeOf(node) {
   return collect(node, (item) => item.props && item.props['data-mo-image-provider-notice'] !== undefined)[0];
