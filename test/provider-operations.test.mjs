@@ -278,19 +278,59 @@ test('a failed credential update rolls back earlier updates in the same settings
   assert.deepEqual((await route('config')).data.config.providers.map(({ id }) => id), ['relay']);
 });
 
-test('a model override inherits field mappings and can set a separate endpoint and binary output', async (t) => {
-  const provider = normalizeConfig({ providers: [{
-    ...relay, key: 'dummy', operations: { generate: { input: 'explicit', fields: { prompt: { path: 'text' } } } },
-    modelOptions: { m: { operations: { generate: { path: 'local-image', output: 'binary' } } } }
-  }] }).providers[0];
-  const calls = stubFetch(t, ({ url, body }) => {
-    assert.equal(url.pathname, '/api/local-image');
-    assert.deepEqual(JSON.parse(body), { text: input.prompt });
-    return png();
+test('model-level auto inherits a built-in provider override while provider-level auto keeps the protocol default', async (t) => {
+  const raw = {
+    id: 'a1111', adapter: 'a1111', baseUrl: 'http://127.0.0.1:7860', optionalKey: true, models: ['m'],
+    operations: {
+      generate: { output: { kind: 'json', pick: [{ path: 'result.pixels', as: 'base64' }] } }
+    },
+    modelOptions: { m: { operations: { generate: { output: 'auto' } } } }
+  };
+  const provider = normalizeConfig({ providers: [raw] }).providers[0];
+  assert.equal(provider.modelOptions.m?.operations?.generate, undefined);
+  const protocolDefault = { ...raw, operations: { generate: { output: 'auto' } } };
+  const restored = normalizeConfig({ providers: [protocolDefault] }).providers[0];
+  assert.equal(restored.operations.generate.output, 'auto');
+  let useNativeFormat = false;
+  const calls = stubFetch(t, ({ url }) => {
+    assert.equal(url.pathname, '/sdapi/v1/txt2img');
+    return json(useNativeFormat ? { images: [PNG] } : { result: { pixels: PNG } });
   });
-  const result = await callImageApi('generate', resolveAdapter(provider, 'm'), provider, input);
+  for (const candidate of [raw, provider]) {
+    const result = await callImageApi('generate', resolveAdapter(candidate, 'm'), candidate, input);
+    assert.equal(result.bytes.toString('base64'), PNG);
+  }
+  useNativeFormat = true;
+  const result = await callImageApi('generate', resolveAdapter(restored, 'm'), restored, input);
   assert.equal(result.bytes.toString('base64'), PNG);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 3);
+});
+
+test('custom model operations inherit the provider output on auto while explicit model overrides still work', async (t) => {
+  const provider = normalizeConfig({ providers: [{
+    ...relay, key: 'dummy', models: ['m', 'n'],
+    operations: {
+      generate: {
+        input: 'explicit',
+        fields: { prompt: { path: 'text' } },
+        output: { kind: 'json', pick: [{ path: 'result.pixels', as: 'base64' }] }
+      }
+    },
+    modelOptions: {
+      m: { operations: { generate: { path: 'local-json', output: 'auto' } } },
+      n: { operations: { generate: { path: 'local-image', output: 'binary' } } }
+    }
+  }] }).providers[0];
+  assert.deepEqual(provider.modelOptions.m.operations.generate, { path: 'local-json' });
+  const calls = stubFetch(t, ({ url, body }) => {
+    assert.deepEqual(JSON.parse(body), { text: input.prompt });
+    return url.pathname === '/api/local-image' ? png() : json({ result: { pixels: PNG } });
+  });
+  for (const model of ['m', 'n']) {
+    const result = await callImageApi('generate', resolveAdapter(provider, model), provider, { ...input, model });
+    assert.equal(result.bytes.toString('base64'), PNG);
+  }
+  assert.deepEqual(calls.map(({ url }) => url.pathname), ['/api/local-json', '/api/local-image']);
 });
 
 test('an ordinary POST is never repeated on 503 or when the optional field was not sent', async (t) => {

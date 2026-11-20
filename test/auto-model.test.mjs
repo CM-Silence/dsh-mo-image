@@ -156,11 +156,11 @@ test('a provider argument is validated against the selected provider, not obeyed
   assert.ok(calls[0].url.startsWith('https://api.test/v1'));
 });
 
-test('auto mode is described in the prompt section with the available models', () => {
+test('auto mode refers to the settings catalog without repeating model IDs', () => {
   const text = promptSectionText({ model: 'auto', models: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'], promptOptimization: true });
   assert.match(text, /Auto/);
-  assert.match(text, /gpt-image-2\.5-flare/);
-  assert.match(text, /gpt-image-2\.5-sunburst/);
+  assert.doesNotMatch(text, /gpt-image-2\.5-(flare|sunburst)/);
+  assert.match(text, /mo_image_settings/);
   assert.match(text, /model/);
 });
 

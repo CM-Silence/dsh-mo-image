@@ -250,6 +250,46 @@ test('decodePng and scalePng still handle valid 1x1 and 2x2 PNGs', () => {
   assert.deepEqual(Array.from(scaled.rgba), [128, 128, 128, 255]);
 });
 
+test('decodePng reverses all row filters across split IDAT chunks', () => {
+  const raw = Buffer.from([
+    0, 10, 20, 30, 40, 50, 60, 70, 80,
+    1, 11, 21, 31, 41, 40, 40, 40, 40,
+    2, 1, 1, 1, 1, 1, 1, 1, 1,
+    3, 7, 12, 17, 22, 21, 21, 21, 21,
+    4, 1, 1, 1, 1, 1, 1, 1, 1
+  ]);
+  const compressed = zlib.deflateSync(raw);
+  const split = Math.floor(compressed.length / 2);
+  const source = pngOf([
+    ihdr({ width: 2, height: 5 }),
+    chunk('IDAT', compressed.subarray(0, split)),
+    chunk('IDAT', Buffer.alloc(0)),
+    chunk('IDAT', compressed.subarray(split)),
+    chunk('IEND', Buffer.alloc(0))
+  ]);
+  const expected = Uint8Array.from({ length: 40 }, (_, i) => (i % 8 + 1) * 10 + Math.floor(i / 8));
+  assert.deepEqual(decodePng(source)?.rgba, expected);
+});
+
+test('decodePng expands compact rows for grayscale, RGB and indexed inputs', () => {
+  for (const { colorType, raw, expected } of [
+    { colorType: 0, raw: [0, 10, 2, 5], expected: [10, 10, 10, 255, 15, 15, 15, 255] },
+    { colorType: 2, raw: [0, 10, 20, 30, 2, 5, 4, 3], expected: [10, 20, 30, 255, 15, 24, 33, 255] },
+    { colorType: 4, raw: [0, 10, 15, 2, 5, 3], expected: [10, 10, 10, 15, 15, 15, 15, 18] }
+  ]) {
+    const source = craftedPng({ colorType, width: 1, height: 2 }, Buffer.from(raw));
+    assert.deepEqual(decodePng(source)?.rgba, Uint8Array.from(expected));
+  }
+  const indexed = pngOf([
+    ihdr({ colorType: 3, width: 1, height: 2 }),
+    chunk('PLTE', Buffer.from([10, 20, 30, 40, 50, 60])),
+    chunk('tRNS', Buffer.from([70])),
+    chunk('IDAT', zlib.deflateSync(Buffer.from([0, 0, 2, 1]))),
+    chunk('IEND', Buffer.alloc(0))
+  ]);
+  assert.deepEqual(decodePng(indexed)?.rgba, Uint8Array.from([10, 20, 30, 70, 40, 50, 60, 255]));
+});
+
 test('imageSizeOf rejects truncated JPEG, WebP and GIF headers', () => {
   const jpeg = jpegHeader();
   for (let size = 0; size < 11; size++) {

@@ -346,6 +346,47 @@ function stubSubmit(reply) {
   return () => state.posts;
 }
 
+test('a long 400 error is shortened after classifying the complete message', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const detail = 'invalid request:  ' + '🌄'.repeat(20000);
+  for (const tail of ['', ' This model does not support image generation.']) {
+    const posts = stubSubmit(() => jsonResponse({ error: { message: detail + tail } }, 400));
+    await assert.rejects(
+      () => callImageApi('generate', syncAdapter(), gatewayProvider(), submitInput),
+      (error) => {
+        assert.equal(error.code, tail ? 'unsupported_model' : 'unknown');
+        assert.equal(error.phase, 'submit');
+        assert.equal(error.submissionState, 'rejected');
+        assert.equal(error.status, 400);
+        assert.ok(Buffer.byteLength(error.message) < 1500);
+        assert.match(error.message, /invalid request: .*…/u);
+        assert.doesNotMatch(error.message, /[\uD800-\uDBFF]…/u);
+        return true;
+      }
+    );
+    assert.equal(posts(), 1);
+  }
+});
+
+test('a retry still handles an optional field named near the end of a long 400 error', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const bodies = [];
+  stubSubmit((_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return bodies.length === 1
+      ? jsonResponse({ error: { message: 'details '.repeat(2500) + 'unknown parameter: negative_prompt' } }, 400)
+      : pngResponse();
+  });
+  const result = await callImageApi('generate', syncAdapter(), gatewayProvider(), { ...submitInput, negativePrompt: 'blurry' });
+  assert.deepEqual(result.bytes, Buffer.from(PNG_1PX, 'base64'));
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].negative_prompt, 'blurry');
+  assert.equal(bodies[1].negative_prompt, undefined);
+  assert.equal(bodies[1].prompt, bodies[0].prompt);
+});
+
 test('a 5xx submit is posted once for sync and async adapters alike', async () => {
   const original = globalThis.fetch;
   try {
@@ -436,6 +477,103 @@ test('a 5xx body that names a task id reports it and never dumps the body', asyn
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test('an ambiguous submit drops overlong task ID hints without suggesting a partial or fallback ID', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  for (const status of [408, 503]) {
+    const posts = stubSubmit(() => jsonResponse({
+      task_id: 'task-original-' + 'x'.repeat(200000), output: { request_id: 'secondary-id' }
+    }, status));
+    await assert.rejects(
+      () => callImageApi('generate', syncAdapter(), gatewayProvider(), submitInput),
+      (error) => {
+        assert.equal(error.code, 'submission_unknown');
+        assert.equal(error.phase, 'submit');
+        assert.equal(error.submissionState, 'unknown');
+        assert.equal(error.status, status);
+        assert.match(error.message, /请不要直接重复提交/);
+        assert.doesNotMatch(error.message, /task-original-|secondary-id/);
+        assert.ok(Buffer.byteLength(error.message) < 600);
+        return true;
+      }
+    );
+    assert.equal(posts(), 1);
+  }
+});
+
+test('an ambiguous submit omits a task ID that cannot be displayed verbatim', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const provider = gatewayProvider(undefined, 'fixture-provider-key');
+  const posts = stubSubmit(() => jsonResponse({ task_id: 'task-' + provider.key }, 503));
+  await assert.rejects(
+    () => callImageApi('generate', syncAdapter(), provider, submitInput),
+    (error) => {
+      assert.equal(error.code, 'submission_unknown');
+      assert.match(error.message, /请不要直接重复提交/);
+      assert.doesNotMatch(error.message, /fixture-provider-key|task-\[redacted\]/);
+      return true;
+    }
+  );
+  assert.equal(posts(), 1);
+});
+
+test('poll errors are shortened while saved upstream IDs and local resume IDs remain intact', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const upstreamId = 'provider-' + 'opaque-'.repeat(100) + 'end';
+  const jobId = '0e92796d-dbfd-4af7-8997-3b7ef227e01c';
+  const message = 'provider-reply: ' + 'long '.repeat(16000);
+  for (const failedTask of [false, true]) {
+    const patches = [];
+    const journal = {
+      async create() { return { id: jobId }; },
+      async update(_id, patch) { patches.push(patch); return true; }
+    };
+    const posts = stubSubmit((url, init) => {
+      if (init.method === 'POST') return jsonResponse({ task_id: upstreamId });
+      assert.ok(new URL(url).pathname.endsWith('/' + upstreamId));
+      return failedTask ? jsonResponse({ status: 'FAILED', message }) : jsonResponse({ error: { message } }, 401);
+    });
+    await assert.rejects(
+      () => callImageApi('generate', legacyAsyncAdapter(), gatewayProvider(), submitInput, undefined, { journal }),
+      (error) => {
+        assert.equal(error.code, failedTask ? 'task_failed' : 'auth');
+        assert.equal(error.status, failedTask ? undefined : 401);
+        assert.equal(error.phase, 'poll');
+        assert.equal(error.submissionState, 'accepted');
+        assert.equal(error.resumable, !failedTask);
+        assert.equal(error.jobId, jobId);
+        assert.equal(error.message.includes('resume_job_id=' + jobId), !failedTask);
+        assert.match(error.message, /provider-reply: .*…/);
+        assert.ok(Buffer.byteLength(error.message) < 1000);
+        return true;
+      }
+    );
+    assert.equal(posts(), 1);
+    assert.equal(patches.find((patch) => patch.status === 'submitted').taskId, upstreamId);
+  }
+});
+
+test('a successful HTTP response without an image has bounded diagnostic text', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const provider = { ...gatewayProvider(), adapter: 'google-gemini' };
+  const adapter = resolveAdapter(provider, 'gemini-2.5-flash-image');
+  const posts = stubSubmit(() => jsonResponse({ candidates: [{ finishReason: 'SAFETY ' + 'detail '.repeat(20000) }] }));
+  await assert.rejects(
+    () => callImageApi('generate', adapter, provider, { ...submitInput, model: 'gemini-2.5-flash-image' }),
+    (error) => {
+      assert.equal(error.code, 'protocol_mismatch');
+      assert.equal(error.submissionState, 'accepted');
+      assert.match(error.message, /finishReason=SAFETY .*…/);
+      assert.ok(Buffer.byteLength(error.message) < 1000);
+      return true;
+    }
+  );
+  assert.equal(posts(), 1);
 });
 
 test('a 429 submit still retries on the sync path', async (t) => {

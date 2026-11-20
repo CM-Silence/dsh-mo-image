@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, truncateSync, unlinkSync } from 'node:fs';
+import { once } from 'node:events';
+import { createServer, get } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -115,12 +117,42 @@ test('generation resolves the key from the credentials service without a config 
   assert.ok(url, 'calls without a workspace retain signed previews');
   const previewRoute = routes.find((route) => route.path === '/api/mo-image/preview');
   assert.ok(previewRoute);
-  const res = {
-    status: 0, body: null,
-    writeHead(status) { this.status = status; },
-    end(body) { this.body = body; }
-  };
-  await previewRoute.handler({ method: 'GET', url: new URL(url[1]).pathname }, res);
+  let handled;
+  const server = createServer((req, res) => {
+    handled = previewRoute.handler(req, res).then(() => res.writableFinished);
+  });
+  server.listen(0, '127.0.0.1');
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+  await once(server, 'listening');
+  const href = 'http://127.0.0.1:' + server.address().port + new URL(url[1]).pathname;
+  const bytes = Buffer.concat([Buffer.from(PNG_1PX, 'base64'), Buffer.alloc(192 * 1024)]);
+  writeFileSync(script.path, bytes);
+  const res = await originalFetch(href);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, Buffer.from(PNG_1PX, 'base64'));
+  assert.equal(res.headers.get('content-length'), String(bytes.length));
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes);
+  assert.equal(await handled, true);
+
+  await t.test('an interrupted preview finishes its handler without writing the rest of the file', { timeout: 5000 }, async (previewTest) => {
+    const length = 16 * 1024 * 1024;
+    truncateSync(script.path, length);
+    const request = get(href, { agent: false });
+    previewTest.after(() => { request.destroy(); });
+    const [response] = await once(request, 'response', { signal: previewTest.signal });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['content-length'], String(length));
+    const closed = once(response, 'close', { signal: previewTest.signal });
+    response.once('data', () => response.destroy());
+    await closed;
+    assert.equal(response.complete, false);
+    assert.equal(await handled, false);
+  });
+
+  unlinkSync(script.path);
+  const missing = await originalFetch(href);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { ok: false, error: 'not found' });
 });

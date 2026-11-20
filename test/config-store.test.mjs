@@ -39,6 +39,40 @@ test('normalizeConfig keeps the active model and drops unknown provider fields',
   assert.equal(config.active.model, 'm');
 });
 
+test('official OpenRouter migrates the old FLUX.2 ID and preserves model settings', () => {
+  const old = 'black-forest-labs/flux-2-pro';
+  const current = 'black-forest-labs/flux.2-pro';
+  const provider = {
+    id: 'p1', name: 'OpenRouter', adapter: 'openrouter-images',
+    baseUrl: 'https://openrouter.ai/api/v1', models: [old, current],
+    names: { [old]: 'FLUX.2 Pro' },
+    modelOptions: { [old]: { size: { mode: 'aspect' } }, [current]: { locked: { size: true } } }
+  };
+  const active = { providerId: 'p1', model: old };
+  const config = normalizeConfig({ providers: [provider], active });
+  assert.deepEqual(config.providers[0].models, [current]);
+  assert.equal(config.active.model, current);
+  assert.equal(config.providers[0].names[current], 'FLUX.2 Pro');
+  assert.equal(config.providers[0].modelOptions[current].size.mode, 'aspect');
+  assert.equal(config.providers[0].modelOptions[current].locked.size, true);
+  assert.deepEqual(normalizeConfig(config), config);
+
+  const gateway = normalizeConfig({ providers: [{ ...provider, baseUrl: 'https://gateway.test/v1' }], active });
+  assert.equal(gateway.active.model, old);
+  assert.deepEqual(gateway.providers[0].models, [old, current]);
+});
+
+test('a tool aspect in Size Auto is kept for the wire without inventing a strict pixel target', () => {
+  const model = 'gemini-3.1-flash-image';
+  const provider = { adapter: 'google-gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' };
+  const adapter = resolveAdapter(provider, model);
+  const plan = resolveSizeRequest(provider, model, { auto: true }, { size: '3:4' }, adapter);
+  assert.equal(plan.aspect, '3:4');
+  assert.equal(plan.nominal, null);
+  const [width, height] = plan.arg.split('x').map(Number);
+  assert.ok(width > 0 && height > width, 'the derived wire dimensions retain portrait orientation');
+});
+
 test('OpenAI Images drops the legacy locked Gemini input pair and preserves manual mappings', () => {
   const model = 'relay/gemini-3.1-flash-image:latest';
   const fields = {

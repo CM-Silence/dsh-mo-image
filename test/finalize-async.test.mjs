@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Worker } from 'node:worker_threads';
+import zlib from 'node:zlib';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -58,4 +60,32 @@ test('a small resize stays on the synchronous path with the same result shape', 
   assert.deepEqual(imageSizeOf(syncResult.bytes), { width: 64, height: 64 });
   assert.equal(asyncResult.generated, syncResult.generated);
   assert.match(asyncResult.note, /严格模式/);
+});
+
+test('a large PNG stays at its actual size when worker submission fails', async (t) => {
+  const { finalizeImageAsync } = await import('../lib/image-service.js');
+  const source = png(1024, 512);
+  const worker = t.mock.method(Worker.prototype, 'postMessage', () => { throw new Error('worker unavailable'); });
+  const inflate = t.mock.method(zlib, 'inflateSync');
+  const wanted = { width: 400, height: 300, text: '400x300' };
+  const input = {
+    bytes: source,
+    contentType: 'image/png',
+    fitted: { size: '800x800', width: 800, height: 800, adjusted: true, requested: wanted },
+    note: '上游提示'
+  };
+  for (const strict of [true, false]) {
+    const final = await finalizeImageAsync(input, { strict });
+    assert.equal(final.bytes, source, 'the original bytes are returned unchanged');
+    assert.equal(final.original, undefined, 'the original is already the main output');
+    assert.equal(final.generated, '1024x512');
+    assert.equal(final.fitted.size, '1024x512');
+    assert.equal(final.fitted.width, 1024);
+    assert.equal(final.fitted.height, 512);
+    assert.equal(final.fitted.requested, wanted);
+    assert.match(final.note, /上游提示.*上游出图 1024x512，未能缩放到 400x300，已保留原图/);
+    assert.equal(final.note.includes('严格模式'), strict);
+  }
+  assert.equal(worker.mock.callCount(), 2);
+  assert.equal(inflate.mock.callCount(), 0, 'the main thread must not start a second decode');
 });

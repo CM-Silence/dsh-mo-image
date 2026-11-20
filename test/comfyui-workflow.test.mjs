@@ -90,12 +90,17 @@ test('comfyui uses the per-model custom workflow when one is configured', async 
   });
   const provider = {
     baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true,
-    modelOptions: { 'my-model.safetensors': { workflow: CUSTOM_T2I } }
+    modelOptions: { 'my-model.safetensors': { workflow: CUSTOM_T2I, params: [
+      { name: 'checkpointAlias', node: '4', input: 'unet_name', type: 'text', expose: true },
+      { name: 'widthAlias', node: '6', input: 'width', type: 'number', expose: true },
+      { name: 'steps', node: '8', input: 'steps', type: 'number', expose: false }
+    ] } }
   };
   const adapter = resolveAdapter(provider, '');
   const out = await adapter.execute('generate', provider, {
     model: 'my-model.safetensors', prompt: 'a lighthouse', negativePrompt: '',
-    fitted: { width: 832, height: 1216, size: '832x1216' }
+    fitted: { width: 832, height: 1216, size: '832x1216' },
+    params: { checkpointAlias: 'other.safetensors', widthAlias: 2048, steps: 30 }
   }, new AbortController().signal);
   assert.ok(out.bytes.length > 0);
   const workflow = submitted.prompt;
@@ -105,6 +110,7 @@ test('comfyui uses the per-model custom workflow when one is configured', async 
   assert.equal(workflow['6'].inputs.height, 1216);
   assert.equal(workflow['8'].inputs.steps, 12);
   assert.equal(typeof workflow['8'].inputs.seed, 'number');
+  assert.match(out.note, /checkpointAlias、widthAlias、steps/);
 });
 
 test('comfyui custom workflow uploads the reference and fills {{image}} on edit', async (t) => {
@@ -195,18 +201,21 @@ test('a params.prompt cannot override the prompt argument', async (t) => {
       'm.safetensors': Object.assign({}, MAPPED_OPTIONS, {
         params: [
           { name: 'prompt', role: true, node: '5', input: 'text', type: 'STRING' },
-          { name: 'steps', node: '8', input: 'steps', type: 'INT' }
+          { name: 'sizeAlias', node: '6', input: 'width', type: 'INT', expose: true },
+          { name: 'steps', node: '8', input: 'steps', type: 'INT', expose: true }
         ]
       })
     }
   };
   const result = await adapter0(provider).execute('generate', provider, {
-    model: 'm.safetensors', prompt: 'a lighthouse', negativePrompt: '', fitted: {},
-    params: { prompt: 'hijacked', steps: 30 }
+    model: 'm.safetensors', prompt: 'a lighthouse', negativePrompt: '', fitted: { width: 832, height: 1216, size: '832x1216' },
+    params: { prompt: 'hijacked', sizeAlias: 2048, steps: 30 }
   }, new AbortController().signal);
   assert.equal(submitted.prompt['5'].inputs.text, 'a lighthouse', 'the prompt argument wins');
   assert.equal(submitted.prompt['8'].inputs.steps, 30, 'a real tunable still applies');
+  assert.equal(submitted.prompt['6'].inputs.width, 832);
   assert.match(String(result.note), /prompt/, 'the ignored key is reported back');
+  assert.match(String(result.note), /sizeAlias/);
 });
 
 test('comfyui falls back to the builtin workflow when the model has no options', async (t) => {
@@ -261,7 +270,7 @@ const MAPPED_OPTIONS = {
   }
 };
 
-function submitMapped(t, fitted) {
+function submitMapped(t, fitted, options = MAPPED_OPTIONS) {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   let submitted = null;
@@ -274,7 +283,7 @@ function submitMapped(t, fitted) {
   });
   const provider = {
     baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true,
-    modelOptions: { 'm.safetensors': MAPPED_OPTIONS }
+    modelOptions: { 'm.safetensors': options }
   };
   return adapter0(provider).execute('generate', provider, {
     model: 'm.safetensors', prompt: 'a lighthouse', negativePrompt: '', fitted
@@ -293,6 +302,20 @@ test('a size the chat model asked for is written into the mapped inputs', async 
   const submitted = await submitMapped(t, { width: 832, height: 1216, size: '832x1216' });
   assert.equal(submitted.prompt['6'].inputs.width, 832);
   assert.equal(submitted.prompt['6'].inputs.height, 1216);
+});
+
+const MIXED_OPTIONS = { ...MAPPED_OPTIONS, workflow: MAPPED_T2I.replace('"width":640', '"width":"{{width}}"') };
+
+test('a requested size fills both a placeholder and its complementary mapping', async (t) => {
+  const submitted = await submitMapped(t, { width: 832, height: 1216, size: '832x1216' }, MIXED_OPTIONS);
+  assert.equal(submitted.prompt['6'].inputs.width, 832);
+  assert.equal(submitted.prompt['6'].inputs.height, 1216);
+});
+
+test('auto size supplies a default placeholder value and preserves the existing mapped dimension', async (t) => {
+  const submitted = await submitMapped(t, { omit: true, size: 'none' }, MIXED_OPTIONS);
+  assert.equal(submitted.prompt['6'].inputs.width, 1024);
+  assert.equal(submitted.prompt['6'].inputs.height, 960);
 });
 
 test('a builtin workflow still needs concrete numbers when the size is auto', async (t) => {

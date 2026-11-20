@@ -366,22 +366,28 @@ test('模型字段规则：gemini 原生把内容写进 contents[].parts[]，负
   assert.equal(rule.fields.image, null);
 });
 
-test('模型字段规则：ideogram-4 是 JSON，没有 negative_prompt；4-5 / transparent 有', () => {
+test('模型字段规则：Ideogram 4.5/4.6 将排除项并入提示词，编辑使用 images', () => {
   const plain = detectFieldRule('ideogram-4');
   assert.equal(plain.fields.negative, null, 'ideogram-4 的 JSON body 只有 prompt / num_images / resolution');
 
-  for (const model of ['ideogram-3', 'ideogram-4-5', 'ideogram-4-transparent']) {
+  for (const model of ['ideogram-3', 'ideogram-4-transparent']) {
     assert.deepEqual(
       detectFieldRule(model).fields.negative,
       { path: 'negative_prompt' },
       model + ' 的表单体带 negative_prompt'
     );
   }
-  for (const model of ['ideogram-3', 'ideogram-4', 'ideogram-4-5']) {
+  for (const model of ['ideogram-3', 'ideogram-4']) {
     const rule = detectFieldRule(model);
     assert.deepEqual(rule.fields.n, { path: 'num_images' }, model + ' 的张数字段叫 num_images');
     assert.equal(rule.fields.model, null, 'ideogram 的模型名在路径里，不是 body 字段');
     assert.equal(rule.fields.image, null, 'ideogram 不支持编辑');
+  }
+  for (const model of ['ideogram-4-5', 'ideogram-4-6']) {
+    const { fields } = detectFieldRule(model, '', 'ideogram');
+    assert.deepEqual(fields.negative, { appendToPrompt: '\n\nAvoid: ' });
+    assert.deepEqual(fields.n, { path: 'num_images' });
+    assert.deepEqual(fields.image, { multipart: 'images' });
   }
 });
 

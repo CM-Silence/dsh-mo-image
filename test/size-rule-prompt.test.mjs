@@ -8,7 +8,7 @@ import { promptSectionText, sizeRuleText } from '../lib/prompt-profiles.js';
 test('a fixed size tells the model not to send size', () => {
   const text = promptSectionText({ model: 'flux-2-pro', sizeMode: 'fixed', size: '1024x1024' });
   assert.match(text, /尺寸已固定为 1024x1024，不要传 size/);
-  assert.match(text, /质量、提供商、模型同样由选择器控制/);
+  assert.match(text, /提供商和模型同样由选择器控制/);
 });
 
 test('an auto size lets the model send size and lists the options', () => {
@@ -27,7 +27,7 @@ test('an auto size without options still lets the model pass a size', () => {
 test('the Auto-model section carries the size rule too', () => {
   const text = promptSectionText({ model: 'auto', models: ['m1'], sizeMode: 'auto' });
   assert.match(text, /尺寸由你决定/);
-  assert.match(text, /模型必须从上面列表里传/);
+  assert.match(text, /模型必须从当前提供商的目录里选/);
 });
 
 test('the Auto-model section gets the fixed wording when the picker pins a size', () => {

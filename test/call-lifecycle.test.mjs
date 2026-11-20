@@ -264,6 +264,7 @@ test('an async generate writes a resumable job record', async (t) => {
   assert.equal(record.id, result.jobId);
   assert.equal(record.status, 'saved');
   assert.equal(record.taskId, 'job-1');
+  assert.equal(record.strict, false);
   assert.equal(record.file, result.path);
   assert.equal(record.model, 'flux-2-pro');
   assert.ok(record.pollTarget.includes('/get_result'));
@@ -313,6 +314,10 @@ test('a submitted async job survives a restart and resumes by jobId', async (t) 
   delete record.file;
   writeFileSync(journalFile, JSON.stringify(record, null, 2), 'utf8');
   rmSync(first.path, { force: true });
+  const configFile = path.join(home, 'mo-image', 'config.json');
+  const config = JSON.parse(readFileSync(configFile, 'utf8'));
+  config.defaults.strict = true;
+  writeFileSync(configFile, JSON.stringify(config), 'utf8');
 
   const posts = pollOnlyFetch(t);
   const tools = await restartPlugin([]);
@@ -326,6 +331,7 @@ test('a submitted async job survives a restart and resumes by jobId', async (t) 
   assert.equal(posts(), 0, 'resume polls the existing task instead of submitting');
   assert.equal(resumed.jobId, first.jobId);
   assert.ok(existsSync(resumed.path));
+  assert.doesNotMatch(resumed.note || '', /严格/, 'resume uses the original resize mode');
 
   const after = JSON.parse(readFileSync(journalFile, 'utf8'));
   assert.equal(after.status, 'saved');

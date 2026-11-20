@@ -91,13 +91,12 @@ test('the settings tool returns a minimal json with the model and a one-line hin
   assert.equal(settings.parameters.required, undefined, 'the settings tool takes no arguments');
 
   const result = await settings.execute({}, exec);
-  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'sizeMode', 'strict']);
+  assert.deepEqual(Object.keys(result).sort(), ['canEdit', 'control', 'hint', 'model', 'promptOptimization', 'provider', 'qualityMode', 'sizeMode', 'strict']);
   assert.equal(result.provider, 'p1', 'the provider is reported by id only');
   assert.equal(result.model, 'flux-2-klein-4b.safetensors');
   assert.equal(result.promptOptimization, true);
   assert.match(result.hint, /30–80 词/, 'the FLUX word budget must be in the hint');
-  assert.match(result.hint, /完整写法没读过/, 'the hint says to load the full rules only once');
-  assert.match(result.hint, /读过就不用再加载/, 'and that a second read is wasted');
+  assert.doesNotMatch(result.hint, /加载|skill/, 'the settings result carries the dialect, not a second skill instruction');
 });
 
 test('prompt optimization off only says to use the user wording', async (t) => {
@@ -122,6 +121,97 @@ test('auto mode lists the model ids to pick from', async (t) => {
   assert.deepEqual(result.models, ['flux-2-klein-4b.safetensors', 'moss_image_sft_int8_convrot.safetensors']);
   assert.deepEqual(result.editModels, ['flux-2-klein-4b.safetensors', 'moss_image_sft_int8_convrot.safetensors'],
     'Auto mode also reports which models can edit');
+  const rendered = JSON.parse(settings.output.render({}, result)[0].text);
+  assert.deepEqual(rendered.models, result.models);
+  assert.equal(rendered.editModelIndexes, 'all');
+  assert.equal(rendered.editModels, undefined, 'IDs appear only in the model-facing catalog');
+});
+
+test('Auto candidate details are scoped, reusable and refreshed when size or params change', async (t) => {
+  const cfg = config();
+  cfg.active = { providerId: 'p1', model: 'auto' };
+  cfg.defaults = { ...cfg.defaults, auto: false, width: 1024, height: 1024 };
+  const model = cfg.providers[0].models[0];
+  cfg.providers[0].modelOptions = {
+    [model]: {
+      params: [{ name: 'steps', type: 'number', expose: true, default: '12', description: 'Sampling steps' }]
+    }
+  };
+  const { settings, exec, home, calls } = await harness(t, cfg);
+
+  assert.equal((await settings.execute({ model: 'missing' }, exec)).model, undefined);
+  const detail = await settings.execute({ model }, exec);
+  assert.equal(detail.model, model);
+  assert.equal(detail.size, '1024x1024');
+  assert.equal(detail.canEdit, true);
+  assert.equal(detail.models, undefined);
+  assert.deepEqual(detail.params, [{ name: 'steps', type: 'number', description: 'Sampling steps', default: '12' }]);
+  assert.equal((await settings.execute({ model }, exec)).unchanged, true);
+  assert.deepEqual(await settings.execute({ model, refresh: true }, exec), detail);
+  assert.equal((await settings.execute({}, exec)).model, 'auto', 'the candidate read does not consume the catalog');
+  assert.equal((await settings.execute({}, exec)).unchanged, true);
+
+  const file = path.join(home, 'mo-image', 'config.json');
+  cfg.providers[0].models.push('another-candidate');
+  writeFileSync(file, JSON.stringify(cfg), 'utf8');
+  const expanded = await settings.execute({}, exec);
+  assert.ok(expanded.models.includes('another-candidate'));
+  assert.equal((await settings.execute({ model }, exec)).unchanged, true, 'an unrelated catalog change does not repeat these details');
+
+  cfg.defaults.height = 1536;
+  writeFileSync(file, JSON.stringify(cfg, null, 2), 'utf8');
+  const reloaded = await settings.execute({}, exec);
+  assert.equal(reloaded.model, 'auto', 'fixed dimension changes invalidate the Auto catalog read');
+  const resized = await settings.execute({ model }, exec);
+  assert.equal(resized.size, '1024x1536');
+  cfg.providers[0].modelOptions[model].params[0].default = '24';
+  writeFileSync(file, JSON.stringify(cfg, null, 4), 'utf8');
+  const changed = await settings.execute({ model }, exec);
+  assert.equal(changed.params[0].default, '24');
+  assert.equal(calls.length, 0);
+});
+
+test('selector guards fixed model, size and quality while automatic settings permit validated choices', async (t) => {
+  const cfg = config();
+  cfg.providers[0].models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+  cfg.providers[0].baseUrl = 'https://api.openai.com/v1';
+  cfg.providers[0].presetId = 'openai';
+  cfg.active.model = cfg.providers[0].models[0];
+  cfg.defaults = { ...cfg.defaults, quality: 'auto' };
+  const { settings, generate, edit, exec, calls, home } = await harness(t, cfg);
+  const first = await settings.execute({}, exec);
+  assert.equal(first.qualityMode, 'auto');
+  assert.equal(first.sizeMode, 'auto');
+  assert.ok(first.qualityOptions.includes('low'));
+  assert.ok(generate.parameters.properties.quality);
+  assert.ok(edit.parameters.properties.quality);
+  await assert.rejects(() => generate.execute({ prompt: 'test', model: cfg.providers[0].models[1] }, exec), /只能由用户/);
+  await assert.rejects(() => generate.execute({ prompt: 'test', quality: 'unsupported-tier' }, exec), /不支持质量档位/);
+  assert.equal(calls.length, 0);
+
+  const reference = path.join(home, 'reference.png');
+  writeFileSync(reference, Buffer.from(PNG_1PX, 'base64'));
+  await generate.execute({ prompt: 'test', quality: 'low', size: '1024x1536' }, exec);
+  await edit.execute({ prompt: 'edit', images: [reference], quality: 'medium', size: '1536x1024' }, exec);
+  await generate.execute({ prompt: 'use API default' }, exec);
+  const automatic = JSON.parse(calls[0].init.body);
+  assert.equal(automatic.model, cfg.active.model);
+  assert.equal(automatic.quality, 'low');
+  assert.equal(automatic.size, '1024x1536');
+  assert.equal(calls[1].init.body.get('quality'), 'medium');
+  assert.equal(calls[1].init.body.get('size'), '1536x1024');
+  assert.equal(JSON.parse(calls[2].init.body).quality, undefined);
+
+  cfg.defaults = { ...cfg.defaults, auto: false, quality: 'high', width: 1024, height: 1024 };
+  writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(cfg, null, 2));
+  const fixed = await settings.execute({}, exec);
+  assert.equal(fixed.qualityMode, 'fixed');
+  assert.equal(fixed.quality, 'high');
+  assert.equal(fixed.sizeMode, 'fixed');
+  await generate.execute({ prompt: 'keep picker settings', quality: 'low', size: '1024x1536' }, exec);
+  const pinned = JSON.parse(calls[3].init.body);
+  assert.equal(pinned.quality, 'high');
+  assert.equal(pinned.size, '1024x1024');
 });
 
 test('generating without reading the settings hands over the config instead of failing', async (t) => {
@@ -403,15 +493,82 @@ test('a config change while a request is in flight invalidates the next call', a
   assert.equal(handoff.settings.model, 'moss_image_sft_int8_convrot.safetensors');
 });
 
-test('two calls emitted in the same step still produce at most one image', async (t) => {
-  const { generate, exec, calls } = await harness(t);
+test('configuration handed off once per step blocks sibling generation and editing', async (t) => {
+  const { settings, generate, edit, exec, home, calls } = await harness(t);
+  await settings.execute({}, exec);
+  const next = config();
+  next.defaults.promptOptimization = false;
+  writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(next, null, 2), 'utf8');
 
-  // 模型把两个生图调用放在同一批：交接会先把配置记成已读，同批的第二个调用就会真的生成。
-  // 这不报错，而且提示词本来就是按系统提示词里的当前写法写的，所以可以接受。
+  const reference = path.join(home, 'reference.png');
+  writeFileSync(reference, Buffer.from(PNG_1PX, 'base64'));
+  const toolSet = {};
   const results = await Promise.all([
-    generate.execute({ prompt: 'a harbor' }, exec),
-    generate.execute({ prompt: 'a forest' }, exec)
+    generate.execute({ prompt: '一座港口' }, { ...exec, toolSet, callId: 'stale-generate' }),
+    edit.execute({ prompt: '改成夜景', images: [reference] }, { ...exec, toolSet, callId: 'stale-edit' })
   ]);
-  assert.equal(results.filter((item) => item.needsSettings).length, 1);
+  assert.ok(results.every((result) => result.needsSettings && result.path === ''));
+  const handedOff = results.filter((result) => result.settings);
+  assert.equal(handedOff.length, 1);
+  assert.equal(handedOff[0].settings.promptOptimization, false);
+  assert.match(handedOff[0].note, /沿用用户原话/);
+  assert.equal(calls.length, 0);
+  assert.equal((await settings.execute({}, exec)).unchanged, true);
+
+  await generate.execute({ prompt: '一座港口' }, { ...exec, toolSet: {}, callId: 'fresh-generate' });
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(calls[0].init.body).prompt, '一座港口');
+});
+
+test('image tools do not use settings read by a sibling call in the same step', async (t) => {
+  const { settings, generate, exec, calls } = await harness(t);
+  const step = { ...exec, toolSet: {} };
+  const snapshot = await settings.execute({}, step);
+  assert.equal(snapshot.model, 'flux-2-klein-4b.safetensors');
+  const wait = await generate.execute({ prompt: 'a harbor' }, step);
+  assert.equal(wait.needsSettings, true);
+  assert.equal(wait.settings, undefined);
+  assert.equal(calls.length, 0);
+  await generate.execute({ prompt: 'a harbor' }, { ...exec, toolSet: {} });
   assert.equal(calls.length, 1);
 });
+
+for (const kind of ['generate', 'edit']) {
+  test(`${kind} replays a handoff without submitting and forwards the prepared prompt on a new call`, async (t) => {
+    const harnessResult = await harness(t);
+    const { settings, exec, home, calls } = harnessResult;
+    const tool = harnessResult[kind];
+    const prompt = 'A lighthouse at dusk with a sign reading "Måke".';
+    const args = { prompt };
+    if (kind === 'edit') {
+      const reference = path.join(home, 'reference.png');
+      writeFileSync(reference, Buffer.from(PNG_1PX, 'base64'));
+      args.images = [reference];
+    }
+    const first = { ...exec, callId: 'read' };
+    const handoff = await tool.execute(args, first);
+    assert.equal(handoff.settings.promptOptimization, true);
+    assert.match(handoff.note, /沿用上下文里仍适用的写法和成稿/);
+    assert.deepEqual(await tool.execute(args, first), handoff);
+    await assert.rejects(tool.execute({ ...args, prompt: 'different' }, first), { code: 'call_conflict' });
+    assert.equal((await settings.execute({}, exec)).unchanged, true);
+    assert.equal(calls.length, 0);
+
+    const actual = { ...exec, callId: 'submit' };
+    const image = await tool.execute(args, actual);
+    assert.ok(image.path);
+    assert.deepEqual(await tool.execute(args, actual), image);
+    assert.equal(calls.length, 1);
+    const body = calls[0].init.body;
+    assert.equal(typeof body === 'string' ? JSON.parse(body).prompt : body.get('prompt'), prompt);
+
+    const next = config();
+    next.active.model = next.providers[0].models[1];
+    writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(next, null, 2), 'utf8');
+    await assert.rejects(tool.execute(args, actual), { code: 'call_conflict' });
+    assert.equal(calls.length, 1);
+    const changed = await tool.execute(args, { ...exec, callId: 'changed' });
+    assert.equal(changed.settings.model, next.active.model);
+    assert.equal(calls.length, 1);
+  });
+}

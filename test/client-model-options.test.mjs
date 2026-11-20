@@ -1047,7 +1047,7 @@ function localPresetConfig(presetId, adapter, baseUrl) {
   };
 }
 
-test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是锁', async () => {
+test('A1111 / SwarmUI 的输入键可改，sd-server 只提供默认锁定的输出设置', async () => {
   // A1111 的模型面板只有参数表（尺寸 / 采样器全走 sdapi 参数），锁在表标题那一行。
   const a1111 = await openEditor(localPresetConfig('a1111', 'a1111', 'http://127.0.0.1:7860'));
   const a1111Panel = openModelPanel(a1111.harness);
@@ -1063,11 +1063,13 @@ test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是�
     && node.props['data-param-key'] === 'size')[0];
   assert.notEqual(sizeMode.props.disabled, true, 'SwarmUI 的尺寸控件能直接改');
 
-  // sd-server 走 OpenAI 兼容字段：和云端预设同一档，箭头在但禁用。
+  // sd-server 的输入沿用 OpenAI 兼容字段。模型可覆盖部署端返回格式。
   const sd = await openEditor(localPresetConfig('sd-server', 'openai-images', 'http://127.0.0.1:8080/v1'));
-  const sdToggle = optionsToggle(sd.harness.renderRoot());
-  assert.ok(sdToggle, 'sd-server：箭头照旧渲染');
-  assert.equal(sdToggle.props.disabled, true, 'sd-server：只是禁用');
+  const sdPanel = openModelPanel(sd.harness);
+  assert.equal(findAll(sdPanel, (node) => node.props['data-mo-image-input-settings'] !== undefined).length, 0);
+  const output = findAll(sdPanel, (node) => node.props['data-mo-image-output-settings'] !== undefined)[0];
+  assert.ok(output);
+  assert.equal(paramLock(output, 'operations').props['aria-pressed'], 'true');
 });
 
 test('一键配置把命中的尺寸与字段写进去，并把整块输入设置锁上', async () => {

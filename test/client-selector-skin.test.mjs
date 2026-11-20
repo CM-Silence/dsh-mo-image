@@ -476,7 +476,7 @@ test('the open codex quality pane renders one tick per quality level', () => {
     seed({ open: true, pane: 'quality' })
   );
   assert.equal(collectClass(tree, 'cmes-rail').length, 1);
-  assert.equal(collectClass(tree, 'cmes-dot').length, 10);
+  assert.equal(collectClass(tree, 'cmes-dot').length, 12, 'Auto adds a selectable stop even without an upstream auto grade');
   assert.equal(collectClass(tree, 'cmes-tickOverlay').length, 1);
   assert.equal(collectClass(tree, 'cmes-tickMotion').length, 1);
   const text = collectText(tree).join(' ');

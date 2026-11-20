@@ -68,7 +68,7 @@ const imagesIn = (dir) => readdirSync(path.join(dir, 'generated-images')).sort()
 test('strict mode keeps the upstream original next to the resized image', async (t) => {
   const { work, exec, settings, generate } = await harness(t, { strict: true, width: 128, height: 128 });
   await settings.execute({}, exec);
-  const result = await generate.execute({ prompt: '一只猫' }, exec);
+  const result = await generate.execute({ prompt: '一只猫', size: '256x256' }, exec);
 
   const files = imagesIn(work);
   assert.equal(files.length, 2, 'the resized image and the original');

@@ -282,14 +282,17 @@ test('A1111 sends the migrated rows: defaults, exposed overrides, reserved field
         { name: 'steps', type: 'number', default: '20', expose: true },
         { name: 'cfg_scale', type: 'number', default: '7' },
         { name: 'width', type: 'number', default: '999' },
+        { name: 'width.value', type: 'number', expose: true },
+        { name: 'override_settings.sd_model_checkpoint', type: 'text', expose: true },
+        { name: 'override_settings.CLIP_stop_at_last_layers', type: 'number', expose: true },
         { name: 'denoising_strength', type: 'number', default: '0.4' }
       ]
     }
   });
   const adapter = resolveAdapter(provider, '');
-  await adapter.execute('generate', provider, {
+  const result = await adapter.execute('generate', provider, {
     model: 'm', prompt: 'a cat', fitted: { width: 512, height: 640, size: '512x640' },
-    params: { steps: 30 }
+    params: { steps: 30, 'width.value': 2048, 'override_settings.sd_model_checkpoint': 'other', 'override_settings.CLIP_stop_at_last_layers': 2 }
   }, new AbortController().signal);
   const body = bodyOf(calls, '/sdapi/v1/txt2img');
   assert.equal(body.steps, 30, 'an exposed row takes the model value');
@@ -298,15 +301,27 @@ test('A1111 sends the migrated rows: defaults, exposed overrides, reserved field
   assert.equal(body.height, 640);
   assert.equal(body.denoising_strength, undefined, 'img2img-only rows stay out of txt2img');
   assert.equal(body.prompt, 'a cat');
-  assert.deepEqual(body.override_settings, { sd_model_checkpoint: 'm' });
+  assert.deepEqual(body.override_settings, { sd_model_checkpoint: 'm', CLIP_stop_at_last_layers: 2 });
+  assert.match(result.note, /width\.value/);
+  assert.match(result.note, /override_settings\.sd_model_checkpoint/);
 
+  const image = { buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png' };
   await adapter.execute('edit', provider, {
     model: 'm', prompt: 'make it blue', fitted: { omit: true, size: 'none' },
-    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png' }]
+    images: [image]
   }, new AbortController().signal);
   const editBody = bodyOf(calls, '/sdapi/v1/img2img');
   assert.equal(editBody.denoising_strength, 0.4, 'img2img gets the row default');
   assert.ok(Array.isArray(editBody.init_images));
+  assert.equal(editBody.width, 1, 'auto uses the reference size');
+  assert.equal(editBody.height, 1);
+
+  await adapter.execute('edit', provider, {
+    model: 'm', prompt: 'make it blue', fitted: { size: '512x640', width: 512, height: 640 }, images: [image]
+  }, new AbortController().signal);
+  const fixedEditBody = bodyOf(calls, '/sdapi/v1/img2img');
+  assert.equal(fixedEditBody.width, 512);
+  assert.equal(fixedEditBody.height, 640);
 });
 
 test('A1111 reports the keys it could not honour', async (t) => {

@@ -83,6 +83,31 @@ test('A1111 leaves the size out of the body while the size is Auto', async (t) =
   assert.equal(body.height, undefined);
 });
 
+test('A1111 sends optional preset Basic auth and preserves legacy Bearer', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const headers = [];
+  globalThis.fetch = async (url, init) => {
+    headers.push(init.headers.Authorization);
+    return jsonResponse(String(url).endsWith('/sd-models') ? [{ title: 'sdxl' }] : { images: [PNG_1PX] });
+  };
+  const preset = localPresetManifest().find(({ id }) => id === 'a1111');
+  assert.equal(preset.optionalKey, true);
+  assert.deepEqual(preset.auth, { mode: 'basic' });
+  const adapter = resolveAdapter(preset, 'sdxl');
+  const basic = { ...preset, key: 'fixture:sample-password' };
+  const legacy = { ...basic, auth: undefined, key: 'legacy-gateway-token' };
+  const unauthenticated = { ...preset, key: '' };
+  for (const provider of [basic, legacy, unauthenticated]) {
+    assert.deepEqual(await adapter.listModels(provider), ['sdxl']);
+    await adapter.execute('generate', provider, { model: 'sdxl', prompt: 'fixture' });
+  }
+  const basicHeader = 'Basic ' + Buffer.from(basic.key).toString('base64');
+  assert.deepEqual(headers, [
+    basicHeader, basicHeader, 'Bearer legacy-gateway-token', 'Bearer legacy-gateway-token', undefined, undefined
+  ]);
+});
+
 test('ComfyUI adapter lists CheckpointLoaderSimple checkpoints', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, adapterManifest, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, mapQuality, filterImageModels } from '../lib/adapters.js';
+import { resolveAdapter, adapterManifest, adapterSupportsKind, providerPresetManifest, prepareGenerate, prepareEdit, fitSize, qualityOptionsFor, qualityForAdapter, mapQuality, filterImageModels } from '../lib/adapters.js';
 import { callImageApi } from '../lib/image-execution.js';
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -406,4 +406,107 @@ test('Ideogram sends an Api-Key multipart generation request', async (t) => {
   assert.equal(captured.init.body.get('prompt'), 'a typographic poster');
   assert.equal(captured.init.body.get('rendering_speed'), 'QUALITY');
   assert.equal(captured.init.body.get('aspect_ratio'), '1x1');
+});
+
+test('Ideogram 4.5 and 4.6 generate using the native JSON size and quality fields', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return jsonResponse({ data: [{ b64_json: PNG_1PX }] });
+  };
+  const model45 = 'ideogram-4-5';
+  const model46 = 'ideogram-4-6';
+  const provider = {
+    baseUrl: 'https://api.ideogram.ai', adapter: 'ideogram', key: 'test-key',
+    modelOptions: {
+      [model45]: {
+        quality: { field: 'rendering_speed', options: ['turbo', 'default', 'quality'], default: 'default' },
+        fields: { negative: { path: 'negative_prompt' }, image: null }
+      }
+    }
+  };
+  const preset = providerPresetManifest().find(({ id }) => id === 'ideogram');
+  assert.ok(preset.models.includes(model45) && preset.models.includes(model46));
+  const adapter45 = resolveAdapter(provider, model45);
+  const adapter46 = resolveAdapter(provider, model46);
+  assert.deepEqual(await adapter45.listModels(), preset.models);
+  assert.deepEqual(qualityOptionsFor(provider, model45, adapter45).options.map(({ value }) => value), ['off', 'low', 'medium', 'high']);
+  assert.equal(qualityForAdapter(provider, model45, 'turbo', adapter45), 'low');
+  assert.equal(qualityOptionsFor(provider, model46, adapter46).aliases.quality, 'high');
+  const prompt = JSON.stringify({
+    high_level_description: 'A typographic poster',
+    compositional_deconstruction: { background: 'a blue wall', elements: [] }
+  });
+  await callImageApi('generate', adapter45, provider, {
+    model: model45, prompt, negativePrompt: 'logos', quality: 'turbo',
+    fitted: fitSize(provider, '1000x1000', model45, adapter45)
+  });
+  await callImageApi('generate', adapter46, provider, {
+    model: model46, prompt: 'a poster', quality: 'off',
+    fitted: fitSize(provider, '8192x256', model46, adapter46)
+  });
+  assert.deepEqual(requests.map(({ url }) => url), [
+    'https://api.ideogram.ai/v2/image/generate/ideogram-4-5',
+    'https://api.ideogram.ai/v2/image/generate/ideogram-4-6'
+  ]);
+  for (const { init } of requests) {
+    assert.equal(init.headers['Content-Type'], 'application/json');
+    assert.equal(init.headers['Api-Key'], 'test-key');
+  }
+  const [body45, body46] = requests.map(({ init }) => JSON.parse(init.body));
+  assert.deepEqual(body45, {
+    prompt: JSON.stringify({
+      high_level_description: 'A typographic poster Avoid: logos',
+      compositional_deconstruction: { background: 'a blue wall', elements: [] }
+    }),
+    num_images: 1, size: '1024x1024', quality: 'low'
+  });
+  assert.deepEqual(body46, { prompt: 'a poster', num_images: 1, size: '1536x256' });
+});
+
+test('Ideogram 4.5 and 4.6 edit with ordered multipart images and validate limits before sending', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url) === 'https://cdn.test/result.png') {
+      return new Response(Buffer.from(PNG_1PX, 'base64'), { headers: { 'Content-Type': 'image/png' } });
+    }
+    requests.push({ url: String(url), init });
+    return jsonResponse({ data: [{ url: 'https://cdn.test/result.png' }] });
+  };
+  const provider = { baseUrl: 'https://api.ideogram.ai', adapter: 'ideogram', key: 'test-key' };
+  const editImages = ['source.png', 'reference.png'].map((filename) => ({
+    filename, contentType: 'image/png', buffer: Buffer.from(PNG_1PX, 'base64')
+  }));
+  for (const model of ['ideogram-4-5', 'ideogram-4-6']) {
+    const adapter = resolveAdapter(provider, model);
+    assert.equal(adapterSupportsKind(adapter, 'edit'), true);
+    const input = {
+      model, prompt: 'change the color', negativePrompt: 'logos', quality: 'very_low', images: editImages,
+      fitted: fitSize(provider, '768x1024', model, adapter)
+    };
+    assert.ok((await callImageApi('edit', adapter, provider, input)).bytes.length);
+    const { url, init } = requests.at(-1);
+    assert.ok(url.endsWith('/v2/image/generate/' + model));
+    assert.equal(init.headers['Content-Type'], undefined);
+    assert.equal(init.body.get('prompt'), 'change the color\n\nAvoid: logos');
+    assert.equal(init.body.get('quality'), 'very_low');
+    assert.equal(init.body.get('size'), '768x1024');
+    assert.deepEqual(init.body.getAll('images').map(({ name }) => name), ['source.png', 'reference.png']);
+    await assert.rejects(callImageApi('edit', adapter, provider, { ...input, images: Array(6).fill(editImages[0]) }), /最多接受 5 张/);
+    await assert.rejects(callImageApi('edit', adapter, provider, { ...input, images: [] }), /至少一张/);
+    await assert.rejects(callImageApi('edit', adapter, provider, {
+      ...input, images: [{ ...editImages[0], contentType: 'image/gif' }]
+    }), /只支持/);
+  }
+  const model = 'ideogram-4-6';
+  const adapter = resolveAdapter(provider, model);
+  await assert.rejects(callImageApi('generate', adapter, provider, {
+    model, prompt: 'fixture', quality: 'very_low', fitted: fitSize(provider, '4096x4096', model, adapter)
+  }), /Very Low.*最高支持 2K/);
+  assert.equal(adapterSupportsKind(resolveAdapter(provider, 'ideogram-4'), 'edit'), false);
+  assert.equal(requests.length, 2);
 });

@@ -260,13 +260,13 @@ test('settingsPayload says the size is fixed so the model leaves it alone', () =
   assert.match(payload.hint, /768x1024/);
 });
 
-test('the prompt section tells the model to tune exposed params proactively', () => {
+test('the prompt section points at exposed params without repeating their names', () => {
   const section = promptSectionText({
     model: 'sd15.safetensors', adapter: { id: 'a1111' }, promptOptimization: true,
     workflowParams: [{ name: 'steps', type: 'INT' }, { name: 'cfg_scale', type: 'FLOAT' }]
   });
-  assert.match(section, /可调参数：steps、cfg_scale/);
-  assert.match(section, /主动调整/);
+  assert.match(section, /按需调整设置结果里的可调参数/);
+  assert.doesNotMatch(section, /steps|cfg_scale/);
   assert.match(section, /参数调优/, 'point the model at the skill section');
   assert.doesNotMatch(section, /karras|denoising_strength/, 'the details live in the skill, not every request');
 });

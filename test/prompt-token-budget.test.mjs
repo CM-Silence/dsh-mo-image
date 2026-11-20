@@ -51,7 +51,7 @@ test('the prompt modes keep the shared delivery and ownership rules', () => {
     assert.match(text, /除非用户明确要求看图/);
     assert.match(text, /不要自行切换/);
     assert.match(text, /可以问用户/);
-    assert.match(text, /质量、提供商、模型|提供商不能换/);
+    assert.match(text, /提供商和模型同样由选择器控制|提供商不能换/);
     assert.doesNotMatch(text, /必须传 model/);
   }
 });
@@ -62,7 +62,7 @@ test('the optimization-off section keeps the raw-wording rules and no formula', 
   assert.match(OFF, /不要扩写/);
   assert.match(OFF, /不要自动补 negative_prompt/);
   assert.match(OFF, /尺寸由你决定/);
-  assert.match(OFF, /加载 skill/);
+  assert.match(OFF, /缺少所需指引时才加载相应 skill/);
   assert.match(OFF, /不要套用.*公式/);
   assert.doesNotMatch(OFF, /生成公式/);
   assert.doesNotMatch(OFF, /主体 \+ 动作 \+ 环境/);
@@ -74,7 +74,7 @@ test('the model profile keeps its label, formula, edit rule and negative-prompt 
   assert.match(ON, /主体 \+ 动作 \+ 环境/);
   assert.match(ON, /无 negative prompt/);
   assert.match(promptSectionText({ model: 'qwen-image' }), /支持 negative prompt/);
-  assert.match(AUTO_ON, /可加载 skill/);
+  assert.match(AUTO_ON, /缺少所需指引时才加载相应 skill/);
 });
 
 test('the config-state marker stays a single line the host interpolates', () => {

@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Worker } from 'node:worker_threads';
 
 import { encodePng } from '../lib/png-scale.js';
 import { imageSizeOf } from '../lib/adapter-kit.js';
 import { resizeInWorker, closeImageWorker } from '../lib/image-worker.js';
 
-/* D2：大图缩放必须在 Worker 里完成；失败时返回 null，让调用方同步兜底。 */
+/* 大图缩放在 Worker 中完成；失败时调用方可以保留原图。 */
 
 function png(width, height) {
   return encodePng(new Uint8Array(width * height * 4).fill(120), width, height);
@@ -39,11 +40,58 @@ test('unsupported input and unsafe targets return null instead of throwing', asy
   assert.equal(await resizeInWorker(png(10, 10), 100, 100, 'cover', { timeoutMs: 0 }), null, 'timeout 0 is invalid');
 });
 
-test('a timeout resolves to null and does not poison later jobs', async () => {
-  const timedOut = await resizeInWorker(png(800, 600), 200, 150, undefined, { timeoutMs: 1 });
-  assert.equal(timedOut, null, 'a 1ms budget expires before the worker can finish');
+test('an active timeout terminates its worker before dispatching the next job', async (t) => {
+  const postMessage = Worker.prototype.postMessage;
+  const terminate = t.mock.method(Worker.prototype, 'terminate');
+  let firstWorker;
+  let firstExited = false;
+  let nextWorker;
+  t.mock.method(Worker.prototype, 'postMessage', function (...args) {
+    if (!firstWorker) {
+      firstWorker = this;
+      this.prependOnceListener('exit', () => { firstExited = true; });
+      return;
+    }
+    nextWorker = this;
+    assert.equal(firstExited, true, 'the previous thread has stopped');
+    return postMessage.apply(this, args);
+  });
 
-  const next = await resizeInWorker(png(100, 100), 50, 50);
-  assert.ok(next, 'the worker is still usable after a timed-out request');
-  assert.deepEqual(imageSizeOf(next.bytes), { width: 50, height: 50 });
+  const source = png(100, 100);
+  const expired = resizeInWorker(source, 50, 50, undefined, { timeoutMs: 10 });
+  const queued = resizeInWorker(source, 40, 30);
+  assert.equal(await expired, null);
+  const next = await queued;
+  assert.ok(next);
+  assert.equal(terminate.mock.callCount(), 1);
+  assert.equal(firstExited, true);
+  assert.notEqual(nextWorker, firstWorker);
+  assert.deepEqual(imageSizeOf(next.bytes), { width: 40, height: 30 });
+});
+
+test('a queued timeout leaves the active job running and transfers no extra image', async (t) => {
+  const postMessage = Worker.prototype.postMessage;
+  const terminate = t.mock.method(Worker.prototype, 'terminate');
+  let submit;
+  const posted = t.mock.method(Worker.prototype, 'postMessage', function (...args) {
+    submit = () => postMessage.apply(this, args);
+  });
+  const source = png(100, 100);
+  const active = resizeInWorker(source, 50, 50);
+  const queued = resizeInWorker(source, 40, 30, undefined, { timeoutMs: 1 });
+  assert.equal(await queued, null);
+  assert.equal(posted.mock.callCount(), 1);
+  assert.equal(terminate.mock.callCount(), 0);
+  submit();
+  assert.deepEqual(imageSizeOf((await active).bytes), { width: 50, height: 50 });
+});
+
+test('close settles active and queued jobs and allows a fresh worker to start', async () => {
+  const source = png(100, 100);
+  const active = resizeInWorker(source, 50, 50);
+  const queued = resizeInWorker(source, 40, 30);
+  closeImageWorker();
+  assert.deepEqual(await Promise.all([active, queued]), [null, null]);
+  const next = await resizeInWorker(source, 20, 30);
+  assert.deepEqual(imageSizeOf(next.bytes), { width: 20, height: 30 });
 });

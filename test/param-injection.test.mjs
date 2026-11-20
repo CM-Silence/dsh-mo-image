@@ -22,7 +22,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveAdapter, fitSize, prepareGenerate, prepareEdit } from '../lib/adapters.js';
+import { resolveAdapter, fitSize, prepareGenerate, prepareEdit, qualityOptionsFor } from '../lib/adapters.js';
 
 /** 一条通用的 OpenAI 兼容网关：四个内置 role 都有 path 模板，走 prepare*（通用路径）。 */
 const MODEL = 'flux-1-schnell';
@@ -125,4 +125,58 @@ test('expose:true 的行被调用方传值覆盖；没暴露的行只认默认�
   ], { params: { seed: 7, steps: 50 } });
   assert.equal(body.seed, 7, '暴露行应该用 input.params 里的值');
   assert.equal(body.steps, 20, '没暴露的行不许被 input.params 改掉');
+});
+
+test('mapped size and quality stay reserved when the selector omits them', () => {
+  const provider = providerOf([
+    row('settings.dimensions', 'text', '128x128', { expose: true }),
+    row('settings.detail', 'text', '', { expose: true }),
+    row('settings.seed', 'number', '42', { expose: true })
+  ]);
+  const options = provider.modelOptions[MODEL];
+  options.size = { mode: 'wh-string', field: 'settings.dimensions' };
+  options.fields = { quality: { path: 'settings.detail' } };
+  const adapter = resolveAdapter(provider, MODEL);
+  const input = inputOf({ fitted: { size: 'none', omit: true }, quality: 'off', params: { 'settings.seed': 52 } });
+  assert.deepEqual(JSON.parse(prepareGenerate(adapter, provider, input, new Set()).body).settings, { seed: 52 });
+  for (const name of ['settings.dimensions', 'settings.detail']) {
+    assert.throws(() => prepareGenerate(adapter, provider, { ...input, params: { [name]: 'other' } }, new Set()), /已由模型设置或协议管理/);
+  }
+});
+
+test('the resolved aspect takes precedence over nominal pixel proportions', () => {
+  const provider = providerOf([]);
+  provider.modelOptions[MODEL].size = { mode: 'aspect', field: 'aspect_ratio' };
+  const adapter = resolveAdapter(provider, MODEL);
+  const input = inputOf({ fitted: { size: '1024x1024', width: 1024, height: 1024, aspect: '3:4' } });
+  assert.equal(JSON.parse(prepareGenerate(adapter, provider, input, new Set()).body).aspect_ratio, '3:4');
+});
+
+test('an explicit custom quality mapping participates in the quality selector and request body', () => {
+  const provider = {
+    ...providerOf([]), adapter: 'custom',
+    operations: { generate: {
+      path: 'render', input: 'explicit', output: 'binary', fields: {
+        prompt: { path: 'prompt' }, quality: { path: 'settings.detail' }
+      }
+    } }
+  };
+  const adapter = resolveAdapter(provider, MODEL);
+  assert.equal(qualityOptionsFor(provider, MODEL, adapter), null, 'the mapping alone cannot infer level names');
+  provider.modelOptions[MODEL].quality = { options: ['draft', 'refined'], map: { refined: 'REFINED' } };
+  assert.deepEqual(qualityOptionsFor(provider, MODEL, adapter).options.map(({ value }) => value), ['off', 'draft', 'refined']);
+  const picked = inputOf({ quality: 'refined' });
+  assert.deepEqual(JSON.parse(prepareGenerate(adapter, provider, picked, new Set()).body).settings, { detail: 'REFINED' });
+});
+
+test('Ideogram omits its controlled quality and size fields when Off and Auto', async () => {
+  const model = 'ideogram-v3';
+  const provider = {
+    adapter: 'ideogram', baseUrl: 'https://api.ideogram.ai', key: 'test-key',
+    modelOptions: { [model]: { params: ['rendering_speed', 'aspect_ratio'].map((name) => row(name, 'text', '', { expose: true })) } }
+  };
+  const adapter = resolveAdapter(provider, model);
+  const input = { model, prompt: 'a cat', fitted: { omit: true, size: 'none' }, quality: 'off' };
+  await assert.rejects(adapter.execute('generate', provider, { ...input, params: { rendering_speed: 'QUALITY' } }), /rendering_speed.*已由模型设置或协议管理/);
+  await assert.rejects(adapter.execute('generate', provider, { ...input, params: { aspect_ratio: '3x4' } }), /aspect_ratio.*已由模型设置或协议管理/);
 });

@@ -7,8 +7,8 @@
  *
  *   - google-gemini：contents[0].parts[]（参考图 inlineData 对象 + 文本追加）、
  *     generationConfig.imageConfig（比例 / 档位）、自动尺寸时不发 imageConfig；
- *   - ideogram：按模型分四条路——ideogram-4 是 JSON（resolution，没有负面词）、
- *     4-5 只收 size、4-transparent 多一个 output_resolution、其余走 multipart
+ *   - ideogram：4 是 JSON（resolution，没有负面词），4.5 和 4.6 文生图使用 JSON（size、quality），
+ *     4-transparent 多一个 output_resolution，3 与透明模型走 multipart
  *     （aspect_ratio 用字母 x，张数 num_images，质量渲染成 rendering_speed）。
  *
  * 下面这一节（「改造前」）要求**改造前后逐条一样**：它是这次搬迁的判据，不要在实现改完之后
@@ -248,7 +248,7 @@ test('ideogram-4-transparent：比例 + 透明模型多一个 output_resolution'
   assert.equal(form.get('size'), null, 'transparent 和 3 一样只发比例');
 });
 
-test('ideogram-4-5 只收 size：没有 aspect_ratio，也没有 output_resolution', async (t) => {
+test('ideogram-4-5 文生图使用 JSON size，未选择质量时省略 quality', async (t) => {
   const calls = capture(t, IDEOGRAM_RESPONSE);
   const provider = ideogramProvider();
   const adapter = resolveAdapter(provider, 'ideogram-4-5');
@@ -259,10 +259,7 @@ test('ideogram-4-5 只收 size：没有 aspect_ratio，也没有 output_resoluti
     fitted: { width: 1024, height: 1024, size: '1024x1024', tier: '2K' }
   }, new AbortController().signal);
 
-  const form = calls[0].init.body;
-  assert.equal(form.get('size'), '1024x1024');
-  assert.equal(form.get('aspect_ratio'), null);
-  assert.equal(form.get('output_resolution'), null);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { prompt: 'a poster', num_images: 1, size: '1024x1024' });
 });
 
 test('ideogram 自动尺寸：比例与 size 都不发，提示词和质量照发', async (t) => {
@@ -301,7 +298,7 @@ test('ideogram 质量档是 off：rendering_speed 整个字段都不出现', asy
   assert.equal(calls[0].init.body.get('prompt'), 'a poster', '提示词照发');
 });
 
-test('ideogram 的编辑方向仍然直接报错（协议没有原生编辑）', async (t) => {
+test('ideogram-3 编辑直接报错', async (t) => {
   const calls = capture(t, IDEOGRAM_RESPONSE);
   const provider = ideogramProvider();
 

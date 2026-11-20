@@ -101,9 +101,9 @@ test('both prompt modes describe who owns the size', () => {
   const on = promptSectionText({ model: 'gpt-image-2.5-flare' });
   const off = promptSectionText({ model: 'gpt-image-2.5-flare', promptOptimization: false });
   for (const text of [on, off]) {
-    // 默认是「自动尺寸」：模型可以传 size，质量/提供商/模型仍由选择器控制。
+    // 默认是「自动尺寸」：模型可以传 size，提供商和模型仍由选择器控制。
     assert.match(text, /尺寸由你决定/);
-    assert.match(text, /质量、提供商、模型/);
+    assert.match(text, /提供商和模型同样由选择器控制/);
   }
 });
 

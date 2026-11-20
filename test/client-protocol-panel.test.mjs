@@ -87,7 +87,7 @@ const PROVIDER_PRESET_FIXTURE = [{
 /** 宿主下发的本地部署器清单（LOCAL_PRESETS 的完整 id 集，形状与真清单一致）。 */
 const LOCAL_DEPLOYER_FIXTURE = [
   { id: 'sd-server', name: 'sd-server', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images' },
-  { id: 'a1111', name: 'A1111', baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111' },
+  { id: 'a1111', name: 'A1111', baseUrl: 'http://127.0.0.1:7860', adapter: 'a1111', optionalKey: true, auth: { mode: 'basic' } },
   { id: 'comfyui', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui' },
   { id: 'swarmui', name: 'SwarmUI', baseUrl: 'http://127.0.0.1:7801', adapter: 'swarmui' },
   { id: 'localai', name: 'LocalAI', baseUrl: 'http://127.0.0.1:8080/v1', adapter: 'openai-images' },
@@ -374,9 +374,7 @@ test('协议确定时锁死这三项：鉴权方式、文生图返回格式、�
   assert.ok(protocolPanelControls(relay)['图生图端点'], '图生图端点跟着协议照常渲染');
 });
 
-test('协议未知或自定义时不锁这三项：没有「跟随协议」一项，默认显示协议默认值', () => {
-  // 这两种情况协议说不出形态（自定义协议要用户自己填，adapter 为空是还没认出来），
-  // 所以三项照常给；但「跟随协议」不再是一个选项——没设过就显示协议默认值，落盘仍然不写。
+test('协议未知或自定义时可选择返回预设、手写 JSON 或跟随协议', () => {
   for (const adapter of ['custom', '']) {
     const client = loadClient();
     client.setCatalog();
@@ -396,10 +394,9 @@ test('协议未知或自定义时不锁这三项：没有「跟随协议」一�
       assert.ok(select, (adapter || '(自动)') + '：' + label + ' 要渲染');
       assert.deepEqual(
         collect(select, (item) => item.type === 'option').map((option) => option.props.value),
-        ['openai', 'binary', 'task-json'],
-        '「跟随协议」（auto）不再是可选项'
+        ['inherit', 'openai', 'binary', 'task-json', 'custom-json']
       );
-      assert.equal(select.props.value, 'openai', '没设过就显示第一项');
+      assert.equal(select.props.value, 'inherit', '默认响应由协议决定');
     }
   }
 });
@@ -1098,7 +1095,7 @@ test('新建提供商的三个 tab 按「第三方 → 本地 → 自定义」�
   assert.ok(providerSelect, '默认选中的仍是「第三方模型提供商」（catalog）');
 });
 
-test('新增本地部署：与云厂商预设同一规则，鉴权 / 返回格式都不渲染', () => {
+test('新增 sd-server：与云厂商预设同一规则，鉴权 / 返回格式都不渲染', () => {
   const client = loadClient({ preserveFormState: true, localPresets: LOCAL_DEPLOYER_FIXTURE });
   client.setCatalog();
   const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
@@ -1124,6 +1121,40 @@ test('新增本地部署：与云厂商预设同一规则，鉴权 / 返回格�
   const url = collect(node, (item) => item.type === 'input' && item.props.value === 'http://127.0.0.1:8080/v1')[0];
   assert.ok(url, 'API 地址在');
   assert.ok(collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0], '密钥还在');
+});
+
+test('A1111 预设新建使用可选 HTTP Basic，旧配置保留 Bearer', async () => {
+  const provider = { id: '', name: '', baseUrl: '', adapter: '', presetId: '', models: [], names: {} };
+  const client = loadClient({ preserveFormState: true, localPresets: LOCAL_DEPLOYER_FIXTURE });
+  client.setCatalog();
+  let saved;
+  const render = () => client.render(client.h(client.form(), {
+    provider, isNew: true, onSave(next) { saved = next; }, onClose() {}, t
+  }));
+  const localTab = collect(render(), (item) => item.type === 'button' && text(item).join('') === '本地模型')[0];
+  localTab.props.onClick();
+  const deployer = collect(render(), (item) => item.type === 'select'
+    && collect(item, (option) => option.type === 'option' && option.props.value === 'a1111').length)[0];
+  deployer.props.onChange({ target: { value: 'a1111' } });
+  const tree = render();
+  const auth = protocolPanelControls(tree)['鉴权方式'];
+  assert.equal(auth.props.value, 'basic');
+  assert.ok(insideOf(detailsOf(tree, '自定义设置'), auth));
+  const credentials = collect(tree, (item) => item.type === 'input' && item.props.type === 'password')[0];
+  assert.equal(credentials.props.placeholder, 'username:password');
+  credentials.props.onChange({ target: { value: 'fixture:user-password' } });
+  const save = collect(render(), (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop();
+  await save.props.onClick();
+  assert.equal(saved.auth.mode, 'basic');
+  assert.equal(saved.key, 'fixture:user-password');
+  assert.equal(saved.optionalKey, true);
+
+  const legacyClient = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
+  legacyClient.setCatalog();
+  const old = { ...LOCAL_DEPLOYER_FIXTURE[1], id: 'p-old', presetId: 'a1111', auth: undefined, models: ['sdxl'] };
+  assert.equal(protocolPanelControls(renderForm(legacyClient, old))['鉴权方式'].props.value, 'bearer');
+  const edit = renderForm(legacyClient, { ...old, auth: { mode: 'basic' } });
+  assert.equal(protocolPanelControls(edit)['鉴权方式'].props.value, 'basic');
 });
 
 test('本地模型的字段顺序：部署器 → 显示名称 → 密钥 →（自定义设置）地址 → 模型目录', () => {
@@ -1267,7 +1298,7 @@ test('这次只动编辑页：新增的三条入口布局保持原样（第三�
   assert.ok(customAt(customUrl) < customAt(customKey), '自定义 API：API 地址 → API 密钥');
 });
 
-test('本地预设编辑：与云厂商预设同一规则，整块协议设置都不渲染（含鉴权）', () => {
+test('本地预设编辑隐藏协议和返回格式，只有 A1111 可编辑鉴权', () => {
   for (const local of LOCAL_DEPLOYER_FIXTURE) {
     const client = loadClient({ localPresets: LOCAL_DEPLOYER_FIXTURE });
     client.setCatalog();
@@ -1278,7 +1309,12 @@ test('本地预设编辑：与云厂商预设同一规则，整块协议设置�
     });
     assert.equal(detailsOf(node, '协议设置'), undefined, local.id + '：不渲染「协议设置」');
     for (const [label, control] of Object.entries(protocolPanelControls(node))) {
-      assert.equal(control, undefined, local.id + '：' + label + ' 不该出现');
+      if (local.id === 'a1111' && label === '鉴权方式') {
+        assert.equal(control.props.value, 'custom', 'A1111 保留已配置的鉴权方式');
+        assert.ok(insideOf(detailsOf(node, '自定义设置'), control));
+      } else {
+        assert.equal(control, undefined, local.id + '：' + label + ' 不该出现');
+      }
     }
     // 主字段与「自定义设置」照旧。
     const url = collect(node, (item) => item.type === 'input' && item.props.value === local.baseUrl)[0];
@@ -1562,7 +1598,7 @@ test('这次只动编辑页：新建「自定义模型 API」仍全部平铺，�
       label: '内置协议',
       provider: {
         id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images',
-        models: ['m'], names: {}
+        presetId: '', models: ['m'], names: {}
       }
     },
     {
@@ -1605,15 +1641,15 @@ test('这次只动编辑页：新建「自定义模型 API」仍全部平铺，�
 });
 
 test('新建「自定义模型 API」：协议这一组全部平铺，没有折叠区', () => {
-  // 协议确定 vs 自定义协议：前者只给「协议 + 图生图端点」，后者给「协议 + 鉴权 + 两个返回格式」。
+  // 使用内置请求协议时，仍可覆盖该自定义提供商的响应格式。
   const cases = [
     {
       label: '内置协议',
       provider: { id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: [], names: {} },
       url: 'https://g.example/v1',
       name: 'Relay',
-      shown: ['API 协议', '图生图端点'],
-      hidden: ['鉴权方式', '文生图返回格式', '图生图返回格式']
+      shown: ['API 协议', '图生图端点', '文生图返回格式', '图生图返回格式'],
+      hidden: ['鉴权方式']
     },
     {
       label: '自定义协议',
@@ -1884,7 +1920,7 @@ test('自定义操作预览使用实际端点，返回预设可直接写入草�
   assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/render/);
   assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/catalog/);
   assert.notEqual(fetchButton(tree).props.disabled, true);
-  assert.equal(select(tree).props.value, 'openai', '没设过就显示第一项');
+  assert.equal(select(tree).props.value, 'inherit', '默认使用协议的响应格式');
   select(tree).props.onChange({ target: { value: 'binary' } });
   tree = render();
   assert.equal(select(tree).props.value, 'binary');
@@ -1895,7 +1931,7 @@ test('自定义操作预览使用实际端点，返回预设可直接写入草�
     { path: 'v1/render', method: 'POST', output: 'binary' }, '只改 output，端点与方法照旧');
 });
 
-test('自定义协议的返回格式面板只有两个预设下拉：说明文字与 JSON 输入框都已删除', () => {
+test('自定义协议的返回格式默认只显示文生图和图生图下拉', () => {
   const client = loadClient();
   client.setCatalog();
   const provider = {
@@ -1922,16 +1958,16 @@ test('自定义协议的返回格式面板只有两个预设下拉：说明文�
   assert.equal(collect(selectRow, (item) => item.type === 'select').length, 2, '两个下拉在同一个父容器里');
   assert.equal(selectRow.props.style.gridTemplateColumns, 'minmax(0, 1fr) minmax(0, 1fr)', '一行两列，各占半宽');
 
-  // 面板里只剩两个下拉：说明文字与 JSON 都不在了（返回格式只有预设，没有「自定义」这一档）。
+  // 用户选择自定义 JSON 前，不占用额外版面。
   assert.equal(collect(panel, (item) => item.type === 'p').length, 0, '没有说明文字');
   assert.equal(collect(panel, (item) => item.type === 'textarea').length, 0, '没有 JSON 输入框');
   assert.equal(collect(node, (item) => item.props
     && item.props['data-mo-image-operations'] !== undefined).length, 0, '旧的 operations 面板标记也不在了');
 });
 
-test('整个表单里没有返回格式 JSON 编辑器：任何协议、任何模型都没有', () => {
+test('没有选择自定义描述符时，返回格式 JSON 编辑器不显示', () => {
   const jsonEditors = (tree) => collect(tree, (item) => item.props
-    && item.props['data-mo-image-operations-json'] !== undefined);
+    && item.props['data-mo-image-output-json'] !== undefined);
   const cases = [
     { label: '自定义协议', provider: { id: 'p1', name: 'Gateway', baseUrl: '', adapter: 'custom', customEndpoints: { generate: 'https://g.example/v1/render', edit: '', models: '' }, models: ['m'], names: {} } },
     { label: 'openai-images', provider: { id: 'p1', name: 'Relay', baseUrl: 'https://g.example/v1', adapter: 'openai-images', models: ['gpt-image-1'], names: {} } },
@@ -2005,7 +2041,7 @@ test('内置协议的返回格式整块不渲染：协议定死了，手写 JSON
   '协议设置的标记也不在');
 });
 
-test('旧配置里手写的 output 显示为只读「自定义（来自旧配置）」，保存时原样保留', async () => {
+test('旧配置里手写的 output 可回显和编辑，未修改时原样保存', async () => {
   const client = loadClient();
   client.setCatalog();
   const legacy = { kind: 'json', pick: [{ path: 'data.0.url', as: 'url' }] };
@@ -2023,19 +2059,43 @@ test('旧配置里手写的 output 显示为只读「自定义（来自旧配置
     t: t
   }));
   const select = collect(tree, (item) => item.props['data-mo-image-output-preset'] === 'generate')[0];
-  assert.equal(select.props.value, 'custom', '匹配不到预设的旧值要显示成自定义');
+  assert.equal(select.props.value, 'custom-json');
   const option = collect(select, (item) => item.type === 'option'
-    && item.props && item.props.value === 'custom')[0];
+    && item.props && item.props.value === 'custom-json')[0];
   assert.ok(option, '自定义项要出现在下拉里');
-  assert.equal(option.props.disabled, true, '自定义项是只读的');
-  assert.equal(text(option).join(''), '自定义（来自旧配置）');
-  assert.equal(collect(tree, (item) => item.props['data-mo-image-output-legacy-hint'] !== undefined).length, 1,
-    '给一句简短说明');
+  const editor = collect(tree, (item) => item.props['data-mo-image-output-json'] === 'generate')[0];
+  assert.ok(editor);
+  assert.equal(editor.props.disabled, false);
+  assert.deepEqual(JSON.parse(editor.props.value), legacy);
   const save = collect(tree, (item) => item.type === 'button'
     && text(item).join('').includes('form.save')).pop();
   assert.ok(save, '保存按钮要存在');
   await save.props.onClick();
   assert.deepEqual(saved.operations.generate.output, legacy, '用户重新选预设之前，旧值不能被丢掉');
+});
+
+test('自定义 JSON 保存前校验语法，更新描述符时保留操作端点', async () => {
+  const client = loadClient({ customMode: true, preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom',
+    operations: { version: 1, generate: { path: '/render', method: 'POST' } }, models: []
+  };
+  let saved = null;
+  const render = () => client.render(client.h(client.form(), {
+    provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t
+  }));
+  const control = (marker) => collect(render(), (item) => item.props[marker] === 'generate')[0];
+  const save = () => collect(render(), (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop().props.onClick();
+  control('data-mo-image-output-preset').props.onChange({ target: { value: 'custom-json' } });
+  control('data-mo-image-output-json').props.onChange({ target: { value: '{' } });
+  await save();
+  assert.equal(saved, null);
+  assert.match(text(render()).join(' '), /form.outputPreset.invalidJson/);
+  const output = { kind: 'json', pick: [{ path: 'result.images.0', as: 'url' }] };
+  control('data-mo-image-output-json').props.onChange({ target: { value: JSON.stringify(output) } });
+  await save();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.operations.generate)), { path: '/render', method: 'POST', output });
 });
 
 test('旧配置的自定义值可以被预设覆盖', () => {
@@ -2050,7 +2110,7 @@ test('旧配置的自定义值可以被预设覆盖', () => {
   const render = () => renderForm(client, provider);
   let tree = render();
   const select = () => collect(tree, (item) => item.props['data-mo-image-output-preset'] === 'generate')[0];
-  assert.equal(select().props.value, 'custom');
+  assert.equal(select().props.value, 'custom-json');
   select().props.onChange({ target: { value: 'binary' } });
   tree = render();
   assert.equal(select().props.value, 'binary', '重新选预设就覆盖旧的自定义值');
@@ -2254,7 +2314,7 @@ test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保�
   assert.deepEqual(entry.params, [{ name: 'seed', type: 'number', default: '1', description: '' }], '参数表原样带回');
 });
 
-test('预设来源的 ComfyUI：输入参数默认不锁，但没有「输出设置」入口', () => {
+test('预设来源的 ComfyUI 输入默认可改，模型返回覆盖默认锁定', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -2273,11 +2333,17 @@ test('预设来源的 ComfyUI：输入参数默认不锁，但没有「输出设
   const textarea = collect(input, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
   assert.ok(textarea.length, '工作流编辑器还在');
   assert.notEqual(textarea[0].props.disabled, true, '工作流编辑器可用');
-  // 输出设置没有入口：预设来源的返回格式是协议定的，而这三条协议的读法是手写描述符
-  // （ComfyUI 两跳 /history → /view），预设表里那几项一个都表达不了——给下拉只会把读法换坏。
-  assert.equal(modelSection(row, 'data-mo-image-output-settings'), null, '预设来源没有输出设置');
-  assert.equal(collect(row, (item) => item.props && item.props['data-mo-image-output-presets'] !== undefined).length,
-    0, '连返回格式下拉都不渲染');
+  const output = modelSection(row, 'data-mo-image-output-settings');
+  assert.ok(output);
+  assert.equal(output.props.open, undefined);
+  const lock = collect(output, (item) => item.props['data-lock-key'] === 'operations')[0];
+  assert.equal(lock.props['aria-pressed'], 'true');
+  const selects = collect(output, (item) => item.props['data-mo-image-output-preset']);
+  assert.deepEqual(selects.map((item) => item.props.value), ['inherit', 'inherit']);
+  assert.ok(selects.every((item) => item.props.disabled === true));
+  lock.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  const unlocked = modelSection(renderForm(client, provider), 'data-mo-image-output-settings');
+  assert.ok(collect(unlocked, (item) => item.props['data-mo-image-output-preset']).every((item) => !item.props.disabled));
 });
 
 test('自配的 ComfyUI 才给「输出设置」：不锁，选完就回显', () => {
