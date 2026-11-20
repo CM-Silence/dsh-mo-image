@@ -768,8 +768,8 @@ test('编辑页的预设来源：「自定义设置」折叠区里最后一块�
   assert.ok(box, '「切换为自定义API」在');
   const button = convertStepOf(box, 'idle');
   assert.equal(text(button).join(''), 'form.convertToCustom', '按钮文案走 i18n');
-  // 无边框按钮：和「取消」同一套 linkButton，不是那种带底色的按钮。
-  assert.ok(String(button.props.className || '').includes('linkButton'), '用 linkButton（无边框）');
+  // 与「添加模型」同一个按钮样式（左边一个图标），不是普通的小字链接。
+  assert.ok(String(button.props.className || '').includes('addModelButton'), '用「添加模型」那套样式');
   assert.match(text(box).join(' '), /form.convertToCustomHint/, '旁边写着它会做什么');
   // 位置：在「自定义设置」折叠区里面，而且是它最后一块——收起时整块都看不见。
   const fold = detailsOf(node, '自定义设置');
