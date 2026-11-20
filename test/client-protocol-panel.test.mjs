@@ -749,11 +749,15 @@ test('判据只看 presetId：同一份配置去掉它，协议项就回到「�
     '加上 presetId 就变回预设来源，协议项整块不渲染');
 });
 
-/** 编辑页那块「转为自定义」（没有就是 undefined）。 */
+/** 编辑页那块「切换为自定义API」（没有就是 undefined）。 */
 const convertBoxOf = (node) => collect(node, (item) => item.props
   && item.props['data-mo-image-convert-custom'] !== undefined)[0];
 
-test('编辑页的预设来源：API 密钥上方有「转为自定义」', () => {
+/** 那一块里的某个按钮（按 data-mo-image-convert-step 找：idle / confirm / cancel）。 */
+const convertStepOf = (box, step) => collect(box, (item) => item.type === 'button'
+  && item.props['data-mo-image-convert-step'] === step)[0];
+
+test('编辑页的预设来源：「自定义设置」下面有「切换为自定义API」', () => {
   const client = loadClient();
   client.setCatalog();
   const node = renderForm(client, {
@@ -761,18 +765,56 @@ test('编辑页的预设来源：API 密钥上方有「转为自定义」', () =
     presetId: 'openai', models: ['gpt-image-1'], names: {}
   });
   const box = convertBoxOf(node);
-  assert.ok(box, '「转为自定义」在');
-  const button = collect(box, (item) => item.type === 'button')[0];
+  assert.ok(box, '「切换为自定义API」在');
+  const button = convertStepOf(box, 'idle');
   assert.equal(text(button).join(''), 'form.convertToCustom', '按钮文案走 i18n');
-  // 位置：API 密钥上方，而且不在折叠区里（它是这一页唯一的入口级动作）。
-  const key = collect(node, (item) => item.type === 'input' && item.props.type === 'password')[0];
+  assert.match(text(box).join(' '), /form.convertToCustomHint/, '旁边写着它会做什么');
+  // 位置：在「自定义设置」折叠区下面，而且不在折叠区里。
   const order = preorder(node);
-  assert.ok(order.indexOf(box) < order.indexOf(key), '排在 API 密钥之前');
-  assert.equal(insideAnyDetails(node, box), false, '不在「自定义设置」里');
-  assert.match(text(box).join(' '), /form.convertToCustomHint/, '按钮旁写清后果');
+  const fold = detailsOf(node, '自定义设置');
+  assert.ok(order.indexOf(fold) < order.indexOf(box), '排在「自定义设置」之后');
+  assert.equal(insideAnyDetails(node, box), false, '它自己不在折叠区里');
+  // 默认只有一步：没有确认按钮，也没有那句黄字警告。
+  assert.equal(convertStepOf(box, 'confirm'), undefined, '默认不是确认态');
+  assert.equal(collect(box, (item) => item.props
+    && item.props['data-mo-image-convert-warning'] !== undefined).length, 0, '默认没有警告');
 });
 
-test('点「转为自定义」：协议组与模型选项当场出现，保存后来源变成空串', async () => {
+test('点一下只翻出二次确认：黄字警告 + 确认/取消，draft 一个字不动', () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
+    presetId: 'openai', models: ['gpt-image-1'], names: {}
+  };
+  const render = () => renderForm(client, provider);
+  let tree = render();
+  convertStepOf(convertBoxOf(tree), 'idle').props.onClick();
+  tree = render();
+
+  const box = convertBoxOf(tree);
+  const warning = collect(box, (item) => item.props
+    && item.props['data-mo-image-convert-warning'] !== undefined)[0];
+  assert.ok(warning, '警告出来了');
+  assert.equal(text(warning).join(''), 'form.convertToCustomWarning', '文案是那句单向提醒');
+  assert.match(String(warning.props.style.color), /--dsw-alias-state-warn-primary/, '用的是警告色（黄）');
+  assert.equal(convertStepOf(box, 'idle'), undefined, '原按钮让位给确认');
+  assert.ok(convertStepOf(box, 'confirm'), '确认按钮在');
+  assert.ok(convertStepOf(box, 'cancel'), '取消按钮在');
+
+  // 第一下不碰 draft：预设来源还在，协议组仍然不渲染。
+  assert.equal(collect(tree, (item) => item.props
+    && item.props['data-mo-image-protocol'] !== undefined).length, 0, '协议组还藏着');
+
+  // 取消 = 回到第一步，什么都没变。
+  convertStepOf(box, 'cancel').props.onClick();
+  tree = render();
+  assert.ok(convertStepOf(convertBoxOf(tree), 'idle'), '取消后回到待切换');
+  assert.equal(collect(tree, (item) => item.props
+    && item.props['data-mo-image-protocol'] !== undefined).length, 0, '取消不动配置');
+});
+
+test('点「确认切换」：协议组与模型选项当场出现，保存后来源变成空串', async () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -784,23 +826,19 @@ test('点「转为自定义」：协议组与模型选项当场出现，保存�
     provider: provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t: t
   }));
 
-  // 转之前：预设来源——协议那一组不渲染，模型行没有展开箭头。
+  // 两步走：先翻确认，再确认。
+  convertStepOf(convertBoxOf(render()), 'idle').props.onClick();
+  convertStepOf(convertBoxOf(render()), 'confirm').props.onClick();
   let tree = render();
-  assert.equal(collect(tree, (item) => item.props
-    && item.props['data-mo-image-protocol'] !== undefined).length, 0, '协议组藏起来了');
-  assert.equal(collect(tree, (item) => item.type === 'button'
-    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '模型行没有选项箭头');
 
-  collect(convertBoxOf(tree), (item) => item.type === 'button')[0].props.onClick();
-  tree = render();
-
-  // 转之后：按钮消失，协议下拉与模型选项当场出现，折叠区也替用户打开了。
+  // 转之后：按钮消失，协议下拉与模型选项当场出现。
   assert.equal(convertBoxOf(tree), undefined, '转完按钮就没了');
   assert.ok(collect(tree, (item) => item.type === 'select'
     && item.props['data-mo-image-protocol'] !== undefined)[0], '协议下拉出现了');
   assert.ok(collect(tree, (item) => item.type === 'button'
     && typeof item.props['aria-expanded'] === 'boolean')[0], '模型行有了展开箭头');
-  assert.equal(detailsOf(tree, '自定义设置').props.open, true, '转完把「自定义设置」打开');
+  // 「默认不展开」：折叠区不会替用户打开。
+  assert.equal(detailsOf(tree, '自定义设置').props.open, false, '折叠区保持收起');
 
   // 别的字段一个都没动：地址、协议、模型都还在（转的只是「来源」）。
   assert.equal(collect(tree, (item) => item.type === 'input'
@@ -813,7 +851,7 @@ test('点「转为自定义」：协议组与模型选项当场出现，保存�
   assert.equal(saved.adapter, 'openai-images', '协议也留着');
 });
 
-test('新建页没有「转为自定义」：目录 / 本地两条入口本来就是选预设', () => {
+test('新建页没有「切换为自定义API」：目录 / 本地两条入口本来就是选预设', () => {
   const client = loadClient({ customMode: true });
   client.setCatalog();
   const node = renderForm(client, {
@@ -822,7 +860,7 @@ test('新建页没有「转为自定义」：目录 / 本地两条入口本来�
   assert.equal(convertBoxOf(node), undefined, '新建页不提供这个动作');
 });
 
-test('本来就是自定义的提供商没有「转为自定义」', () => {
+test('本来就是自定义的提供商没有「切换为自定义API」', () => {
   const client = loadClient();
   client.setCatalog();
   for (const provider of [
