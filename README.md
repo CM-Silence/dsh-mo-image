@@ -95,7 +95,7 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 **从内置预设建的提供商不显示协议相关字段**：协议、鉴权与返回格式预设里已经写好了，零配置就能用，不需要人去改一个已经正确的配置。自己填地址的（「自定义模型 API」、中转站、老配置）形状未知，这一块照旧出现。判据只看来源（`presetId`），不看地址；手改 API 地址不动它——同一家提供商换个地址（反向代理、私有化部署）仍是那份预设。老配置没记来源时先按协议分组：组内只有一份就是它（本地部署器就是这样，换端口、换机器仍认得出），共用协议的那一组（`openai-images` 那 14 份）再按地址、按名称消歧；没记协议（`adapter` 为空）的则在全部预设里按地址认，地址认不出再按名称认，都唯一不了就不补。补不上时，只有「地址是预设的、协议却不是预设里的那一条」这种本该有来源的配置会在表单顶部看到红字；「自定义模型 API」入口、自定义端点和自定义协议都不提醒——它们本来就没有预设来源。以前手动改过的协议 / 鉴权 / 返回格式只是不显示，保存时原样带回。
 
-**想改预设的字段？展开「自定义设置」，点底部的「切换为自定义API」**（按钮与「添加模型」同款、左侧带一个方向图标，排在模型目录等接入细节之后；这一块只在展开时才看得到）。点它只是翻出二次确认——提示换成黄色那句「注意：切换为自定义API为单向操作，要回到预设需要重新从目录添加。」，旁边多出「确认切换」与「取消」；第一下不碰任何字段。确认后来源才被撇掉（presetId 变空串），协议那一组、鉴权方式与模型选项随即出现；地址、协议、鉴权、模型、字段模板一律留着，动的只是「这份配置归谁管」。单向：预设选择器只在新建页有，要回到预设就重新从目录添加一份。保存之前取消，什么都没发生。
+**想改预设的字段？展开「自定义设置」，点底部的「切换为自定义API」**（按钮与「添加模型」同款、左侧带一个方向图标，排在模型目录等接入细节之后；这一块只在展开时才看得到）。点它只是翻出二次确认——提示换成黄色那句「注意：切换为自定义API为单向操作，要回到预设需要重新从目录添加。」，旁边多出「确认切换」与「取消」；第一下不碰任何字段。确认后来源才被撇掉（presetId 变空串），协议那一组、鉴权方式与模型选项随即出现；地址、协议、鉴权、模型、字段模板一律留着，动的只是「这份配置归谁管」。单向：预设选择器只在新建页有，要回到预设就重新从目录添加一份。保存之前取消，什么都没发生。切换之后表单顶部会挂一枚与列表同款的「自定义」标签（「已切换为自定义 API，保存后生效」）——列表上那一枚读的是已落盘的配置，要保存之后才变，这一枚是当场看得见的回执。
 
 内置了几家官方或大型模型平台，也可以选择“自定义模型 API”，填写自部署或其他兼容接口。
 
@@ -204,15 +204,15 @@ npm run release -- minor --dry-run        # 只看会做什么
 <cwd>/generated-images/
 ~~~
 
-`<cwd>` 来自 DSH 会话的 `session.header.cwd`。找得到 cwd 时不再写入插件状态目录，因此在「工作区可修改」权限下可以直接写项目；只有拿不到 cwd（例如非会话调用）时才回退到：
+`<cwd>` 优先使用 DSH 会话的当前工作目录，也适用于切换过目录或使用 worktree 的会话。宿主未提供当前目录时使用会话的初始目录。只有拿不到会话目录（例如非会话调用）时才回退到：
 
 ~~~text
 $DSH_HOME/mo-image/out/
 ~~~
 
-旧版本已经生成在 `$DSH_HOME/mo-image/out/` 的图片不会被迁移，旧的 `/api/mo-image/preview/<basename>` 链接仍然能打开。
+聊天里新生成的图片使用本地文件绝对路径，支持本地图片菜单的 DSH 客户端可以通过宿主读取原图、复制图片并在桌面文件夹中定位。找不到会话目录，或图片超过宿主的本地预览上限时，使用签名预览。
 
-预览 URL 使用 HMAC 签名，不暴露任意文件读取：签名 key 固定保存在 `$DSH_HOME/mo-image/preview.key`，图片本体留在项目目录。新图片的 `/api/mo-image/preview/<token>` 链接在宿主重启后仍然有效。
+旧聊天中的 `/api/mo-image/preview/<basename>` 和签名预览链接继续可用。HMAC 签名 key 保存在 `$DSH_HOME/mo-image/preview.key`，因此签名链接在宿主重启后仍然有效。
 
 建议把 `generated-images/` 加进项目的 `.gitignore`，避免把生成图误提交。
 
@@ -271,10 +271,11 @@ $DSH_HOME/.credentials.yaml
 | **Google Gemini / Nano Banana** | `google-gemini` | `gemini-nano-banana-2.1`、`gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-2.5-flash-image` | 原生 `generateContent`；生成 + 参考图编辑，新模型最多 14 张、2.5 只有 3 张 |
 | OpenAI | `openai-images` | 按模型 ID 自动匹配 | 生成 + 编辑 |
 | **OpenAI Responses** | `openai-responses` | 手动/获取 | 官方新版 `image_generation` 工具；需要填「调度模型」 |
-| **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
+| **OpenRouter** | `openrouter-images` | `google/gemini-3.1-flash-image`、`openai/gpt-image-2.5-flare`、`black-forest-labs/flux.2-pro` | 专用 `/api/v1/images`；生成 + `input_references` 参考图 |
 | **Azure OpenAI** | `openai-images`（`auth.mode: 'api-key'`） | 你的部署名 | `api-key` 鉴权；`model` 填部署名 |
+| **Microsoft Foundry (MAI-Image)** | 声明式 HTTP | 你的 MAI-Image 部署名 | 使用 `/mai/v1` 和 `api-key`。生成使用宽高像素，编辑通过 multipart 上传最多五张 JPEG / PNG 参考图 |
 | **Black Forest Labs** | `bfl` | `flux-2-pro`、`flux-2-max`、`flux-3-image`、`flux-kontext-pro` | 异步队列；生成 + FLUX.2/FLUX 3 参考图 |
-| **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 异步队列；`COMPLETED` 后还要取一次 `response_url` |
+| **fal.ai** | `fal` | `fal-ai/flux-2-pro`、`fal-ai/flux-pro/kontext` | 按生成、单图编辑和多图编辑选择端点，队列完成后读取 `response_url` |
 | **Replicate** | `replicate` | `black-forest-labs/flux-2-pro` | 异步队列；按模型 schema 决定输入字段 |
 | **魔搭 ModelScope** | `modelscope` | `Qwen/Qwen-Image-2.1`、`Qwen/Qwen-Image-Edit` | 异步任务；提交带 `X-ModelScope-Async-Mode`，轮询 `/v1/tasks/{id}` |
 | **xAI Grok Imagine** | `openai-images`（`edit:'none'`） | `grok-imagine-image-2.0` | 预设提供文生图，使用 `aspect_ratio` 和 `resolution` |
@@ -296,7 +297,8 @@ $DSH_HOME/.credentials.yaml
 
 说明：
 
-- Google Gemini 使用 `x-goog-api-key` 头；`imageSize` 按模型分级（3.1-flash 支持 `512/1K/2K/4K`，2.5 不发），`aspectRatio` 新模型 14 档。
+- 原生 Google Gemini 使用 `x-goog-api-key` 头，尺寸写入 `generationConfig.imageConfig`。3.1 Flash Image 支持 `512/1K/2K/4K` 档位。自定义网关按实际选用的协议和输入设置组装请求。
+- 型号规则允许模型 ID 带厂商前缀、日期或发布后缀。实际请求使用原样 ID，尺寸和字段仍以所选协议为准。
 - xAI 使用 `aspect_ratio` + `resolution`，不是 OpenAI 的 `size`。
 - MiniMax H3-Image 的 `size` 与 `aspect_ratio`/`area` 是互斥的（同时给会 400），插件只发后者，让服务端按档位算宽高；它没有 `negative_prompt`（负面词拼进提示词），也没有质量档位枚举（只有 `output_compression` 0–100 的压缩率）。旧模型 `image-01` / `image-01-live` 走的是另一条旧接口 `POST /v1/image_generation`（`aspect_ratio` + `base_resp` 响应），不是 OpenAI Images 形状，所以没有放进这两个预设。
 - Recraft / Ideogram / Together / Stability 的默认模型 ID 只是建议值，服务端模型更新后可以在「模型目录」里改，或用「获取可用模型」重新拉取。
@@ -555,7 +557,9 @@ $DSH_HOME/.credentials.yaml
 - 分隔符只在「一个字段写宽x高」时有意义：`x`、`*`（百炼）或自定义 1–4 个可见字符。
 - 第二个字段可选：把**比例**或**档位**另写一处（Gemini 的 `aspectRatio` + `imageSize` 就是这种），留空不发。
 
-典型场景：某个中转站的 nano-banana 只认 `width`/`height`，或者把尺寸藏在 `image_size` 里——不必改代码，在模型选项里点两下就行。非官方网关也会按**模型名**给一套默认形态（名字里有 `banana` / `gemini-…image` 就按比例+档位，`seedream-5.5` 就按 1K/1.5K/2K，认不出来才是宽高；只按官方模型家族匹配，中转站自造的产品名不认），猜不准或猜错就在模型选项里覆盖——和质量档位按模型 id 模糊定位是同一套思路。
+兼容网关按所选协议和已知的接口规则发尺寸。Gemini / Nano Banana 的原生比例与档位配置只用于 `google-gemini` 协议。网关要求 `width` / `height`、`image_size` 或其他字段时，可以在模型的「输入设置」中覆盖。
+
+如果旧版一键配置曾为兼容网关的 Gemini 模型保存 `aspect_ratio`，该覆盖会继续生效。要使用新版默认值，在「输入设置 → 尺寸」解锁，选择「跟随默认」并清空尺寸参数名，再保存。
 
 **一键配置与锁**：三条入口共用同一个动作——「输入设置」标题行那颗只配这一个模型，「模型目录」右侧的「一键配置所有模型」对列表每一项各跑一次，从「获取可用模型」采纳新模型之后也会对刚加进来的那些自动跑一次。它按规则表把**尺寸 / 质量 / 字段模板**写进模型。**「认得出」= 规则表里有这个模型的专门规则**：质量规则、字段模板规则，或者一条**不是兜底**的尺寸规则——只知道尺寸怎么发的模型（`doubao-seedream-5-5`、`flux-2-flex` 这类）也算认得出，否则它连自己认识的尺寸都写不进去。兜底那条 `.*`（OpenAI 兼容发 `size`）匹配一切，所以**不算**认得出，否则每个模型都会被算成命中。没有专门规则的模型不写、也不锁，提示里会说明「按协议默认发送」；ComfyUI / A1111 / SwarmUI 的规则表里没有尺寸与质量，不给这个按钮）。八个键（尺寸、质量、提示词、负面词、模型、张数、参考图、返回格式）可以单独上锁，**锁住的键不会被一键配置改动**，解锁后才能手填；「输入设置」标题行那把整块锁一次锁上 / 解开全部输入键，行级锁（表格操作列里的锁）语义相同，只挡自动写入、不挡手动编辑。从预设创建的提供商默认全锁；自配网关与老配置默认不锁；**ComfyUI / A1111 / SwarmUI 的输入键默认不锁**（参数清单由部署端决定：装了哪个 sampler、模型目录里有哪几个 checkpoint，预设给不了映射），返回格式仍按预设来源锁——sd-server / localai / openai-gateway 走 OpenAI 兼容字段，和云端预设一样全锁。一键配置配好一个模型后会把它的**整块输入设置锁上**（七个输入键一次到位，返回格式那个键不动）——配好了就定了，要手改先解锁，否则下一次一键配置又按规则盖回去；没命中规则的模型不锁，下次还会重试；你在「质量」/「参考图」里明确取消过的，也不会被重新打开。
 

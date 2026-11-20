@@ -133,6 +133,33 @@ test('config route migrates keys to the credentials store and never returns them
   assert.equal(secrets.get('MO_IMAGE_P1_API_KEY'), 'new-secret');
   assert.equal(JSON.parse(readFileSync(configFile, 'utf8')).providers[0].key, undefined);
 
+  // 「切换为自定义API」写的是**显式空串**：地址还与预设一样，但来源已经撇掉。
+  // 这条必须活着穿过保存与回读——否则下一次读配置会按地址把 presetId 回填成 openai，
+  // 转换被悄悄撤销，列表上的「自定义」标签也跟着消失。
+  const convertedRes = makeRes();
+  await route.handler(jsonReq('POST', JSON.stringify({
+    config: {
+      version: 1,
+      providers: [{
+        id: 'p1', name: 'OpenAI production', baseUrl: 'https://api.openai.com/v1', key: '',
+        adapter: 'openai-images', protocol: 'openai-images', presetId: '',
+        models: ['gpt-image-2.5-flare'], names: {}, hasKey: true
+      }],
+      active: { providerId: 'p1', model: 'gpt-image-2.5-flare' },
+      defaults: { quality: 'high', auto: true, width: 1024, height: 1024 }
+    }
+  })), convertedRes);
+  assert.equal(convertedRes.status, 200);
+  assert.equal(JSON.parse(convertedRes.body).config.providers[0].presetId, '', '保存响应里要留着空串');
+  const onDisk = JSON.parse(readFileSync(configFile, 'utf8')).providers[0];
+  assert.equal(onDisk.presetId, '', '落盘也要留着');
+  assert.equal(onDisk.adapter, 'openai-images', '协议不能被「补来源」那一步改掉');
+
+  const rereadRes = makeRes();
+  await route.handler({ method: 'GET', headers: { host: '127.0.0.1:1' }, url: '/api/mo-image/config' }, rereadRes);
+  assert.equal(JSON.parse(rereadRes.body).config.providers[0].presetId, '',
+    '回读时不能按地址把来源回填成 openai');
+
   const deleteRes = makeRes();
   await route.handler(jsonReq('POST', JSON.stringify({
     config: {

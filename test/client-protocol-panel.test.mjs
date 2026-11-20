@@ -845,6 +845,15 @@ test('点「确认切换」：协议组与模型选项当场出现，保存后�
   // 「默认不展开」：折叠区不会替用户打开。
   assert.equal(detailsOf(tree, '自定义设置').props.open, false, '折叠区保持收起');
 
+  // 表单顶部挂上和列表同款的「自定义」标签：切换当场看得见（列表那枚要等保存）。
+  const converted = collect(tree, (item) => item.props
+    && item.props['data-mo-image-converted'] !== undefined)[0];
+  assert.ok(converted, '切换后表单顶部有「已切换」那一行');
+  const tag = collect(converted, (item) => String((item.props || {}).className || '').includes('rowTag'))[0];
+  assert.ok(tag, '那一行里有一枚标签');
+  assert.equal(text(tag).join(''), 'tag.custom', '标签就是列表里那枚「自定义」');
+  assert.equal(text(converted).join('').includes('form.convertedHint'), true, '再加上「保存后生效」那句');
+
   // 别的字段一个都没动：地址、协议、模型都还在（转的只是「来源」）。
   assert.equal(collect(tree, (item) => item.type === 'input'
     && item.props.value === 'https://api.openai.com/v1').length, 1, '地址原样');

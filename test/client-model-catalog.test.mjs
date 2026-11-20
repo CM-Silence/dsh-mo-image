@@ -21,8 +21,13 @@ const DEFAULT_ADAPTERS = [
   { id: 'openai-images', label: 'protocol.openai-images', local: false, supportsModels: true }
 ];
 
+/** 宿主下发的内置提供商预设（测试里可以换成真清单）。 */
+const DEFAULT_PRESETS = [
+  { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], website: 'https://platform.openai.com/api-keys' }
+];
+
 /** A stateful React stand-in, so clicks and drags re-render the settings section. */
-function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_ADAPTERS, primitives = null } = {}) {
+function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_ADAPTERS, primitives = null, presets = DEFAULT_PRESETS } = {}) {
   let loaded = null;
   let dirty = false;
   const hookStores = new Map();
@@ -70,13 +75,17 @@ function createHarness({ config, modelsResponse = FETCHED, adapters = DEFAULT_AD
     MutationObserver: class { observe() {} disconnect() {} },
     AbortSignal: globalThis.AbortSignal, Response: globalThis.Response,
     fetch: async (url, init) => {
-      fetchCalls.push({ url: String(url), method: (init && init.method) || 'GET', body: init && init.body });
+      const method = (init && init.method) || 'GET';
+      fetchCalls.push({ url: String(url), method: method, body: init && init.body });
       if (String(url).endsWith('/api/mo-image/models')) {
         return new Response(JSON.stringify(modelsResponse), { status: 200, headers: { 'content-type': 'application/json' } });
       }
+      // 保存走的是「服务端回写一份权威配置」那条路：回的是**刚发上去的**那份，
+      // 不是打开页面时的旧配置——否则保存后的列表看起来什么都没发生。
+      const saved = method === 'POST' && init && init.body ? JSON.parse(init.body).config : null;
       return new Response(JSON.stringify({
-        ok: true, config, adapters,
-        providerPresets: [{ id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images', models: [], website: 'https://platform.openai.com/api-keys' }],
+        ok: true, config: saved || config, adapters,
+        providerPresets: presets,
         localPresets: []
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -441,6 +450,58 @@ test('arrow keys on the drag handle move a row without a pointer', async () => {
 function rowTags(tree) {
   return findAll(tree, (node) => hasClass(node, 'rowTag')).map((node) => textOf(node).join(''));
 }
+
+test('converting the volcengine preset (a real catalog entry) also lands on Custom', async () => {
+  // 用户实机上的那一份：预设来源是 volcengine-plan，地址与预设一模一样。
+  // 转成自定义之后地址不变，只有 presetId 变空串——这就是「来源」唯一的凭据。
+  const { providerPresetManifest } = await import('../lib/adapters.js');
+  const { harness, tree } = await openProviderEditor(baseConfig({
+    providers: [{
+      id: 'p1', name: '火山方舟 Agent Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3',
+      key: '', hasKey: true, adapter: 'openai-images', protocol: 'openai-images',
+      presetId: 'volcengine-plan', protocolOptions: { edit: 'same' },
+      models: ['doubao-seedream-5.0-flash'], names: {}
+    }]
+  }), { presets: providerPresetManifest() });
+  assert.ok(tree);
+  const step = (value) => findAll(harness.renderRoot(), (node) => node.type === 'button'
+    && node.props['data-mo-image-convert-step'] === value)[0];
+  step('idle').props.onClick();
+  step('confirm').props.onClick();
+  await findButton(harness.renderRoot(), 'Save').props.onClick();
+  await settle();
+  assert.deepEqual(rowTags(harness.renderRoot()), ['Custom'], '换过来的就该打「自定义」标');
+});
+
+test('a provider whose presetId is an explicit empty string reads as Custom', async () => {
+  // 「切换为自定义API」落盘的凭据就是这个空串：地址还与预设一致，但来源已经撇掉了。
+  const config = baseConfig({
+    providers: [{ ...baseConfig().providers[0], presetId: '' }]
+  });
+  const harness = createHarness({ config });
+  await settle();
+  assert.deepEqual(rowTags(harness.renderRoot()), ['Custom']);
+});
+
+test('a preset converted to a custom API shows the Custom tag once saved', async () => {
+  const { harness, tree } = await openProviderEditor(baseConfig({
+    providers: [{ ...baseConfig().providers[0], presetId: 'openai' }]
+  }));
+  assert.ok(tree);
+  const step = (value) => findAll(harness.renderRoot(), (node) => node.type === 'button'
+    && node.props['data-mo-image-convert-step'] === value)[0];
+  // 第一下只翻警告，第二下才真的改 draft。
+  step('idle').props.onClick();
+  step('confirm').props.onClick();
+  const save = findButton(harness.renderRoot(), 'Save');
+  assert.ok(save, 'expected the Save button');
+  await save.props.onClick();
+  await settle();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
+  const written = JSON.parse(posted[posted.length - 1].body).config.providers[0];
+  assert.equal(written.presetId, '', '落盘时显式写空串：这是「自定义 API」的凭据');
+  assert.deepEqual(rowTags(harness.renderRoot()), ['Custom'], '换过来的就该打「自定义」标');
+});
 
 test('a provider built from a built-in preset carries no Custom tag', async () => {
   const harness = createHarness({ config: baseConfig() });
