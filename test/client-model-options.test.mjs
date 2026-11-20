@@ -950,9 +950,12 @@ async function saveAndPosted(harness) {
 }
 
 test('预设来源没有模型选项：中转站与自定义提供商有，且默认不锁', async () => {
-  // 预设已经把输入与返回定死了，模型行连展开箭头都不该有。
+  // 预设已经把输入与返回定死了，模型行的箭头还在但禁用（不是删掉——列表里有的行有、
+  // 有的没有，看着像漏渲染）。
   const preset = await openEditor(PRESET_CONFIG);
-  assert.equal(optionsToggle(preset.harness.renderRoot()), null, '预设来源：模型行没有展开箭头');
+  const presetToggle = optionsToggle(preset.harness.renderRoot());
+  assert.ok(presetToggle, '预设来源：箭头照旧渲染');
+  assert.equal(presetToggle.props.disabled, true, '预设来源：只是禁用');
 
   // adapter 为空的中转站是最常见的一档：以前按 adapter 判会把它一起锁死，现在看 presetId。
   const relay = await openEditor(RELAY_CONFIG);
@@ -1056,9 +1059,11 @@ test('面板上 A1111 / SwarmUI 的输入键能直接改，sd-server 的还是�
     && node.props['data-param-key'] === 'size')[0];
   assert.notEqual(sizeMode.props.disabled, true, 'SwarmUI 的尺寸控件能直接改');
 
-  // sd-server 走 OpenAI 兼容字段：和云端预设同一档，模型行没有可展开的面板。
+  // sd-server 走 OpenAI 兼容字段：和云端预设同一档，箭头在但禁用。
   const sd = await openEditor(localPresetConfig('sd-server', 'openai-images', 'http://127.0.0.1:8080/v1'));
-  assert.equal(optionsToggle(sd.harness.renderRoot()), null, 'sd-server 没有模型选项（预设已经把字段定死了）');
+  const sdToggle = optionsToggle(sd.harness.renderRoot());
+  assert.ok(sdToggle, 'sd-server：箭头照旧渲染');
+  assert.equal(sdToggle.props.disabled, true, 'sd-server：只是禁用');
 });
 
 test('一键配置把命中的尺寸与字段写进去，并给写过的键上锁', async () => {

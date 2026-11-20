@@ -2184,11 +2184,16 @@ test('云端预设的模型行没有模型选项：预设定死了输入与返�
   const tree = renderForm(client, provider);
   const row = collect(tree, (item) => String((item.props || {}).className || '').includes('modelRow'))[0];
   assert.ok(row, '模型行在');
-  // 连展开箭头都没有：没有可展开的东西。
-  assert.equal(collect(row, (item) => item.type === 'button'
-    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '没有展开箭头');
+  // 箭头还在，但禁用：同一份列表里有的行有箭头、有的没有，看着像漏渲染。
+  const toggle = modelOptionsToggle(row);
+  assert.ok(toggle, '箭头照旧渲染');
+  assert.equal(toggle.props.disabled, true, '禁用它（这份配置不由你改）');
+  assert.equal(toggle.props['data-mo-image-model-options'], 'unavailable', '标记成不可用');
   assert.equal(modelSection(tree, 'data-mo-image-input-settings'), null, '没有输入设置');
   assert.equal(modelSection(tree, 'data-mo-image-output-settings'), null, '没有输出设置');
+  // 点下去也不会展开（禁用态在浏览器里本来就不触发，这里再挡一次）。
+  toggle.props.onClick({ currentTarget: { focus() {} } });
+  assert.equal(modelSection(renderForm(client, provider), 'data-mo-image-input-settings'), null, '点了也不展开');
 });
 
 test('云端声明式预设也隐藏自定义端点、模型选项与协议设置', () => {
@@ -2203,8 +2208,10 @@ test('云端声明式预设也隐藏自定义端点、模型选项与协议设�
   assert.equal(collect(tree, (item) => item.props['data-mo-image-output-settings'] !== undefined).length, 0);
   assert.equal(collect(tree, (item) => item.props['data-mo-image-input-settings'] !== undefined).length, 0);
   assert.equal(collect(tree, (item) => item.props.name === 'route-generate').length, 0);
-  assert.equal(collect(tree, (item) => item.type === 'button'
-    && typeof item.props['aria-expanded'] === 'boolean').length, 0, '模型行也没有展开箭头');
+  const toggle = collect(tree, (item) => item.type === 'button'
+    && typeof item.props['aria-expanded'] === 'boolean')[0];
+  assert.ok(toggle, '模型行箭头照旧渲染');
+  assert.equal(toggle.props.disabled, true, '只是禁用');
 });
 
 test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保存后原样带回', async () => {
