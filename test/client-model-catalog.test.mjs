@@ -528,6 +528,90 @@ test('a preset converted to a custom API shows the Custom tag once saved', async
   assert.deepEqual(rowTags(harness.renderRoot()), ['Custom'], '换过来的就该打「自定义」标');
 });
 
+test('deleting a provider asks first, then removes it only after confirming', async () => {
+  const harness = createHarness({ config: baseConfig() });
+  await settle();
+  let tree = harness.renderRoot();
+  const del = findAll(tree, (node) => node.type === 'button'
+    && node.props['data-mo-image-delete-provider'] === 'p1')[0];
+  assert.ok(del, '每行都有删除按钮');
+
+  del.props.onClick();
+  tree = harness.renderRoot();
+  const dialog = findAll(tree, (node) => node.props
+    && node.props['data-mo-image-delete-dialog'] !== undefined)[0];
+  assert.ok(dialog, '先弹确认，不直接删');
+  assert.match(textOf(dialog).join(''), /Delete OpenAI production\?/, '标题里带提供商名字');
+  assert.match(textOf(dialog).join(''), /stored API key/, '说明里讲清楚会清掉密钥');
+  assert.equal(harness.fetchCalls.filter((call) => call.method === 'POST').length, 0, '还没写配置');
+
+  // 取消 = 什么都没发生。
+  const cancel = findAll(dialog, (node) => node.type === 'button' && hasClass(node, 'secondaryButton'))[0];
+  assert.ok(cancel, '有取消按钮');
+  cancel.props.onClick();
+  tree = harness.renderRoot();
+  assert.equal(findAll(tree, (node) => node.props && node.props['data-mo-image-delete-dialog'] !== undefined).length, 0,
+    '取消后弹窗关掉');
+  assert.equal(findAll(tree, (node) => node.props && node.props['data-mo-image-delete-provider'] === 'p1').length, 1,
+    '提供商还在');
+
+  // 确认才真的删：配置里没有它了。
+  findAll(tree, (node) => node.type === 'button' && node.props['data-mo-image-delete-provider'] === 'p1')[0].props.onClick();
+  tree = harness.renderRoot();
+  const confirm = findAll(tree, (node) => node.type === 'button'
+    && /^Delete OpenAI production$/.test(textOf(node).join('')))[0];
+  assert.ok(confirm, '确认按钮的文案是「删除 X」');
+  assert.ok(hasClass(confirm, 'dangerButton'), '确认按钮是红色那个');
+  confirm.props.onClick();
+  await settle();
+  const posted = harness.fetchCalls.filter((call) => call.method === 'POST' && call.url.includes('/api/mo-image/config'));
+  assert.equal(posted.length, 1, '删除会写配置');
+  assert.deepEqual(JSON.parse(posted[0].body).config.providers, [], '写下去的配置里没有它了');
+});
+
+test('the delete dialog truncates a long name in the title and the button', async () => {
+  const longName = 'very-long-provider-name-that-will-not-fit-anywhere-at-all';
+  const harness = createHarness({
+    config: baseConfig({ providers: [{ ...baseConfig().providers[0], name: longName }] })
+  });
+  await settle();
+  let tree = harness.renderRoot();
+  findAll(tree, (node) => node.type === 'button' && node.props['data-mo-image-delete-provider'] === 'p1')[0].props.onClick();
+  tree = harness.renderRoot();
+  const dialog = findAll(tree, (node) => node.props && node.props['data-mo-image-delete-dialog'] !== undefined)[0];
+  assert.ok(dialog, '弹窗在');
+  const heading = findAll(dialog, (node) => node.type === 'strong')[0];
+  const line = textOf(heading).join('');
+  assert.match(line, /Delete .+…\?$/, '标题截断并以省略号收尾');
+  assert.ok(line.length < longName.length, '标题比原名短');
+  const confirm = findAll(dialog, (node) => node.type === 'button' && hasClass(node, 'dangerButton'))[0];
+  const label = textOf(confirm).join('');
+  assert.match(label, /^Delete .+…$/, '按钮也截断');
+  assert.ok(label.length < longName.length, '按钮比原名短');
+  // 说明那一段仍是全名：用户还能确认自己删的是哪一个。
+  assert.match(textOf(dialog).join(' '), new RegExp(longName), '说明里保留完整名字');
+});
+
+test('with the DSH primitives available the dialog is the shared Modal', async () => {
+  const seen = [];
+  const Modal = (props) => {
+    seen.push(props);
+    return { type: 'div', props: { 'data-fake-modal': '' }, children: [props.title, props.description, props.footer] };
+  };
+  const harness = createHarness({ config: baseConfig(), primitives: { Modal } });
+  await settle();
+  let tree = harness.renderRoot();
+  findAll(tree, (node) => node.type === 'button' && node.props['data-mo-image-delete-provider'] === 'p1')[0].props.onClick();
+  tree = harness.renderRoot();
+  assert.ok(findAll(tree, (node) => node.props && node.props['data-fake-modal'] !== undefined).length === 1,
+    '用的是 DSH 的 Modal 原语，不是自己画的一层');
+  const props = seen[seen.length - 1];
+  assert.equal(props.open, true);
+  assert.match(String(props.title), /Delete OpenAI production\?/);
+  assert.equal(typeof props.closeLabel, 'string', '有关闭按钮的文案');
+  assert.match(String(props.description), /stored API key/);
+});
+
 test('a provider built from a built-in preset carries no Custom tag', async () => {
   const harness = createHarness({ config: baseConfig() });
   await settle();
