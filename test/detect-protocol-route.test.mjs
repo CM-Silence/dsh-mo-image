@@ -222,7 +222,7 @@ test('a saved provider is used by id (no key in the draft)', async (t) => {
 
   const probe = makeRes();
   await route.handler(jsonReq({ providerId: 'p1', probe: '/models' }), probe);
-  assert.deepEqual(JSON.parse(probe.body).protocols, ['openai-images', 'openai-chat', 'openai-responses', 'openrouter-images']);
+  assert.deepEqual(JSON.parse(probe.body).protocols, ['openai-images', 'openai-chat', 'openai-responses', 'openrouter-images', 'tokenhub-hy-image']);
   assert.deepEqual(calls.map((call) => call.url), ['https://saved.example/v1/models'], '用已保存的地址探测');
 });
 

@@ -160,7 +160,7 @@ test('内网 SwarmUI：/API/ListModels 200 + JSON → swarmui', async (t) => {
 test('本地 OpenAI 兼容（sd-server / LocalAI）：本地三条都不中，最后认 /models', async (t) => {
   const calls = stubFetch(t, (url) => (url.endsWith('/models') ? json({ data: [{ id: 'sd-cpp-local' }] }) : miss()));
   const run = await runPlan({ baseUrl: 'http://127.0.0.1:8080/v1', key: 'k' }, '');
-  assert.deepEqual(run.hit.protocols, ['openai-images', 'openai-chat', 'openai-responses', 'openrouter-images']);
+  assert.deepEqual(run.hit.protocols, ['openai-images', 'openai-chat', 'openai-responses', 'openrouter-images', 'tokenhub-hy-image']);
   assert.equal(run.hit.shape, 'openai-data');
   assert.deepEqual(urls(calls), [
     'http://127.0.0.1:8080/v1/object_info',

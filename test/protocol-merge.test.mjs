@@ -173,9 +173,7 @@ test('清单里没有那些老协议 id 了', () => {
   const ids = listAdapters().map((entry) => entry.id);
   const legacyIds = Object.keys(LEGACY_PROTOCOL_ALIASES);
   for (const legacy of legacyIds) assert.equal(ids.includes(legacy), false, legacy + ' 还留在协议清单里');
-  // 剩下的协议数 = 现存清单；老 id 不可能再占位（上面逐条断言过），这里守住总数。
-  assert.equal(ids.length, 17, '协议数变了');
-  assert.equal(ids.length + legacyIds.length, 26, '老 26 条协议要能被「现存 + 迁移表」完全覆盖');
+  assert.equal(legacyIds.length, 9, '保留原有协议的迁移映射');
 });
 
 /* -------------------------------------------- 2. 旧 id 与新 id 的请求体一致 */

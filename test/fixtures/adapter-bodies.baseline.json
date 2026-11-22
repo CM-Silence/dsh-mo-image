@@ -353,6 +353,26 @@
         }
       }
     },
+    "tokenhub-hy-image": {
+      "model": "hy-image-v3.5-preview",
+      "quality": null,
+      "covers": "execute",
+      "generate": {
+        "supported": true,
+        "path": "/wand/hunyuan-image/v35-generation",
+        "body": {
+          "size": "1024x1024"
+        }
+      },
+      "edit": {
+        "supported": true,
+        "path": "/wand/hunyuan-image/v35-generation",
+        "body": {
+          "size": "1024x1024",
+          "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      }
+    },
     "openai-chat": {
       "model": "gpt-image-2.5-flare",
       "quality": null,

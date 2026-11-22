@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { apply, callImageApi } from '../lib/index.js';
@@ -99,6 +99,72 @@ test('Microsoft Foundry serves MAI generation and multipart edits under /mai/v1'
     ...input, model, fitted, images: [{ ...images[0], contentType: 'image/webp' }]
   }), /image\/jpeg、image\/png/);
   assert.equal(calls.length, 2);
+});
+
+test('TokenHub discovers supported Hy models and downloads final images after generation and edit', async (t) => {
+  const preset = providerPresetManifest().find((entry) => entry.id === 'tencent-tokenhub');
+  const [model] = preset.models;
+  const variant = 'regional/' + model + ':latest';
+  const provider = normalizeConfig({ providers: [{ ...preset, presetId: preset.id, key: 'mock-key' }] }).providers[0];
+  const adapter = resolveAdapter(provider, model);
+  const { home, route, tools } = hostFor(t);
+  const cdn = 'https://images.example.test/hy-final.png';
+  const submissions = [];
+  const calls = stubFetch(t, ({ url, method, headers, body }) => {
+    if (url.href === cdn) {
+      assert.equal(method, 'GET');
+      assert.equal(headers.get('authorization'), null);
+      return png();
+    }
+    assert.equal(url.origin, 'https://tokenhub.tencentmaas.com');
+    assert.equal(headers.get('authorization'), 'Bearer mock-key');
+    if (url.pathname === '/v1/models') {
+      assert.equal(method, 'GET');
+      return json({ data: [
+        { id: model, status: 'online' },
+        { id: variant, name: 'Hy Preview', status: 'online' },
+        { id: model + '-disabled', status: 'offline' },
+        { id: 'wand-vega-image-pro', status: 'online' }, { id: 'hy4', status: 'online' }
+      ] });
+    }
+    assert.equal(method, 'POST');
+    assert.equal(url.pathname, '/v1/wand/hunyuan-image/v35-generation');
+    submissions.push(JSON.parse(body));
+    return json({
+      choices: [{ delta: { type: 'image', image: { url: cdn } }, finish_reason: null }],
+      assembled_history: [{ content: [{ image_url: { url: 'https://images.example.test/intermediate.png' } }] }]
+    });
+  });
+
+  assert.equal(preset.supportsModels, true);
+  assert.equal(detectProtocolStart(preset, variant).answer.protocol, adapter.id);
+  const found = await route('models', { ...preset, presetId: preset.id, key: 'mock-key' });
+  assert.equal(found.status, 200);
+  assert.deepEqual(found.data.models, [model, variant]);
+  assert.equal(found.data.names[variant], 'Hy Preview');
+
+  const fitted = fitSize(provider, '8192x8192', variant, adapter);
+  assert.equal(fitted.size, '4096x4096');
+  const image = { buffer: Buffer.from(PNG, 'base64'), contentType: 'image/png' };
+  await configure(route, provider);
+  const exec = { agent: { session: { header: { cwd: home } } } };
+  await tools.get('mo_image_settings').execute({}, exec);
+  const generated = await tools.get('mo_image_generate').execute({ prompt: input.prompt }, exec);
+  assert.equal(path.dirname(generated.path), path.join(home, 'generated-images'));
+  assert.deepEqual(readFileSync(generated.path), image.buffer);
+  const edited = await callImageApi('edit', adapter, provider, { ...input, model: variant, fitted, images: [image] });
+  assert.deepEqual(edited.bytes, image.buffer);
+
+  const text = { type: 'text', text: input.prompt };
+  assert.deepEqual(submissions, [
+    { model, messages: [{ role: 'user', content: [text] }] },
+    { model: variant, size: '4096x4096', messages: [{ role: 'user', content: [text, {
+      type: 'image_url', image_url: { url: 'data:image/png;base64,' + PNG }
+    }] }] }
+  ]);
+  await assert.rejects(callImageApi('generate', adapter, provider, { ...input, model: 'wand-vega-image-pro' }), /仅支持混元/);
+  await assert.rejects(callImageApi('edit', adapter, provider, { ...input, model }), /至少一张参考图/);
+  assert.equal(calls.length, 5);
 });
 
 test('Gemini keeps the original model ID and sends nested imageConfig only on the native protocol', async (t) => {

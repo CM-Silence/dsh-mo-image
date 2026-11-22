@@ -140,6 +140,7 @@ const MODELS = {
   'modelscope': 'Qwen/Qwen-Image-2.1',
   'openai-responses': 'gpt-image-2.5-flare',
   'openrouter-images': 'google/gemini-3.1-flash-image',
+  'tokenhub-hy-image': 'hy-image-v3.5-preview',
   'openai-chat': 'gpt-image-2.5-flare',
   'openai-images': 'flux-1-schnell'
 };
@@ -161,6 +162,7 @@ const BASE_URLS = {
   'modelscope': 'https://api-inference.modelscope.cn',
   'openai-responses': 'https://api.openai.com/v1',
   'openrouter-images': 'https://openrouter.ai/api/v1',
+  'tokenhub-hy-image': 'https://tokenhub.tencentmaas.com/v1',
   'openai-chat': 'https://relay.example.com/v1',
   'openai-images': 'https://gateway.example.com/v1'
 };
@@ -238,6 +240,7 @@ const OWN_BODY_NOTES = {
   'swarmui': 'execute() 先取 session_id 再拼 {session_id, images, prompt, negativeprompt, model, cfgscale, steps, seed, width, height}；prepare* 只有 size。真实请求：test/local-adapters.test.mjs',
   'openai-responses': 'execute() 发 {model: hostModel, input, tools:[{type:"image_generation", size, quality, output_format}], tool_choice}；prepare* 只有顶层 {size}。真实请求：test/openai-protocols.test.mjs',
   'openrouter-images': 'execute() 拼 {model, prompt, n, output_format, aspect_ratio, resolution?, quality?, input_references?}；prepare* 只有 aspect_ratio。真实请求：test/openai-protocols.test.mjs',
+  'tokenhub-hy-image': 'execute() 拼 {model, messages, size?}；prepare* 不构造多模态消息。真实请求：test/provider-operations.test.mjs',
   'openai-chat': 'execute() 发 {model, messages, modalities}，尺寸只能写进提示词；prepare* 的 generate 体是 {}（control:prompt 表示「不发尺寸字段」，不是漏了字段）。真实请求：test/openai-protocols.test.mjs',
   // 走异步描述符的 async.build()：提交体由 build 自己拼
   'bfl': 'async.build() 拼 {prompt, width, height, output_format}(FLUX.2) 或 {prompt, aspect_ratio, resolution}(FLUX 3 / kontext)；prepare* 只有 width/height。真实请求：test/async-protocols.test.mjs',
@@ -392,7 +395,7 @@ export function buildBaseline() {
 
 test('固定输入表覆盖 listAdapters() 的全部协议', () => {
   const ids = listAdapters().map((entry) => entry.id).sort();
-  assert.equal(ids.length, 17, '协议数变了：基线要跟着补一条，并重新确认搬迁范围');
+  assert.equal(ids.length, 18, '协议数变了：基线要跟着补一条，并重新确认搬迁范围');
   assert.deepEqual(ids.filter((id) => !MODELS[id]), [], '这些协议还没有固定 model');
   assert.deepEqual(ids.filter((id) => !BASE_URLS[id]), [], '这些协议还没有固定 baseUrl');
 });

@@ -389,6 +389,7 @@ protocol.ideogram,"Ideogram","Ideogram","Ideogram","Ideogram","Ideogram","Ideogr
 protocol.stability,"Stability AI","Stability AI","Stability AI","Stability AI","Stability AI","Stability AI","Stability AI","Stability AI"
 protocol.dashscope-qwen-image,"百炼 Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image","Alibaba Qwen-Image"
 protocol.dashscope-wanx,"百炼 通义万相","Alibaba Wanx","Alibaba Wanx","Alibaba Wanx","Alibaba Wanx","Alibaba Wanx","Alibaba Wanx","Alibaba Wanx"
+protocol.tokenhub-hy-image,"腾讯云 混元生图","TokenHub Hy-Image","TokenHub Hy-Image","TokenHub Hy-Image","TokenHub Hy-Image","TokenHub Hy-Image","TokenHub Hy-Image","TokenHub Hy-Image"
 protocol.a1111,"AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111","AUTOMATIC1111"
 protocol.comfyui,"ComfyUI","ComfyUI","ComfyUI","ComfyUI","ComfyUI","ComfyUI","ComfyUI","ComfyUI"
 protocol.swarmui,"SwarmUI","SwarmUI","SwarmUI","SwarmUI","SwarmUI","SwarmUI","SwarmUI","SwarmUI"
