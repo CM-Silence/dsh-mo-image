@@ -702,4 +702,4 @@ Fireworks 和 Novita 的旧配置可以重新从目录添加新版预设以采�
 
 ## License
 
-MIT。Codex 皮肤的几何、色板与粒子分布改编自 [dsh-codex-model-effort-selector](https://github.com/ABING1111/dsh-codex-model-effort-selector)（MIT），完整许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+MIT。Codex 皮肤的几何、色板与粒子分布改编自 [dsh-codex-model-effort-selector](https://github.com/ABING1111/dsh-codex-model-effort-selector)（MIT）。项目和第三方许可见 [LICENSE](LICENSE)。
