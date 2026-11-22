@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { parseWorkflow, uiToApi, analyzeWorkflow, injectByMapping } from '../lib/comfy-workflow.js';
+import { parseWorkflow, uiToApi, analyzeWorkflow, injectByMapping, workflowImageSlots } from '../lib/comfy-workflow.js';
 
 const objectInfo = () => JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
 const mossText = () => readFileSync('test/fixtures/moss-t2i.api.json', 'utf8');
@@ -126,11 +126,58 @@ test('analyzeWorkflow reports no image input for a text-to-image graph', () => {
   assert.equal(mapping.image, null);
 });
 
-test('analyzeWorkflow finds a LoadImage when the graph has one', () => {
+test('analyzeWorkflow maps the connected image and skips mask-only or disconnected inputs', () => {
   const graph = moss();
-  graph['90'] = { class_type: 'LoadImage', inputs: { image: 'ref.png' } };
+  graph['90'] = { class_type: 'LoadImage', inputs: { image: 'mask.png' } };
+  graph['91'] = { class_type: 'LoadImage', inputs: { image: 'unused.png' } };
+  graph['92'] = { class_type: 'LoadImage', inputs: { image: 'ref.png' } };
+  graph['18:7'].inputs.mask = ['90', 1];
+  graph['18:7'].inputs.reference = ['92', 0];
   const { mapping } = analyzeWorkflow(graph, objectInfo());
-  assert.deepEqual(mapping.image, { node: '90', input: 'image' });
+  assert.deepEqual(mapping.image, { node: '92', input: 'image' });
+});
+
+test('multiple connected image inputs require an explicit reference placeholder', () => {
+  const graph = moss();
+  graph['90'] = { class_type: 'LoadImage', inputs: { image: 'overlay.png' } };
+  graph['91'] = { class_type: 'LoadImage', inputs: { image: 'ref.png' } };
+  graph['18:7'].inputs.overlay = ['90', 0];
+  graph['18:7'].inputs.reference = ['91', 0];
+  const info = objectInfo();
+  const result = analyzeWorkflow(graph, info);
+  assert.equal(result.mapping.image, null);
+  assert.equal(result.ambiguousImage, true);
+  assert.deepEqual(result.candidates.image.map((item) => item.node).sort(), ['90', '91']);
+  graph['91'].inputs.image = '{{image}}';
+  assert.equal(analyzeWorkflow(graph, info).ambiguousImage, false);
+});
+
+test('numbered reference placeholders require consecutive valid indexes', () => {
+  const withSecond = { '1': { class_type: 'LoadImage', inputs: { image: '{{image_2}}' } } };
+  assert.throws(() => workflowImageSlots(withSecond), /连续编号/);
+  withSecond['1'].inputs.image = '{{image_17}}';
+  assert.throws(() => workflowImageSlots(withSecond), /image_16/);
+});
+
+test('custom upload controls are eligible only for input images', () => {
+  const graph = moss();
+  graph['90'] = { class_type: 'CustomInput', inputs: { source: 'source.png' } };
+  graph['91'] = { class_type: 'LoadImageOutput', inputs: { image: 'output.png' } };
+  graph['92'] = { class_type: 'Painter', inputs: { mask: 'mask.png' } };
+  graph['18:7'].inputs.reference = ['90', 0];
+  graph['18:7'].inputs.overlay = ['91', 0];
+  graph['18:7'].inputs.mask = ['92', 0];
+  const signature = (field, imageFolder) => ({
+    output: ['IMAGE', 'MASK'],
+    input: { required: { [field]: [['example.png'], { image_upload: true, image_folder: imageFolder }] } }
+  });
+  const info = {
+    ...objectInfo(),
+    CustomInput: signature('source', 'input'),
+    LoadImageOutput: signature('image', 'output'),
+    Painter: signature('mask')
+  };
+  assert.deepEqual(analyzeWorkflow(graph, info).mapping.image, { node: '90', input: 'source' });
 });
 
 test('analyzeWorkflow rejects a graph without any output node', () => {

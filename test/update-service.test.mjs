@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createUpdateService, UPDATE_SPEC } from '../lib/update-service.js';
-import { readMarker, writeMarker } from '../lib/update.js';
+import { readMarker, UPDATE_REGISTRY, writeMarker } from '../lib/update.js';
 
 /** 假的 npm 请求：`/latest` 回版本号，其它（CDN）回 changelog。 */
 function npmRequest(version, notes) {
@@ -27,7 +27,7 @@ function makeService(overrides = {}) {
       installs.push({ spec, options });
       const planned = overrides.installBehaviors && overrides.installBehaviors.shift();
       if (planned instanceof Error) throw planned;
-      if (planned === 'failed-result') return { result: { changed: true, application: 'failed' } };
+      if (planned === 'failed-result') return { changed: true, application: 'failed' };
       if (overrides.failNext) {
         const error = overrides.failNext;
         overrides.failNext = null;
@@ -45,8 +45,6 @@ function makeService(overrides = {}) {
     currentVersion: '0.3.1',
     markerFile,
     request: npmRequest('0.4.0', '- 新'),
-    registryBase: 'http://registry.test',
-    mirrorBase: 'http://mirror.test',
     cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
     pluginManager,
     log: (line) => logs.push(line),
@@ -96,6 +94,7 @@ test('apply installs the npm version spec and writes a marker', async () => {
   assert.equal(installs[0].spec, 'dsh-mo-image@0.4.0');
   assert.equal(typeof installs[0].options.requestId, 'string');
   assert.equal(installs[0].options.enabled, true);
+  assert.equal(installs[0].options.registry, UPDATE_REGISTRY);
 });
 
 test('apply refuses local link installs', async () => {
@@ -117,6 +116,7 @@ test('apply falls back to removeBundle on already-installed', async () => {
   assert.deepEqual(removed, ['dsh-mo-image']);
   assert.equal(installs.length, 2);
   assert.equal(installs[0].spec, installs[1].spec);
+  assert.ok(installs.every(({ options }) => options.registry === UPDATE_REGISTRY));
 });
 
 test('hydrate reports done once and clears the marker', async () => {
@@ -143,7 +143,6 @@ test('apply resolves a plugin manager that becomes available later', async () =>
     markerFile: '',
     request: npmRequest('0.4.0', '- 新'),
     registryBase: 'http://registry.test',
-    mirrorBase: 'http://mirror.test',
     cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
     pluginManager: () => current,
     log() {},
@@ -187,18 +186,21 @@ test('a finished update is not installed twice', async () => {
 });
 
 test('a registry install updates through updateBundle instead of installing over', async () => {
-  const { service, updates, installs } = makeService({
-    bundles: [{ name: 'dsh-mo-image', source: '^0.3.1', updatable: true }]
-  });
-  await service.refresh();
-  await service.apply('0.4.0');
-  await service.settled();
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].name, 'dsh-mo-image');
-  assert.equal(updates[0].version, '0.4.0');
-  assert.equal(typeof updates[0].options.requestId, 'string');
-  assert.equal(installs.length, 0);
-  assert.equal(service.status().state, 'done');
+  for (const source of [{ updatable: true }, { update: 'registry' }]) {
+    const { service, updates, installs } = makeService({
+      bundles: [{ name: 'dsh-mo-image', source: '^0.3.1', ...source }]
+    });
+    await service.refresh();
+    await service.apply('0.4.0');
+    await service.settled();
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].name, 'dsh-mo-image');
+    assert.equal(updates[0].version, '0.4.0');
+    assert.equal(typeof updates[0].options.requestId, 'string');
+    assert.equal(updates[0].options.registry, UPDATE_REGISTRY);
+    assert.equal(installs.length, 0);
+    assert.equal(service.status().state, 'done');
+  }
 });
 
 test('a git install is upgraded through the npm spec', async () => {
@@ -232,6 +234,7 @@ test('a failed npm install after the removal restores the git install and says s
     'github:CM-Silence/dsh-mo-image#v0.3.1'
   ]);
   assert.equal(installs[2].options.enabled, true);
+  assert.ok(installs.every(({ options }) => options.registry === UPDATE_REGISTRY));
   const status = service.status();
   assert.equal(status.state, 'failed');
   assert.equal(status.error, 'update.failedRestored');

@@ -175,10 +175,17 @@ test('fetchUpdateStatus reads the host route without caching', async () => {
 test('the settings header shows the update button only when one is available', () => {
   const { api, React, render } = createHarness();
   const t = (key) => key;
-  const busy = textOf(render(React.createElement(api.__test.UpdateHeader, {
+  const header = render(React.createElement(api.__test.UpdateHeader, {
     status: { state: 'available', current: '0.3.1', latest: '0.4.0' }, t, onOpen() {}
-  }))).join(' ');
-  assert.match(busy, /update\.available/);
+  }));
+  const [row] = header.children;
+  const [title, button] = row.children;
+  assert.equal(row.props.style.justifyContent, 'flex-start');
+  assert.equal(title.type, 'h2');
+  assert.equal(textOf(title).join(''), 'section.title');
+  assert.equal(button.type, 'button');
+  assert.equal(button.props.style.border, 0);
+  assert.equal(textOf(button).join(''), 'update.available');
 
   const idle = textOf(render(React.createElement(api.__test.UpdateHeader, {
     status: { state: 'idle', current: '0.3.1' }, t, onOpen() {}

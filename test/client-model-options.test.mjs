@@ -639,10 +639,16 @@ test('parsing keeps the mapping when the same analyze response also carries para
   const analysis = {
     ok: true,
     format: 'api',
-    mapping: { prompt: { node: '18:17', input: 'value' }, image: null },
+    mapping: {
+      prompt: { node: '18:17', input: 'value' }, image: null,
+      width: { node: '18:6', input: 'width' }, height: { node: '18:6', input: 'height' },
+      quality: { node: '18:8', input: 'image_quality' }
+    },
+    quality: { supported: true, options: [{ value: 'high', label: 'High' }], map: { high: 'High' } },
     candidates: { prompt: [{ node: '18:17', input: 'value', classType: 'PrimitiveStringMultiline' }] },
     params: [
       { name: 'prompt', node: '18:17', input: 'value', type: 'STRING', role: true },
+      { name: 'oldQualityAlias', node: '18:8', input: 'image_quality', type: 'enum' },
       { name: 'steps', node: '18:7', input: 'steps', type: 'INT', default: 25 }
     ],
     warnings: []
@@ -666,6 +672,9 @@ test('parsing keeps the mapping when the same analyze response also carries para
   const entry = provider.modelOptions['flux.safetensors'];
   assert.deepEqual(entry.mapping.prompt, { node: '18:17', input: 'value' },
     'the mapping must survive the params write');
+  assert.deepEqual(entry.mapping.width, analysis.mapping.width);
+  assert.deepEqual(entry.mapping.quality, analysis.mapping.quality);
+  assert.deepEqual(entry.quality, analysis.quality);
   // 提示词行被挡在外面（它走工具参数），剩下的才是可调参数行；类型也折成表里的词表。
   assert.ok(Array.isArray(entry.params) && entry.params.length === 1, 'params must be stored too');
   assert.equal(entry.params[0].name, 'steps');
@@ -733,7 +742,7 @@ test('switching an A1111 parameter on persists it on the row, not in the old exp
   assert.equal(entry.params[0].default, '20', 'the seeded default travels with the row');
 });
 
-/* 尺寸：值由选择器经 mapping 注入，列表里不再占一行；认不出来时才留手选。 */
+/* 自动与固定尺寸共用模型选择器。 */
 
 const SIZED_ANALYSIS = {
   ok: true,
@@ -742,6 +751,7 @@ const SIZED_ANALYSIS = {
     prompt: { node: '18:17', input: 'value' },
     width: { node: '18:6', input: 'width' },
     height: { node: '18:6', input: 'height' },
+    quality: { node: '18:8', input: 'image_quality' },
     image: null
   },
   candidates: {
@@ -753,6 +763,7 @@ const SIZED_ANALYSIS = {
     { name: 'prompt', role: true, node: '18:17', input: 'value', type: 'STRING' },
     { name: 'width', role: true, node: '18:6', input: 'width', type: 'INT' },
     { name: 'height', role: true, node: '18:6', input: 'height', type: 'INT' },
+    { name: 'quality', node: '18:8', input: 'image_quality', type: 'enum' },
     { name: 'steps', node: '18:7', input: 'steps', type: 'INT' }
   ],
   warnings: []
@@ -777,10 +788,10 @@ const hasRow = (tree, key) => findAll(tree, (node) => node.props && node.props.k
 
 const FIXED_SIZE_CONFIG = { ...CONFIG, defaults: { auto: false, width: 768, height: 1024 } };
 
-test('the panel shows width and height while the size is Auto', async () => {
+test('the panel hides width and height while the size is Auto', async () => {
   const tree = await openParsed(SIZED_ANALYSIS);
-  assert.ok(hasRow(tree, 'width'), 'Auto lets the model move the size, so show where it lands');
-  assert.ok(hasRow(tree, 'height'));
+  assert.ok(!hasRow(tree, 'width'));
+  assert.ok(!hasRow(tree, 'height'));
 });
 
 test('the panel hides width and height while the picker pins the size', async () => {
@@ -789,27 +800,31 @@ test('the panel hides width and height while the picker pins the size', async ()
   assert.ok(!hasRow(tree, 'height'));
 });
 
-test('the panel still offers width and height when the graph does not reveal them', async () => {
+test('the workflow parse result shows no mapping dropdowns even for multiple image inputs', async () => {
   const analysis = {
     ...SIZED_ANALYSIS,
+    ambiguousImage: true,
+    candidates: {
+      ...SIZED_ANALYSIS.candidates,
+      image: [{ node: '11', input: 'image' }, { node: '12', input: 'image' }]
+    },
     mapping: { prompt: { node: '18:17', input: 'value' }, width: null, height: null, image: null }
   };
   const tree = await openParsed(analysis, FIXED_SIZE_CONFIG);
-  assert.ok(hasRow(tree, 'width'), 'an undetected size needs the manual fallback');
-  assert.ok(hasRow(tree, 'height'), 'an undetected size needs the manual fallback');
+  assert.equal(findAll(tree, (node) => node.props?.['data-mapping-key']).length, 0);
+  assert.match(textOf(tree).join(' '), /Multiple image inputs found.*\{\{image\}\}/i);
 });
 
 /* 提示词与负面词由工具参数直接写入：参数列表里不占行。 */
 
-test('the params table has no prompt or negative prompt rows', async () => {
+test('the params table only offers workflow-specific controls', async () => {
   const tree = await openParsed(SIZED_ANALYSIS);
   assert.ok(!hasRow(tree, 'prompt'), 'the prompt travels as the tool argument, not as a row');
   assert.ok(!hasRow(tree, 'negative_prompt'));
-  assert.match(textOf(tree).join(' '), /straight from the tool call/i,
-    'the panel has to say why these two are absent');
+  assert.match(textOf(tree).join(' '), /supported quality levels in the model picker/i);
   const boxes = findAll(tree, (node) => node.type === 'button'
     && node.props['data-param-field'] === 'expose');
-  assert.equal(boxes.length, 3, 'width, height and steps keep their expose toggles');
+  assert.equal(boxes.length, 1, 'only steps keeps its expose toggle');
   assert.ok(boxes.every((box) => box.props['aria-pressed'] === 'false'));
 });
 
@@ -2250,8 +2265,7 @@ test('删掉旧的种子/模型映射下拉后，两行仍在参数表里可编�
   const tree = await openParsed(SEED_MODEL_ANALYSIS, FIXED_SIZE_CONFIG);
   assert.equal(findAll(tree, (node) => node.props && node.props['data-mapping-key']).length, 0,
     '映射面板不再有种子/模型下拉');
-  assert.match(textOf(tree).join(' '), /straight from the tool call/i,
-    '提示词那句说明还在（解释它们为什么不在映射里）');
+  assert.match(textOf(tree).join(' '), /prompts are inserted automatically/i);
   const rows = commonRows(tree);
   const rowWith = (name) => rows.find((row) => findAll(row, (node) => node.props
     && node.props['data-param-field'] === 'name' && node.props.value === name).length);

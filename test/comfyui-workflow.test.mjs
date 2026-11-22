@@ -150,7 +150,7 @@ test('comfyui custom workflow uploads the reference and fills {{image}} on edit'
 test('comfyui custom workflow without {{image}} rejects an edit with a clear message', async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
-  globalThis.fetch = comfyFetch(() => jsonResponse({ error: 'should not be called' }, 500));
+  globalThis.fetch = () => assert.fail('an unsupported workflow must not upload or submit');
   const provider = {
     baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui', optionalKey: true,
     modelOptions: { 'my-model.safetensors': { workflow: CUSTOM_T2I } }
@@ -164,6 +164,70 @@ test('comfyui custom workflow without {{image}} rejects an edit with a clear mes
     }, new AbortController().signal),
     /\{\{image\}\}/
   );
+});
+
+test('ComfyUI binds a connected reference without a saved mapping or placeholder', async (t) => {
+  const model = 'workflow';
+  const workflow = JSON.stringify({
+    '1': { class_type: 'LoadImage', inputs: { image: 'old.png' } },
+    '2': { class_type: 'ImageEditor', inputs: { image: ['1', 0], prompt: '' } },
+    '3': { class_type: 'PreviewImage', inputs: { images: ['2', 0] } }
+  });
+  const provider = { adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', modelOptions: { [model]: { workflow } } };
+  const calls = [];
+  stubComfy(t, comfyFetch((kind, init) => {
+    calls.push(kind);
+    if (kind === 'upload') return jsonResponse({ name: 'ref.png', subfolder: 'images' });
+    if (kind === 'prompt') {
+      const graph = JSON.parse(init.body).prompt;
+      assert.equal(graph['1'].inputs.image, 'images/ref.png');
+      assert.equal(graph['2'].inputs.prompt, 'apply the edit');
+      return jsonResponse({ prompt_id: 'auto-ref' });
+    }
+    return jsonResponse({ 'auto-ref': { outputs: { '3': { images: [{ filename: 'preview.png', type: 'temp' }] } } } });
+  }));
+  const result = await resolveAdapter(provider, model).execute('edit', provider, {
+    model, prompt: 'apply the edit',
+    images: [{ buffer: Buffer.from(PNG_1PX, 'base64'), contentType: 'image/png' }]
+  });
+  assert.ok(result.bytes.length);
+  assert.deepEqual(calls, ['upload', 'prompt', 'history']);
+});
+
+test('numbered reference inputs reuse a slot and bind independently of node order', async (t) => {
+  const model = 'workflow';
+  const graph = {
+    '1': { class_type: 'LoadImage', inputs: { image: '{{image_2}}' }, _meta: { title: 'Style' } },
+    '2': { class_type: 'LoadImage', inputs: { image: '{{image_1}}' }, _meta: { title: 'Subject' } },
+    '3': { class_type: 'LoadImage', inputs: { image: '{{image}}' } },
+    '4': { class_type: 'LoadImage', inputs: { image: 'static-overlay.png' } },
+    '5': { class_type: 'ImageEditor', inputs: { subject: ['2', 0], style: ['1', 0], original: ['3', 0], overlay: ['4', 0], prompt: '' } },
+    '6': { class_type: 'PreviewImage', inputs: { images: ['5', 0] } }
+  };
+  const provider = {
+    adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188',
+    modelOptions: { [model]: { workflow: JSON.stringify(graph) } }
+  };
+  const adapter = resolveAdapter(provider, model);
+  const calls = [];
+  let uploads = 0;
+  stubComfy(t, comfyFetch((kind, init) => {
+    calls.push(kind);
+    if (kind === 'upload') return jsonResponse({ name: 'uploaded-' + ++uploads + '.png' });
+    if (kind === 'prompt') {
+      const submitted = JSON.parse(init.body).prompt;
+      assert.deepEqual(['1', '2', '3', '4'].map((id) => submitted[id].inputs.image),
+        ['uploaded-2.png', 'uploaded-1.png', 'uploaded-1.png', 'static-overlay.png']);
+      return jsonResponse({ prompt_id: 'numbered-ref' });
+    }
+    return jsonResponse({ 'numbered-ref': { outputs: { '6': { images: [{ filename: 'result.png' }] } } } });
+  }));
+  const image = { buffer: Buffer.from(PNG_1PX, 'base64'), filename: 'same.png', contentType: 'image/png' };
+  const edit = (images) => adapter.execute('edit', provider, { model, prompt: 'apply the edit', images });
+  await assert.rejects(() => edit([image]), /需要 2 张参考图/);
+  assert.deepEqual(calls, []);
+  await edit([image, image]);
+  assert.deepEqual(calls, ['upload', 'upload', 'prompt', 'history']);
 });
 
 test('comfyui rejects a custom workflow that is not valid JSON', async (t) => {
@@ -350,6 +414,9 @@ test('a builtin workflow still needs concrete numbers when the size is auto', as
 /* ------------------------------------------------ analyzeComfyWorkflow */
 
 import { analyzeComfyWorkflow } from '../lib/adapters.js';
+import { analyzeWorkflow, listWorkflowInputs } from '../lib/comfy-workflow.js';
+import { normalizeModelOptions, resolveSizeRequest, resolveToolQuality } from '../lib/config-store.js';
+import { fitSize, qualityOptionsFor } from '../lib/adapters.js';
 import { readFileSync } from 'node:fs';
 
 const sampleObjectInfo = () => JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
@@ -388,5 +455,79 @@ test('analyzeComfyWorkflow reports an unreachable object_info', async (t) => {
   await assert.rejects(
     () => analyzeComfyWorkflow({ base: 'http://127.0.0.1:9999', provider: {}, workflow: sdUiJson() }),
     /object_info|节点签名/
+  );
+});
+
+test('ComfyUI maps the prompt, size and quality directly from the model selector', async (t) => {
+  const graph = {
+    '1': { class_type: 'ImageGenerator', inputs: { prompt: '', width: 640, height: 960, image_quality: 'Low' } },
+    '2': { class_type: 'SaveImage', inputs: { images: ['1', 0], quality: 95 } }
+  };
+  const info = {
+    ImageGenerator: { input: { required: { image_quality: [['Low', 'Very High', 'Auto']] } } },
+    SaveImage: { output_node: true, input: { optional: { quality: ['INT'] } } }
+  };
+  const analysis = analyzeWorkflow(graph, info);
+  assert.deepEqual(analysis.mapping.prompt, { node: '1', input: 'prompt' });
+  assert.deepEqual(analysis.mapping.quality, { node: '1', input: 'image_quality' });
+  assert.deepEqual(analysis.warnings, []);
+  assert.deepEqual(analysis.params, []);
+  for (const schema of [info, undefined]) {
+    assert.deepEqual(listWorkflowInputs(graph, schema).map(({ node, input }) => [node, input]), [['2', 'quality']]);
+  }
+  const model = 'workflow';
+  const provider = {
+    adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188',
+    modelOptions: normalizeModelOptions({
+      [model]: {
+        workflow: JSON.stringify(graph), mapping: analysis.mapping, quality: analysis.quality,
+        params: [{ name: 'qualityAlias', node: '1', input: 'image_quality', type: 'text', expose: true }]
+      }
+    }, [model], 'comfyui')
+  };
+  const adapter = resolveAdapter(provider, model);
+  const quality = qualityOptionsFor(provider, model, adapter);
+  assert.equal(quality.default, 'low');
+  assert.deepEqual(quality.options.map((option) => option.value), ['off', 'low', 'very-high']);
+
+  const submitted = [];
+  stubComfy(t, comfyFetch((kind, init) => {
+    if (kind === 'prompt') {
+      submitted.push(JSON.parse(init.body).prompt);
+      return jsonResponse({ prompt_id: 'selector-test-' + submitted.length });
+    }
+    const id = 'selector-test-' + submitted.length;
+    return jsonResponse({ [id]: { outputs: { '2': { images: [{ filename: 'selector.png' }] } } } });
+  }));
+  const generate = async (defaults, args) => {
+    const requested = resolveSizeRequest(provider, model, defaults, args, adapter);
+    await adapter.execute('generate', provider, {
+      model, prompt: 'user prompt',
+      fitted: fitSize(provider, { kind: requested.control, text: requested.arg }, model, adapter),
+      quality: resolveToolQuality(provider, model, defaults, args, adapter),
+      params: { qualityAlias: 'bad', width: 2048, prompt: 'bad' }
+    });
+  };
+  await generate({ auto: false, width: 768, height: 1024, quality: 'low' }, { size: '832x1216', quality: 'very-high' });
+  await generate({ auto: true, quality: 'auto' }, { size: '832x1216', quality: 'very-high' });
+  await generate({ auto: true, quality: 'auto' }, {});
+  assert.deepEqual(submitted.map((workflow) => workflow['1'].inputs), [
+    { prompt: 'user prompt', width: 768, height: 1024, image_quality: 'Low' },
+    { prompt: 'user prompt', width: 832, height: 1216, image_quality: 'Very High' },
+    { prompt: 'user prompt', width: 640, height: 960, image_quality: 'Low' }
+  ]);
+  assert.ok(submitted.every((workflow) => workflow['2'].inputs.quality === 95));
+});
+
+test('ComfyUI rejects a workflow without a prompt input before submitting', async (t) => {
+  stubComfy(t, () => assert.fail('must not submit a workflow without a prompt'));
+  const model = 'workflow';
+  const workflow = JSON.stringify({
+    '1': { class_type: 'SaveImage', inputs: { filename_prefix: 'image' }, _meta: { title: '{{prompt}}' } }
+  });
+  const provider = { adapter: 'comfyui', baseUrl: 'http://127.0.0.1:8188', modelOptions: { [model]: { workflow } } };
+  await assert.rejects(
+    () => resolveAdapter(provider, model).execute('generate', provider, { model, prompt: 'user prompt' }),
+    /找不到可用的提示词输入/
   );
 });

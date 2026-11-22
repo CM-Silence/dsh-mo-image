@@ -175,6 +175,42 @@ test('Auto candidate details are scoped, reusable and refreshed when size or par
   assert.equal(calls.length, 0);
 });
 
+test('ComfyUI reference purposes are returned per candidate and update without repeating the catalog', async (t) => {
+  const cfg = config();
+  const provider = cfg.providers[0];
+  const [builtin, model] = provider.models;
+  provider.baseUrl = 'http://127.0.0.1:8188';
+  provider.adapter = provider.protocol = 'comfyui';
+  const graph = {
+    '1': { class_type: 'LoadImage', inputs: { image: '{{image_2}}' } },
+    '2': { class_type: 'LoadImage', inputs: { image: '{{image_1}}' }, _meta: { title: 'Subject image' } },
+    '3': { class_type: 'ImageEditor', inputs: { style_image: ['1', 0], subject_image: ['2', 0], prompt: '' } },
+    '4': { class_type: 'PreviewImage', inputs: { images: ['3', 0] } }
+  };
+  provider.modelOptions = { [model]: { workflow: JSON.stringify(graph) } };
+  cfg.active.model = 'auto';
+  const { settings, exec, home, calls } = await harness(t, cfg);
+  const catalog = await settings.execute({}, exec);
+  assert.deepEqual(catalog.models, [builtin, model]);
+  assert.deepEqual(catalog.referenceModelIndexes, [1]);
+  assert.equal(catalog.referenceImages, undefined);
+  const detail = await settings.execute({ model }, exec);
+  assert.deepEqual(detail.referenceImages, [
+    { index: 1, purpose: 'Subject image' }, { index: 2, purpose: 'style_image' }
+  ]);
+  assert.equal((await settings.execute({ model }, exec)).unchanged, true);
+  graph['1']._meta = { title: 'Style guide' };
+  provider.modelOptions[model].workflow = JSON.stringify(graph);
+  writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(cfg), 'utf8');
+  const changed = await settings.execute({}, exec);
+  assert.notEqual(changed.changes.referenceRevision, catalog.referenceRevision);
+  assert.deepEqual(Object.keys(changed.changes), ['referenceRevision']);
+  assert.deepEqual((await settings.execute({ model }, exec)).changes.referenceImages, [
+    { index: 1, purpose: 'Subject image' }, { index: 2, purpose: 'Style guide' }
+  ]);
+  assert.deepEqual(calls, []);
+});
+
 test('selector guards fixed model, size and quality while automatic settings permit validated choices', async (t) => {
   const cfg = config();
   cfg.providers[0].models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];

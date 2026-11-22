@@ -139,19 +139,34 @@ test('ComfyUI 自定义工作流没有图片槽时不能编辑', () => {
   assert.deepEqual(status.capabilities.editModels, []);
 });
 
-test('ComfyUI 工作流有 {{image}} 或图片映射时可以编辑', () => {
+test('ComfyUI edits through an automatically detected input, placeholder or saved mapping', () => {
   const withSlot = {
     id: 'p8', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',
     optionalKey: true, models: ['a.safetensors'],
-    modelOptions: { 'a.safetensors': { workflow: '{"2":{"inputs":{"image":"{{image}}"}}}' } }
+    modelOptions: { 'a.safetensors': { workflow: '{"2":{"class_type":"CustomLoader","inputs":{"image":"{{image}}"}}}' } }
   };
   assert.equal(canEditModel(withSlot, 'a.safetensors', resolveAdapter(withSlot, 'a.safetensors')), true);
 
   const withMapping = {
     ...withSlot, id: 'p9', models: ['b.safetensors'],
-    modelOptions: { 'b.safetensors': { workflow: '{}', mapping: { image: { node: '2', input: 'image' } } } }
+    modelOptions: { 'b.safetensors': {
+      workflow: '{"2":{"class_type":"CustomLoader","inputs":{"image":"old.png"}}}',
+      mapping: { image: { node: '2', input: 'image' } }
+    } }
   };
   assert.equal(canEditModel(withMapping, 'b.safetensors', resolveAdapter(withMapping, 'b.safetensors')), true);
+
+  const graph = {
+    '1': { class_type: 'LoadImage', inputs: { image: 'old.png' } },
+    '2': { class_type: 'PreviewImage', inputs: { images: ['1', 0] } }
+  };
+  const auto = { ...withSlot, modelOptions: { 'a.safetensors': { workflow: JSON.stringify(graph) } } };
+  const adapter = resolveAdapter(auto, 'a.safetensors');
+  assert.equal(canEditModel(auto, 'a.safetensors', adapter), true);
+  graph['2'].inputs.images[1] = 1;
+  auto.modelOptions['a.safetensors'].workflow = JSON.stringify(graph);
+  auto.modelOptions['a.safetensors'].mapping = { image: { node: '1', input: 'image' } };
+  assert.equal(canEditModel(auto, 'a.safetensors', adapter), false, 'a stale mask-only binding cannot enable edit');
 
   const builtin = {
     id: 'p10', name: 'ComfyUI', baseUrl: 'http://127.0.0.1:8188', adapter: 'comfyui',

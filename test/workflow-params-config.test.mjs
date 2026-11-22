@@ -127,20 +127,24 @@ test('role params only offer what the model can still tune', () => {
     image: null
   };
   assert.deepEqual(collectRoleParams(graph, mapping, null).map((param) => param.name),
-    ['width', 'height', 'seed']);
+    ['seed']);
 });
 
-test('a size parameter can still be switched on by hand when a workflow needs it', () => {
+test('legacy exposure flags cannot expose selector-managed ComfyUI inputs', () => {
   const provider = {
     modelOptions: {
       m1: {
         workflow: '{}',
-        params: [{ name: 'width', role: true, node: '2', input: 'width', type: 'INT' }],
+        mapping: { quality: { node: '3', input: 'image_quality' } },
+        params: [
+          { name: 'width', role: true, node: '2', input: 'width', type: 'INT' },
+          { name: 'qualityAlias', node: '3', input: 'image_quality', type: 'enum', expose: true }
+        ],
         expose: { width: true }
       }
     }
   };
-  assert.deepEqual(workflowParamsOf(provider, 'm1', { id: 'comfyui' }).map((param) => param.name), ['width']);
+  assert.equal(workflowParamsOf(provider, 'm1', { id: 'comfyui' }), undefined);
 });
 
 /* ───── 模型行（role:'model'）：暴露只由「选择器是不是自动」推导 ───── */
@@ -190,13 +194,13 @@ test('模型行的推导不牵连其它参数行', () => {
 test('role params take their type from object_info and never report a link as a string', () => {
   const objectInfo = JSON.parse(readFileSync('test/fixtures/object-info.sample.json', 'utf8'));
   const graph = {
-    '18:6': { class_type: 'EmptyFlux2LatentImage', inputs: { width: ['19', 0], height: ['19', 1], batch_size: 1 } }
+    '18:7': { class_type: 'KSampler', inputs: { seed: ['19', 0] } }
   };
-  const mapping = { width: { node: '18:6', input: 'width' }, height: { node: '18:6', input: 'height' } };
+  const mapping = { seed: { node: '18:7', input: 'seed' } };
   const params = collectRoleParams(graph, mapping, objectInfo);
-  const width = params.find((item) => item.name === 'width');
-  assert.equal(width.type, 'INT');
-  assert.equal(width.default, undefined, 'a link is not a usable default');
+  const seed = params.find((item) => item.name === 'seed');
+  assert.equal(seed.type, 'INT');
+  assert.equal(seed.default, undefined, 'a link is not a usable default');
 });
 
 const A1111_PROVIDER = {

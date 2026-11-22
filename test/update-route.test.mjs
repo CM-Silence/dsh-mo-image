@@ -76,8 +76,7 @@ test('the update route reports status and starts an install', async (t) => {  co
         }
         return { ok: true, async text() { return `## v${NEXT}\n\n- 新功能\n`; } };
       },
-      registryBase: 'http://npm.test',
-      mirrorBase: 'http://npm-mirror.test',
+      registryBase: 'http://npm-mirror.test',
       cdnSources: [(version) => `http://cdn.test/${version}/CHANGELOG.md`],
       installDelayMs: 0
     }
@@ -100,7 +99,7 @@ test('the update route reports status and starts an install', async (t) => {  co
   assert.equal(secondBody.state, 'available');
   assert.equal(secondBody.latest, NEXT);
   assert.equal(secondBody.notes, '- 新功能');
-  assert.ok(requests.some((url) => url.includes('/dsh-mo-image/latest')));
+  assert.ok(requests.includes('http://npm-mirror.test/dsh-mo-image/latest'));
   assert.ok(requests.some((url) => url.includes('/CHANGELOG.md')));
 
   const applyRes = makeRes();
@@ -111,6 +110,7 @@ test('the update route reports status and starts an install', async (t) => {  co
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(installs.length, 1);
   assert.equal(installs[0].spec, `dsh-mo-image@${NEXT}`);
+  assert.equal(installs[0].options.registry, 'http://npm-mirror.test');
 
   const ackRes = makeRes();
   await route.handler(jsonReq('POST', { action: 'ack' }), ackRes);

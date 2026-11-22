@@ -58,41 +58,22 @@ test('readMarker treats broken json as absent and clearMarker removes the file',
   assert.equal(readMarker(file), null);
 });
 
-test('fetchLatestVersion reads npm and falls back to the mirror', async (t) => {
-  let primaryDown = true;
-  const server = createServer((req, res) => {
-    if (req.url === '/dsh-mo-image/latest') {
-      if (primaryDown) { res.writeHead(503); res.end('down'); return; }
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ name: 'dsh-mo-image', version: '0.4.2' }));
-      return;
-    }
-    if (req.url === '/mirror/dsh-mo-image/latest') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ name: 'dsh-mo-image', version: '0.4.2' }));
-      return;
-    }
-    res.writeHead(404); res.end();
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const viaMirror = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
+test('fetchLatestVersion only checks npmmirror, including when the mirror fails', async () => {
+  const mirrorUrl = 'https://registry.npmmirror.com/dsh-mo-image/latest';
+  const checked = [];
+  const request = async (url, { redirect }) => {
+    checked.push(url);
+    assert.equal(redirect, 'error');
+    return checked.length === 1 ? Response.json({ version: '0.4.2' }) : new Response(null, { status: 503 });
+  };
+  const viaMirror = await fetchLatestVersion({ request });
   assert.equal(viaMirror.version, '0.4.2');
   assert.match(viaMirror.url, /npmjs\.com\/package\/dsh-mo-image\/v\/0\.4\.2/);
-
-  primaryDown = false;
-  const viaPrimary = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
-  assert.equal(viaPrimary.version, '0.4.2');
-
   const reasons = [];
-  const none = await fetchLatestVersion({
-    registryBase: `${base}/x`, mirrorBase: `${base}/y`, request: fetch,
-    onError: (reason) => reasons.push(reason)
-  });
+  const none = await fetchLatestVersion({ request, onError: (reason) => reasons.push(reason) });
   assert.equal(none, null);
-  assert.equal(reasons.length, 1);
-  assert.match(reasons[0], /503|HTTP 404/);
+  assert.deepEqual(checked, [mirrorUrl, mirrorUrl]);
+  assert.deepEqual(reasons, ['https://registry.npmmirror.com: HTTP 503']);
 });
 
 test('alpha and beta versions are never offered as an update', async (t) => {
@@ -103,7 +84,7 @@ test('alpha and beta versions are never offered as an update', async (t) => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const beta = await fetchLatestVersion({ registryBase: base, mirrorBase: `${base}/mirror`, request: fetch });
+  const beta = await fetchLatestVersion({ registryBase: base, request: fetch });
   assert.equal(beta, null);
 
   assert.equal(isHiddenPrerelease('0.9.0-a1'), true);
