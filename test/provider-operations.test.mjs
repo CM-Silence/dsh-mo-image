@@ -215,7 +215,10 @@ function mount(home, saved = new Map()) {
   const ctx = {
     effect(fn) { return fn(); },
     inject(_deps, fn) { fn(ctx); },
-    get(name) { return name === 'credentials' ? this.credentials : undefined; },
+    get(name) {
+      if (name === 'connection') return { requestRejection: () => undefined };
+      if (name === 'credentials') return this.credentials;
+    },
     credentials: {
       async resolve(ref) { return { value: saved.get(ref) }; },
       async describe(ref) { return { configured: saved.has(ref), source: 'file' }; },

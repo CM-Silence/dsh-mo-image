@@ -65,7 +65,10 @@ test('config route migrates keys to the credentials store and never returns them
       register(route) { routes.push(route); return () => {}; },
       getOrigin() { return 'http://127.0.0.1:1'; }
     },
-    get(name) { return name === 'credentials' ? credentials : undefined; }
+    get(name) {
+      if (name === 'connection') return { requestRejection: () => undefined };
+      if (name === 'credentials') return credentials;
+    }
   };
   const mod = await import('../lib/index.js?config-route-test');
   mod.apply(fake);
@@ -290,7 +293,7 @@ test('config route migrates keys to the credentials store and never returns them
   assert.equal(badJson.status, 502);
   assert.equal(JSON.parse(badJson.body).code, 'request.invalidJson');
 
-  fake.get = () => undefined;
+  fake.get = (name) => name === 'connection' ? { requestRejection: () => undefined } : undefined;
   const noCredentials = makeRes();
   await route.handler(jsonReq('POST', JSON.stringify({
     config: {
@@ -378,7 +381,7 @@ async function bootRuleRoutes(t, seq, config) {
       register(route) { routes.push(route); return () => {}; },
       getOrigin() { return 'http://127.0.0.1:1'; }
     },
-    get() { return undefined; }
+    get(name) { return name === 'connection' ? { requestRejection: () => undefined } : undefined; }
   };
   const mod = await import('../lib/index.js?config-route-rules-' + seq);
   mod.apply(fake);

@@ -217,7 +217,7 @@ $DSH_HOME/mo-image/out/
 
 聊天里新生成的图片使用本地文件绝对路径，支持本地图片菜单的 DSH 客户端可以通过宿主读取原图、复制图片并在桌面文件夹中定位。找不到会话目录，或图片超过宿主的本地预览上限时，使用签名预览。
 
-旧聊天中的 `/api/mo-image/preview/<basename>` 和签名预览链接继续可用。HMAC 签名 key 保存在 `$DSH_HOME/mo-image/preview.key`，因此签名链接在宿主重启后仍然有效。
+登录 DSH 后，旧聊天中的 `/api/mo-image/preview/<basename>` 和签名预览链接都可用。HMAC 签名 key 保存在 `$DSH_HOME/mo-image/preview.key`，因此签名链接在宿主重启后仍然有效。
 
 建议把 `generated-images/` 加进项目的 `.gitignore`，避免把生成图误提交。
 

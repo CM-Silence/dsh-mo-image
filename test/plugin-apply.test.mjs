@@ -129,4 +129,52 @@ test('apply registers tools, the prompt section and runtime skills', async (t) =
   assert.ok(routes.some((route) => route.path === '/api/mo-image/comfy/params'),
     'the settings page needs the params route to list literal inputs as parameter candidates');
   assert.deepEqual(routes.map((route) => route.path).sort(), ['/api/mo-image/comfy/analyze', '/api/mo-image/comfy/params', '/api/mo-image/config', '/api/mo-image/detect-model-rule', '/api/mo-image/detect-protocol', '/api/mo-image/models', '/api/mo-image/preview', '/api/mo-image/update']);
+
+  await t.test('all HTTP routes require DSH admission before entering their handlers', async () => {
+    const rejected = {
+      method: 'POST',
+      headers: { host: 'localhost', 'content-type': 'application/json' },
+      get url() { assert.fail('rejected requests must not resolve preview paths'); },
+      [Symbol.asyncIterator]() { assert.fail('rejected requests must not read the body'); }
+    };
+    const enter = async (route, request, peer) => {
+      const response = {
+        writeHead(status, headers) { this.status = status; this.headers = headers; },
+        end(body) { this.body = JSON.parse(body); }
+      };
+      await route.handler(request, response, peer);
+      return response;
+    };
+    const configRoute = routes.find((route) => route.path === '/api/mo-image/config');
+    for (const route of routes) {
+      assert.equal(route.auth, 'required', route.path);
+      assert.equal((await enter(route, rejected)).status, 503, route.path);
+    }
+    for (const status of [401, 403]) {
+      provided.set('connection', {
+        requestRejection(req) {
+          assert.equal(req, rejected);
+          return status;
+        }
+      });
+      for (const route of routes) {
+        const response = await enter(route, rejected);
+        assert.equal(response.status, status, route.path);
+        assert.equal(response.headers['Cache-Control'], 'no-store');
+        assert.equal(response.body.ok, false);
+      }
+    }
+    provided.set('connection', { requestRejection() { throw new Error('service offline'); } });
+    assert.equal((await enter(configRoute, rejected)).status, 503);
+
+    // 0.2.3 already authenticates the request before the handler and supplies its live Peer.
+    provided.delete('connection');
+    const owner = { principal: { kind: 'owner' }, signal: new AbortController().signal };
+    const guest = { ...owner, principal: { kind: 'guest' } };
+    assert.equal((await enter(configRoute, rejected, guest)).status, 403);
+    assert.equal((await enter(configRoute, rejected, { ...owner, signal: AbortSignal.abort() })).status, 401);
+    const response = await enter(configRoute, { method: 'GET', headers: { host: 'localhost' } }, owner);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.config.providers[0].key, undefined);
+  });
 });

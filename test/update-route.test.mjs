@@ -63,7 +63,10 @@ test('the update route reports status and starts an install', async (t) => {  co
     },
     systemPrompt: { section() { return () => {}; } },
     skills: { register() { return () => {}; } },
-    get(name) { return name === 'pluginManager' ? pluginManager : undefined; }
+    get(name) {
+      if (name === 'connection') return { requestRejection: () => undefined };
+      if (name === 'pluginManager') return pluginManager;
+    }
   };
   const requests = [];
   const mod = await import('../lib/index.js?update-route-test');
@@ -137,7 +140,7 @@ test('a finished update is reported on the first status read after a restart', a
     webServer: { register(route) { routes.push(route); return () => {}; }, getOrigin() { return 'http://127.0.0.1:1'; } },
     systemPrompt: { section() { return () => {}; } },
     skills: { register() { return () => {}; } },
-    get() { return undefined; }
+    get(name) { return name === 'connection' ? { requestRejection: () => undefined } : undefined; }
   };
   const mod = await import('../lib/index.js?update-done-test');
   mod.apply(fake, { update: { skipCheck: true } });

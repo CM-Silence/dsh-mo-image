@@ -57,7 +57,7 @@ async function setup(t) {
     inject(_deps, callback) { callback(fake); },
     tools: { register() { return () => {}; } },
     webServer: { register(route) { routes.push(route); return () => {}; }, getOrigin() { return 'http://127.0.0.1:1'; } },
-    get() { return undefined; }
+    get(name) { return name === 'connection' ? { requestRejection: () => undefined } : undefined; }
   };
   const mod = await import('../lib/index.js?detect-protocol-verify-test');
   mod.apply(fake, { update: { skipCheck: true } });

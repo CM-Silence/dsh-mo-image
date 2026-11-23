@@ -45,7 +45,10 @@ function fakeContext() {
         register(route) { routes.push(route); return () => {}; },
         getOrigin() { return 'http://127.0.0.1:1'; }
       },
-      get(name) { return name === 'credentials' ? credentials : undefined; }
+      get(name) {
+        if (name === 'connection') return { requestRejection: () => undefined };
+        if (name === 'credentials') return credentials;
+      }
     }
   };
 }

@@ -47,6 +47,7 @@ test('generation resolves the key from the credentials service without a config 
   };
   const tools = [];
   const routes = [];
+  const previewHeaders = { cookie: 'dsh-test-session=valid' };
   let currentDirectory = worktree;
   let maxImageBytes;
   const projections = { stateOf(_session, key) { return key === 'workingDirectory' ? currentDirectory : null; } };
@@ -59,6 +60,9 @@ test('generation resolves the key from the credentials service without a config 
       getOrigin() { return 'http://127.0.0.1:1'; }
     },
     get(name) {
+      if (name === 'connection') return {
+        requestRejection: (req) => req.headers.cookie === previewHeaders.cookie ? undefined : 401
+      };
       if (name === 'credentials') return credentials;
       if (name === 'sessionProjections') return projections;
       if (name === 'attachments') return { imageLimits: { maxImageBytes } };
@@ -128,18 +132,25 @@ test('generation resolves the key from the credentials service without a config 
   }));
   await once(server, 'listening');
   const href = 'http://127.0.0.1:' + server.address().port + new URL(url[1]).pathname;
+  const legacyHref = new URL('/api/mo-image/preview/' + encodeURIComponent(path.basename(script.path)), href);
   const bytes = Buffer.concat([Buffer.from(PNG_1PX, 'base64'), Buffer.alloc(192 * 1024)]);
   writeFileSync(script.path, bytes);
-  const res = await originalFetch(href);
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get('content-length'), String(bytes.length));
-  assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes);
-  assert.equal(await handled, true);
+  for (const link of [href, legacyHref]) {
+    const anonymous = await originalFetch(link);
+    assert.equal(anonymous.status, 401);
+    assert.deepEqual(await anonymous.json(), { ok: false, error: 'unauthorized' });
+
+    const res = await originalFetch(link, { headers: previewHeaders });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-length'), String(bytes.length));
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes);
+    assert.equal(await handled, true);
+  }
 
   await t.test('an interrupted preview finishes its handler without writing the rest of the file', { timeout: 5000 }, async (previewTest) => {
     const length = 16 * 1024 * 1024;
     truncateSync(script.path, length);
-    const request = get(href, { agent: false });
+    const request = get(href, { agent: false, headers: previewHeaders });
     previewTest.after(() => { request.destroy(); });
     const [response] = await once(request, 'response', { signal: previewTest.signal });
     assert.equal(response.statusCode, 200);
@@ -152,7 +163,7 @@ test('generation resolves the key from the credentials service without a config 
   });
 
   unlinkSync(script.path);
-  const missing = await originalFetch(href);
+  const missing = await originalFetch(href, { headers: previewHeaders });
   assert.equal(missing.status, 404);
   assert.deepEqual(await missing.json(), { ok: false, error: 'not found' });
 });

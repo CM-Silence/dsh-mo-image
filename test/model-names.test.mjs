@@ -46,7 +46,7 @@ async function bootRoute(t) {
       register(route) { routes.push(route); return () => {}; },
       getOrigin() { return 'http://127.0.0.1:1'; }
     },
-    get() { return undefined; }
+    get(name) { return name === 'connection' ? { requestRejection: () => undefined } : undefined; }
   };
   const mod = await import('../lib/index.js?model-names-test');
   mod.apply(fake);
