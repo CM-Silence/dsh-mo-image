@@ -27,7 +27,7 @@ function t(key, params) {
 const MORE = '__more__';
 
 /** 状态化的 React 替身：setState 之后重渲染，和设置页里的行为一致。 */
-function createHarness({ adapters = adapterManifest(), detect = null } = {}) {
+function createHarness({ adapters = adapterManifest(), detect = null, flushSync } = {}) {
   let loaded = null;
   let dirty = false;
   const stores = new Map();
@@ -94,7 +94,7 @@ function createHarness({ adapters = adapterManifest(), detect = null } = {}) {
   vm.runInNewContext(source, context, { filename: 'client.js' });
   const api = loaded.factory((name) => {
     if (name === 'react') return React;
-    if (name === 'react-dom') return { createPortal(node) { return node; } };
+    if (name === 'react-dom') return { createPortal(node) { return node; }, flushSync };
     return {};
   });
   api.apply({
@@ -251,6 +251,7 @@ test('点「更多协议…」展开全部协议并按组分段，且它不会�
 
   const expanded = protocolSelect(client.renderForm(props));
   const values = optionValues(expanded);
+  assert.equal(expanded.props.size, 8, '旧内核也立即显示分组列表，无需再次点开');
   const ids = adapterManifest().map((adapter) => adapter.id);
   for (const id of ids) assert.ok(values.includes(id), '展开后要能看到 ' + id);
   assert.equal(values.filter((value) => value === '').length, 1, '只有一条「未选择」占位');
@@ -260,6 +261,30 @@ test('点「更多协议…」展开全部协议并按组分段，且它不会�
   assert.equal(expanded.props.value, '', '「更多协议…」不能写进 draft');
   assert.deepEqual(optgroupLabels(expanded), ['通用', '兼容网关', '各家原生', '本地部署', '异步任务']);
   assert.ok(optionTexts(expanded).includes('Stability AI'), '长尾协议的短名字');
+});
+
+test('更多协议在原生选择器可用时同步展开并重新打开', () => {
+  const client = createHarness({ flushSync: (update) => update() });
+  client.setCatalog();
+  const props = formProps(providerFixture());
+  let opened = false;
+  let picker = {
+    showPicker() {
+      const select = protocolSelect(client.renderForm(props));
+      assert.ok(optionValues(select).includes('stability'));
+      opened = true;
+    }
+  };
+  protocolSelect(client.renderForm(props)).props.onChange({ target: { value: MORE }, currentTarget: picker });
+  assert.equal(opened, true);
+  assert.equal(protocolSelect(client.renderForm(props)).props.size, undefined);
+
+  picker = { showPicker() { throw new Error('Native picker declined'); } };
+  protocolSelect(client.remount(props)).props.onChange({ target: { value: MORE }, currentTarget: picker });
+  const expanded = protocolSelect(client.renderForm(props));
+  assert.equal(expanded.props.size, 8);
+  expanded.props.onKeyDown({ key: 'Escape' });
+  assert.ok(optionValues(protocolSelect(client.renderForm(props))).includes(MORE));
 });
 
 test('展开后选中长尾协议：下拉回到收起状态并显示它自己的名字', () => {

@@ -840,6 +840,7 @@ const CUSTOM_RELAY_CONFIG = {
       edit: '',
       models: 'https://api.siliconflow.cn/v1/models'
     },
+    operations: { generate: { output: 'openai' } },
     models: ['Qwen/Qwen-Image'], names: {}
   }],
   active: { providerId: 'p9', model: 'Qwen/Qwen-Image' },
@@ -1411,6 +1412,7 @@ test('一键配置不会撤销「这个模型不发质量」：用户关掉过�
         models: 'https://api.siliconflow.cn/v1/models'
       },
       models: ['Qwen/Qwen-Image'], names: {},
+      operations: { generate: { output: 'openai' } },
       modelOptions: { 'Qwen/Qwen-Image': { quality: { supported: false } } }
     }],
     active: { providerId: 'p9', model: 'Qwen/Qwen-Image' },
@@ -3382,6 +3384,7 @@ test('一键配置不会撤销「这个模型不发参考图」：用户关掉�
         models: 'https://api.siliconflow.cn/v1/models'
       },
       models: ['Qwen/Qwen-Image'], names: {},
+      operations: { generate: { output: 'openai' } },
       modelOptions: { 'Qwen/Qwen-Image': { fields: { image: null } } }
     }],
     active: { providerId: 'p9', model: 'Qwen/Qwen-Image' },

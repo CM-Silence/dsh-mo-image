@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 import { normalizeConfig } from '../lib/config-store.js';
+import { resolveConfiguredOutput } from '../lib/provider-operations.js';
 
 const T = {
   'form.route.generate': '文生图',
@@ -43,10 +44,12 @@ const T = {
   'form.keyLocalOptional': '本地无鉴权可留空',
   'form.keyEnter': '输入 API 密钥',
   'form.providerUnrecognized': '未识别出提供商预设，将使用通用协议配置；如需零配置体验，请从「第三方模型提供商」里选择。',
+  'form.operationOutput': '{operation}返回格式',
+  'form.outputPreset.required': '请选择{operation}返回格式。',
   'form.outputPreset.customLegacy': '自定义（来自旧配置）',
   'form.outputPreset.customLegacyHint': '当前值是以前手写的返回配置，原样保留；上面的预设选一个即可覆盖它。'
 };
-const t = (key) => T[key] || key;
+const t = (key, params) => (T[key] || key).replace('{operation}', params?.operation ?? '{operation}');
 
 /** 客户端在主清单缺 authModes 时的兜底顺序。 */
 const AUTH_MODES = ['bearer', 'api-key', 'x-key', 'fal-key', 'custom', 'none', 'basic', 'query'];
@@ -374,7 +377,7 @@ test('协议确定时锁死这三项：鉴权方式、文生图返回格式、�
   assert.ok(protocolPanelControls(relay)['图生图端点'], '图生图端点跟着协议照常渲染');
 });
 
-test('协议未知或自定义时可选择返回预设、手写 JSON 或跟随协议', () => {
+test('自定义协议可选返回预设或手写 JSON，未选协议时仍显示协议默认项', () => {
   for (const adapter of ['custom', '']) {
     const client = loadClient();
     client.setCatalog();
@@ -392,11 +395,14 @@ test('协议未知或自定义时可选择返回预设、手写 JSON 或跟随�
     for (const label of ['文生图返回格式', '图生图返回格式']) {
       const select = controls[label];
       assert.ok(select, (adapter || '(自动)') + '：' + label + ' 要渲染');
+      const defaultOption = adapter === 'custom' ? '' : 'inherit';
+      const options = collect(select, (item) => item.type === 'option');
       assert.deepEqual(
-        collect(select, (item) => item.type === 'option').map((option) => option.props.value),
-        ['inherit', 'openai', 'binary', 'task-json', 'custom-json']
+        options.map((option) => option.props.value),
+        [defaultOption, 'openai', 'binary', 'task-json', 'custom-json']
       );
-      assert.equal(select.props.value, 'inherit', '默认响应由协议决定');
+      assert.equal(select.props.value, defaultOption);
+      assert.equal(options[0].props.disabled, adapter === 'custom', '自定义协议的未选择状态不能选回去');
     }
   }
 });
@@ -475,7 +481,7 @@ test('鉴权方式的取值回显 provider.auth，认不出的值回落到协议
     '认不出的值 = 没设 = 显示协议默认值');
 });
 
-test('三项都没动过就不落盘：只有手改过的才写进配置', async () => {
+test('自定义协议的使用中端点需要返回格式，默认鉴权留空', async () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -490,20 +496,46 @@ test('三项都没动过就不落盘：只有手改过的才写进配置', async
   const save = () => collect(render(), (item) => item.type === 'button'
     && text(item).join('').includes('form.save')).pop();
 
-  // 默认值只是「显示」：不写这三个字段，配置里就没有它们。
+  await save().props.onClick();
+  assert.equal(saved, null, '有端点的文生图必须选择返回格式');
+  assert.match(text(render()).join(' '), /请选择文生图返回格式/);
+
+  protocolPanelControls(render())['文生图返回格式'].props.onChange({ target: { value: 'binary' } });
   await save().props.onClick();
   assert.equal('auth' in saved, false, '默认鉴权只是显示，不落盘');
-  assert.equal('operations' in saved, false, '默认返回格式也只是显示');
+  assert.equal(saved.operations.generate.output, 'binary');
+  assert.equal(saved.operations.edit, undefined, '没填图生图端点，不要求选择格式');
 
-  // 手改一项才写一项。
   protocolPanelControls(render())['鉴权方式'].props.onChange({ target: { value: 'api-key' } });
   await save().props.onClick();
   assert.deepEqual(Object.keys(saved.auth), ['mode'], '选了具体模式才落盘');
   assert.equal(saved.auth.mode, 'api-key');
+});
 
-  protocolPanelControls(render())['文生图返回格式'].props.onChange({ target: { value: 'binary' } });
+test('自定义协议的旧图生图端点使用 auto 时必须重新选择格式才能保存', async () => {
+  const client = loadClient({ preserveFormState: true });
+  client.setCatalog();
+  const provider = {
+    id: 'p1', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom',
+    operations: {
+      generate: { path: 'render', output: 'openai' },
+      edit: { path: 'edit', output: 'auto' }
+    },
+    models: []
+  };
+  let saved = null;
+  const render = () => client.render(client.h(client.form(), {
+    provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t
+  }));
+  const save = () => collect(render(), (item) => item.type === 'button'
+    && text(item).join('').includes('form.save')).pop();
+  assert.equal(protocolPanelControls(render())['图生图返回格式'].props.value, '');
   await save().props.onClick();
-  assert.equal(saved.operations.generate.output, 'binary');
+  assert.equal(saved, null);
+  assert.match(text(render()).join(' '), /请选择图生图返回格式/);
+  protocolPanelControls(render())['图生图返回格式'].props.onChange({ target: { value: 'binary' } });
+  await save().props.onClick();
+  assert.equal(saved.operations.edit.output, 'binary');
 });
 
 test('换协议 = 这三项回到默认：上一套协议的鉴权与两级返回格式都清掉', async () => {
@@ -1437,7 +1469,7 @@ test('编辑页展开「自定义设置」：显示名称 → API 地址 → 协
   assert.ok(at(protocol) < at(directory), '模型目录排在协议设置之后');
   assert.ok(at(directory) < at(fetch), '拉取按钮跟着模型目录');
 
-  // 自定义协议：路由排在模型目录之后，是折叠区里的最后一块。
+  // 自定义协议的端点紧跟协议控件。
   const gateway = renderForm(client, {
     id: 'p2', name: 'Gateway', baseUrl: 'https://g.example/v1', adapter: 'custom', models: ['m'], names: {}
   });
@@ -1447,7 +1479,8 @@ test('编辑页展开「自定义设置」：显示名称 → API 地址 → 协
   assert.ok(route && gatewayDirectory, '路由与模型目录都在');
   assert.ok(insideOf(gatewayAdvanced, route), '路由收在「自定义设置」里');
   const gatewayOrder = preorder(gatewayAdvanced);
-  assert.ok(gatewayOrder.indexOf(gatewayDirectory) < gatewayOrder.indexOf(route), '路由排在模型目录之后');
+  assert.ok(gatewayOrder.indexOf(protocolPanelControls(gateway)['API 协议']) < gatewayOrder.indexOf(route));
+  assert.ok(gatewayOrder.indexOf(route) < gatewayOrder.indexOf(gatewayDirectory), '端点排在模型目录之前');
 
   // 调度模型（openai-responses 才有）同样在折叠区里，排在模型目录之后。
   const responses = renderForm(client, {
@@ -1460,7 +1493,7 @@ test('编辑页展开「自定义设置」：显示名称 → API 地址 → 协
   assert.ok(insideOf(responsesAdvanced, hostModel), '调度模型收在「自定义设置」里');
 });
 
-test('自定义协议：路由 / 调度模型排在模型目录之后，请求与返回格式跟着协议同住一个折叠区', () => {
+test('自定义协议的端点与返回格式在模型目录之前，并处于同一个折叠区', () => {
   const client = loadClient();
   client.setCatalog();
   const gateway = renderForm(client, {
@@ -1479,7 +1512,7 @@ test('自定义协议：路由 / 调度模型排在模型目录之后，请求�
   const directory = collect(gateway, (n) => String((n.props || {}).className || '').endsWith('modelCatalog'))[0];
   const order = preorder(advanced);
   assert.ok(order.indexOf(operations) < order.indexOf(directory), '返回格式（协议）排在模型目录之前');
-  assert.ok(order.indexOf(directory) < order.indexOf(route), '路由排在模型目录之后');
+  assert.ok(order.indexOf(route) < order.indexOf(operations), '路由排在返回格式之前');
 
   const responses = renderForm(client, {
     id: 'p2', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
@@ -1711,7 +1744,7 @@ test('新建「自定义模型 API」：协议这一组全部平铺，没有折�
   }
 });
 
-test('新建「自定义模型 API」：模型目录 / 路由 / 调度模型平铺在返回格式之后', () => {
+test('新建「自定义模型 API」：三个端点紧跟协议，返回格式位于模型目录之前', () => {
   const client = loadClient({ customMode: true });
   client.setCatalog();
   const gateway = renderForm(client, {
@@ -1738,13 +1771,16 @@ test('新建「自定义模型 API」：模型目录 / 路由 / 调度模型平�
   for (const [label, control] of [['请求与返回格式', operations], ['模型目录', directory], ['路由', route]]) {
     assert.equal(insideAnyDetails(gateway, control), false, label + ' 平铺');
   }
-  // 顺序：返回格式 → 模型目录 → 路由（协议相关在前、接入细节在后）。
+  // 协议 → 三个端点 → 返回格式 → 模型目录。
   const order = preorder(formRoot(gateway));
   const at = (target) => order.indexOf(target);
   assert.ok(at(operations) < at(directory), '模型目录排在返回格式之后');
-  assert.ok(at(directory) < at(route), '路由排在模型目录之后');
+  const protocol = protocolPanelControls(gateway)['API 协议'];
+  const routes = collect(gateway, (n) => n.type === 'input' && /^route-/.test(n.props.name));
+  assert.deepEqual(routes.map((field) => field.props.name), ['route-generate', 'route-edit', 'route-models']);
+  assert.ok(at(protocol) < at(routes[0]) && at(routes[2]) < at(operations));
 
-  // 调度模型（openai-responses 才有）同样平铺，排在路由之后。
+  // 调度模型（openai-responses 才有）同样平铺。
   const responses = renderForm(client, {
     id: 'p2', name: 'Responses', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-responses',
     hostModel: 'gpt-5.2', models: [], names: {}
@@ -1920,15 +1956,21 @@ test('自定义操作预览使用实际端点，返回预设可直接写入草�
   assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/render/);
   assert.match(routeHelpOf(tree).props['aria-description'], /https:\/\/g\.example\/v1\/catalog/);
   assert.notEqual(fetchButton(tree).props.disabled, true);
-  assert.equal(select(tree).props.value, 'inherit', '默认使用协议的响应格式');
+  assert.equal(select(tree).props.value, '', '自定义协议等待用户选择返回格式');
   select(tree).props.onChange({ target: { value: 'binary' } });
   tree = render();
   assert.equal(select(tree).props.value, 'binary');
+  const route = collect(tree, (item) => item.props.name === 'route-generate')[0];
+  assert.equal(route.props.value, 'v1/render', '回显的是实际使用的端点');
+  route.props.onChange({ target: { value: 'v2/render' } });
+  tree = render();
+  assert.match(routeHelpOf(tree).props['aria-description'], /v2\/render/);
   const save = collect(tree, (item) => item.type === 'button'
     && text(item).join('').includes('form.save')).pop();
   await save.props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(saved.operations.generate)),
-    { path: 'v1/render', method: 'POST', output: 'binary' }, '只改 output，端点与方法照旧');
+    { path: 'v2/render', method: 'POST', output: 'binary' });
+  assert.equal(saved.customEndpoints.generate, 'v2/render');
 });
 
 test('自定义协议的返回格式默认只显示文生图和图生图下拉', () => {
@@ -1990,7 +2032,7 @@ test('自定义协议：老配置里手写的 operations 界面上不显示，�
   const operations = {
     version: 1,
     generate: { method: 'PATCH', path: 'v1/render', transport: 'json', fields: { prompt: { path: 'input.text' } }, output: 'binary' },
-    edit: { method: 'POST', path: 'v1/edit' },
+    edit: { method: 'POST', path: 'v1/edit', output: 'openai' },
     models: { method: 'GET', path: 'v1/catalog' }
   };
   let saved = null;
@@ -2085,7 +2127,7 @@ test('自定义 JSON 保存前校验语法，更新描述符时保留操作端�
   const render = () => client.render(client.h(client.form(), {
     provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t
   }));
-  const control = (marker) => collect(render(), (item) => item.props[marker] === 'generate')[0];
+  const control = (marker, kind = 'generate') => collect(render(), (item) => item.props[marker] === kind)[0];
   const save = () => collect(render(), (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop().props.onClick();
   control('data-mo-image-output-preset').props.onChange({ target: { value: 'custom-json' } });
   control('data-mo-image-output-json').props.onChange({ target: { value: '{' } });
@@ -2094,8 +2136,23 @@ test('自定义 JSON 保存前校验语法，更新描述符时保留操作端�
   assert.match(text(render()).join(' '), /form.outputPreset.invalidJson/);
   const output = { kind: 'json', pick: [{ path: 'result.images.0', as: 'url' }] };
   control('data-mo-image-output-json').props.onChange({ target: { value: JSON.stringify(output) } });
+  const editSelect = control('data-mo-image-output-preset', 'edit');
+  assert.equal(editSelect.props.disabled, false, '图生图返回格式可以先于端点配置');
+  editSelect.props.onChange({ target: { value: 'custom-json' } });
+  const tree = render();
+  const labels = collect(tree, (item) => item.type === 'label' && collect(item, (child) =>
+    child.props['data-mo-image-output-json'] !== undefined).length);
+  assert.deepEqual(labels.map((label) => text(label).join('')), ['文生图返回格式 · JSON', '图生图返回格式 · JSON']);
+  const { kind, pick } = resolveConfiguredOutput('openai');
+  for (const label of labels) {
+    const input = collect(label, (item) => item.type === 'textarea')[0];
+    assert.deepEqual(JSON.parse(input.props.placeholder), { kind, pick });
+  }
+  const editOutput = { kind: 'binary' };
+  control('data-mo-image-output-json', 'edit').props.onChange({ target: { value: JSON.stringify(editOutput) } });
   await save();
   assert.deepEqual(JSON.parse(JSON.stringify(saved.operations.generate)), { path: '/render', method: 'POST', output });
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.operations.edit)), { output: editOutput });
 });
 
 test('旧配置的自定义值可以被预设覆盖', () => {
