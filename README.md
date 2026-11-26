@@ -115,7 +115,7 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 生图席挂在输入框右侧（`conversation.input.right`），默认沿用 DSH 原版对话模型选择器的类名与结构：类名从当前样式表解析，菜单、搜索、分组、键盘行为和原版对齐；只改 CSS 的主题会自动覆盖到它。
 
-如果对话席被 [dsh-codex-model-effort-selector](https://github.com/ABING1111/dsh-codex-model-effort-selector) 这类接管型美化插件替换，插件会检测 `.cmes-*` DOM 并切换成同一套 Codex 皮肤：
+启用 [dsh-codex-selector](https://github.com/CM-Silence/dsh-codex-selector) 后，生图席根据 DSH 的插件状态切换为同款 Codex 皮肤：
 
 - **质量**占据「推理等级」的位置：滑条按当前模型实际公布的档位排列（Auto 紧挨着 Off，不会被当成最高档），每档一色；拖动/键盘/Home/End 都可改档，最高档触发紫罗兰、星尘动画和「更快消耗使用额度」提示。
 - 点弹层中间的档位标题进入 **provider → 模型**两级下钻，带搜索、当前勾选和「N 档」徽标。
@@ -166,7 +166,7 @@ npm run release -- minor --dry-run        # 只看会做什么
 
 ## 质量档位
 
-质量档位由「当前模型」决定，宿主通过 `/api/mo-image/config` 的 `capabilities` 下发。原版皮肤里，没有官方质量参数的模型隐藏这一行；Codex 皮肤里显示「此模型未提供质量档位」，尺寸仍从齿轮进入，提示词优化用左上角星标切换。GPT-Image 的 `Auto` 是模式而不是画质档，滑条里紧挨着 `Off` 放，不排到最高档。
+质量档位由「当前模型」决定，宿主通过 `/api/mo-image/config` 的 `capabilities` 下发。模型不支持质量参数时，原版皮肤隐藏质量行，Codex 皮肤固定显示满格 Ultra，滑块不可调。这个 Ultra 只影响显示。模型选为「自动」时，只要当前提供商有支持质量的候选，仍可选择质量档位。Codex 皮肤的尺寸从齿轮进入，提示词优化用左上角星标切换。GPT-Image 的 `Auto` 是模式而不是画质档，滑条里紧挨着 `Off` 放，不排到最高档。
 
 | 模型族 | 质量行 | 选项 |
 |---|---|---|
@@ -429,7 +429,7 @@ $DSH_HOME/.credentials.yaml
 |---|---|
 | `send[]` | 白名单：只有列出来的字段才会写进请求体，没列的一律不发 |
 | `size` | 尺寸怎么编码、该模型接受哪些尺寸。`control` 决定选择器给什么控件（`wh` 宽高 / `aspect` 比例+档位 / `preset` 档位下拉+自定义 / `prompt` 宽高写进提示词），`wire` 说明上游真实吃什么，`tiers` 是档位名与像素，`allowed` 是白名单（`allowCustom: true` 时白名单外的宽高也照发），`sizeByModel` 按模型覆盖整套策略 |
-| `quality` | 该模型是否有质量档位、档位名称/数量，以及如何映射成平台参数（如 DALL·E 的 `standard/hd`、Ideogram 的 `rendering_speed`）；没有就不下发，选择器也不显示质量行 |
+| `quality` | 该模型是否有质量档位、档位名称和数量，以及如何映射成平台参数（如 DALL·E 的 `standard/hd`、Ideogram 的 `rendering_speed`）。仅支持质量的模型可调档 |
 | `transport` | `json` 或 `multipart` |
 | `response` | 从任意形状的回应里挖出图片（b64 / data-url / 外链 / 二进制都认） |
 | `authHeader` | 该协议的**默认**鉴权形态：`bearer`（默认）/ `api-key`（Azure）/ `x-key`（BFL）/ `fal-key`（fal）；提供商设了 `provider.auth` 就以它为准 |

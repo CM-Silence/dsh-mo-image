@@ -150,7 +150,6 @@ seat.moreSettings,"其他设置","More settings","その他の設定","Más ajus
 seat.qualityUnsupported,"此模型未提供质量档位","This model has no quality levels","このモデルには画質レベルがありません","Este modelo no ofrece niveles de calidad","Ce modèle n'expose pas de niveaux de qualité","Dieses Modell bietet keine Qualitätsstufen","У этой модели нет уровней качества","Este modelo não oferece níveis de qualidade"
 seat.qualityWarning,"更快消耗使用额度","Consumes usage quota faster","使用量を早く消費します","Consume la cuota más rápido","Consomme le quota plus vite","Verbraucht das Kontingent schneller","Быстрее расходует квоту","Consome a cota mais rápido"
 seat.levelsCount,"{count} 档","{count} levels","{count} 段階","{count} niveles","{count} niveaux","{count} Stufen","{count} уровней","{count} níveis"
-seat.levelsNone,"不支持","Unsupported","非対応","No compatible","Non pris en charge","Nicht unterstützt","Не поддерживается","Não suportado"
 seat.sizeTitle,"尺寸","Size","サイズ","Tamaño","Taille","Größe","Размер","Tamanho"
 seat.back,"返回","Back","戻る","Volver","Retour","Zurück","Назад","Voltar"
 seat.modelAutoHint,"让模型自己挑一个","Let the model pick one","モデルに任せる","Deja que el modelo elija","Laissez le modèle choisir","Das Modell wählen lassen","Пусть модель выберет","Deixe o modelo escolher"

@@ -48,7 +48,17 @@ function fakeContext(tools, prompt, options = {}) {
   const fake = {
     effect(fn) { const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {}; },
     inject(_deps, callback) { callback(fake); },
-    tools: { register(definition) { tools.push(definition); return () => {}; }, guard() { return () => {}; } },
+    tools: {
+      register(definition) {
+        if (options.rejectSettings && definition.name === 'mo_image_settings') throw new Error('settings unavailable');
+        tools.push(definition);
+        return () => {};
+      },
+      get(name, _scope, toolSet) {
+        return toolSet?.has(name) === false ? undefined : tools.find((tool) => tool.name === name);
+      },
+      guard() { return () => {}; }
+    },
     webServer: { register(route) { return () => route; }, getOrigin() { return 'http://127.0.0.1:1'; } },
     systemPrompt,
     get(name) { return name === 'credentials' ? credentials : undefined; }
@@ -103,6 +113,21 @@ test('the marker follows this session only, and clears once the settings were re
   next.active = { providerId: 'p1', model: 'moss_image_sft_int8_convrot.safetensors' };
   writeFileSync(path.join(home, 'mo-image', 'config.json'), JSON.stringify(next, null, 2), 'utf8');
   assert.match(marker({ agent: { session } }), /改过/, 'a config change makes the old read stale again');
+});
+
+test('the unread marker uses the image tool when settings is absent from the current tool set', async (t) => {
+  const { marker, exec } = await harness(t);
+  assert.match(marker(exec), /unknown tool.*直接调用生图/);
+  const unavailable = marker({ ...exec, toolSet: new Set(['mo_image_generate']) });
+  assert.match(unavailable, /直接调用生图\/改图工具接收配置/);
+  assert.doesNotMatch(unavailable, /mo_image_settings/);
+});
+
+test('a failed settings registration still leaves the image tool and its fallback guidance', async (t) => {
+  const { marker, exec, settings, generate } = await harness(t, { rejectSettings: true });
+  assert.equal(settings, undefined);
+  assert.doesNotMatch(marker(exec), /mo_image_settings/);
+  assert.equal((await generate.execute({ prompt: 'a harbor' }, exec)).needsSettings, true);
 });
 
 test('a host without prompt variables gets the same state computed inline', async (t) => {

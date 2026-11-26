@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 // Hook positions are centralized here; tests seed state by name so a hook
 // insertion only changes this table.
-const HOOK = { open: 2, pane: 3, view: 4, subProvider: 5, message: 10, menuPos: 14, tip: 17 };
+const HOOK = { open: 2, pane: 3, view: 4, subProvider: 5, dragging: 9, message: 10, menuPos: 14, liveFraction: 15, tip: 17 };
 function seed(values) {
   return new Map(Object.entries(values).map(([key, value]) => [HOOK[key], value]));
 }
@@ -16,6 +16,8 @@ function loadClient(markers = {}) {
   let hooks = [];
   let hookIndex = 0;
   let overrides = new Map();
+  let statusListener;
+  const dispatched = [];
 
   const React = {
     createElement(type, props, ...children) { return { type, props: props || {}, children }; },
@@ -42,50 +44,11 @@ function loadClient(markers = {}) {
 
   const document = {
     querySelectorAll(selector) {
-      if (selector === 'style' && (markers.codex || markers.codexPartial || markers.codexCssBlocked)) return [{ textContent: '.cmes-popover{color:red}', getAttribute() { return ''; } }];
-      if (selector === '.cmes-popover' && (markers.codex || markers.codexPartial || markers.codexCssBlocked)) return [{
-        id: 'cmes-popover',
-        nodeName: 'SECTION',
-        closest() { return null; },
-        querySelector(child) {
-          if (child === '.cmes-page' && !markers.codexPartial) return { nodeName: 'DIV' };
-          return null;
-        }
-      }];
-      if (selector === '.cmes-trigger' && markers.codex) return [{ closest() { return null; } }];
-      if (selector === '.cmes-trigger' && markers.codexPartial) return [{
-        closest(selectorName) {
-          if (selectorName === '[data-mo-image-seat]') return null;
-          if (selectorName === '.cmes-root') {
-            return {
-              querySelector(child) {
-                if (child === '.cmes-popover') return { nodeName: 'SECTION', style: { position: 'fixed' } };
-                return null;
-              }
-            };
-          }
-          return null;
-        }
-      }];
-      if (selector === '.cmes-trigger' && markers.codexCssBlocked) return [{
-        closest(selectorName) {
-          if (selectorName === '[data-mo-image-seat]') return null;
-          if (selectorName === '.cmes-root') {
-            return {
-              querySelector(child) {
-                if (child === '.cmes-popover' || child === '.cmes-page') return { nodeName: 'DIV' };
-                return null;
-              }
-            };
-          }
-          return null;
-        }
-      }];
-      if (selector === '.cmes-trigger' && markers.selfCodex) return [{ closest() { return {}; } }];
+      if (selector === 'style' && markers.codexDom) return [{ textContent: '.cmes-popover{position:fixed}', getAttribute() { return ''; } }];
+      if (selector === '.cmes-trigger' && markers.codexDom) return [{ closest() { return null; } }];
       return [];
     },
     querySelector(selector) {
-      if (selector === '.cmes-trigger' && markers.codex) return { nodeName: 'BUTTON' };
       if (selector === '[data-model-id]' && markers.official) return { nodeName: 'SPAN', closest() { return null; } };
       return null;
     },
@@ -98,12 +61,13 @@ function loadClient(markers = {}) {
   };
   const window = {
     __ModuleLoader__: { load(definition) { loaded = definition; } },
+    __DSH_BOOT__: markers.bootPlugins ? { entries: markers.bootPlugins.map((id) => ({ id })) } : undefined,
     addEventListener() {},
     removeEventListener() {},
-    dispatchEvent() {},
+    dispatchEvent(event) { dispatched.push(event.type); },
     innerWidth: 1200,
     innerHeight: 800,
-    getComputedStyle() { return { position: markers.codexCssBlocked ? 'static' : 'fixed' }; }
+    getComputedStyle() { return { position: 'fixed' }; }
   };
   const context = {
     window,
@@ -146,6 +110,8 @@ function loadClient(markers = {}) {
 
   return {
     __test: api.__test,
+    dispatched,
+    pluginStatus(entry) { statusListener({ entry }); },
     render(node, overrideMap) {
       overrides = overrideMap || new Map();
       return renderElement(node);
@@ -159,11 +125,15 @@ function loadClient(markers = {}) {
           return () => {};
         }
       };
-      api.apply({
+      const host = {
         locale: undefined,
         effect(fn) { const off = fn(); return typeof off === 'function' ? off : () => {}; },
+        inject(_deps, callback) { if (markers.loader) callback(host); },
+        loader: { entries: () => markers.loader },
+        on(name, listener) { if (name === 'internal/status') statusListener = listener; },
         slots
-      });
+      };
+      api.apply(host);
       assert.equal(typeof seat, 'function');
       overrides = overrideMap || new Map();
       hooks = [];
@@ -234,7 +204,6 @@ const messages = {
   'seat.qualityUnsupported': '此模型未提供质量档位',
   'seat.qualityWarning': '更快消耗使用额度',
   'seat.levelsCount': '{count} 档',
-  'seat.levelsNone': '不支持',
   'seat.sizeTitle': '尺寸',
   'seat.back': '返回',
   'seat.modelAutoHint': '让模型自己挑一个',
@@ -362,37 +331,29 @@ test('the provider page header says 切换模型', () => {
   assert.equal(section.children[0], '切换模型');
 });
 
-test('skin markers pick codex over official over generic', () => {
-  const { __test } = loadClient();
-  assert.equal(__test.detectSeatSkinFromMarkers({ codex: true, official: true, generic: true }), 'codex');
-  assert.equal(__test.detectSeatSkinFromMarkers({ official: true, generic: true }), 'official');
-  assert.equal(__test.detectSeatSkinFromMarkers({ generic: true }), 'generic');
-  assert.equal(__test.detectSeatSkinFromMarkers({}), 'official');
-});
-
-test('detectSeatSkin reads the live codex and official DOM markers', () => {
-  assert.equal(loadClient({ codex: true }).__test.detectSeatSkin(), 'codex');
+test('skin detection uses the exact enabled plugin ID even before the Codex DOM appears', () => {
+  assert.equal(loadClient({ bootPlugins: ['dsh-codex-selector'], official: true }).__test.detectSeatSkin(), 'codex');
+  assert.equal(loadClient({ bootPlugins: ['example-dsh-codex-selector'], codexDom: true }).__test.detectSeatSkin(), 'official');
   assert.equal(loadClient({ official: true }).__test.detectSeatSkin(), 'official');
   assert.equal(loadClient({}).__test.detectSeatSkin(), 'official');
-  assert.equal(loadClient({ selfCodex: true }).__test.detectSeatSkin(), 'official');
 });
 
-test('a codex trigger with an incomplete DOM contract falls back to official', () => {
-  const client = loadClient({ codexPartial: true });
-  assert.equal(client.__test.codexSkinProbe().present, true);
-  assert.equal(client.__test.codexSkinProbe().ready, false);
+test('live loader status takes priority over bootstrap and updates the skin on enable or disable', () => {
+  const entry = { options: { name: 'dsh-codex-selector' }, fiber: { state: 0 }, disabled: false };
+  const client = loadClient({ bootPlugins: ['dsh-codex-selector'], loader: [entry], codexDom: true });
+  assert.equal(collectClass(client.renderSeat(), 'cmes-root').length, 0, 'pending is not active even with stale Codex DOM');
+  const observed = client.dispatched.filter((event) => event === 'mo-image-theme').length;
+  entry.fiber.state = 2;
+  client.pluginStatus(entry);
+  assert.equal(client.__test.detectSeatSkin(), 'codex');
+  entry.disabled = true;
+  client.pluginStatus(entry);
   assert.equal(client.__test.detectSeatSkin(), 'official');
+  assert.equal(client.dispatched.filter((event) => event === 'mo-image-theme').length, observed + 2);
 });
 
-test('a codex trigger whose CSS is not actually fixed falls back to official', () => {
-  const client = loadClient({ codexCssBlocked: true });
-  assert.equal(client.__test.codexSkinProbe().present, true);
-  assert.equal(client.__test.codexSkinProbe().ready, false);
-  assert.equal(client.__test.detectSeatSkin(), 'official');
-});
-
-test('the seat switches to the codex renderer when the chat seat is codex', () => {
-  const codexTree = loadClient({ codex: true }).renderSeat();
+test('the seat picks the Codex renderer when dsh-codex-selector is active', () => {
+  const codexTree = loadClient({ loader: [{ options: { name: 'dsh-codex-selector' }, fiber: { state: 2 } }] }).renderSeat();
   assert.equal(collectClass(codexTree, 'cmes-trigger').length, 1);
   assert.equal(collectClass(codexTree, 'cmes-root').length >= 1, true);
   const officialTree = loadClient({ official: true }).renderSeat();
@@ -500,7 +461,7 @@ test('the codex model pane starts on the provider list and offers Auto', () => {
   assert.equal(collectClass(tree, 'cmes-row').length >= 2, true);
 });
 
-test('a model without a quality spec says so instead of drawing a fake rail', () => {
+test('a Codex model without quality displays a full, non-interactive Ultra rail', () => {
   const client = loadClient();
   const tree = client.render(
     client.h(client.__test.CodexImageSeat, {
@@ -509,11 +470,70 @@ test('a model without a quality spec says so instead of drawing a fake rail', ()
       setStore() {},
       qualitySpec: null
     }),
-    seed({ open: true, pane: 'quality' })
+    seed({ open: true, pane: 'quality', message: true, dragging: true, liveFraction: 0.25 })
   );
-  const text = collectText(tree).join(' ');
-  assert.match(text, /此模型未提供质量档位/);
-  assert.equal(collectClass(tree, 'cmes-rail').length, 0);
+  const popover = collectClass(tree, 'cmes-popover')[0];
+  assert.equal(popover.props['aria-label'], ct('seat.menuModel'));
+  assert.equal(popover.props.style['--cmes-height'], '104px');
+  assert.match(popover.props.className, /\bpeak\b/);
+  assert.doesNotMatch(popover.props.className, /\bmessage\b/);
+  assert.deepEqual(collectText(collectClass(tree, 'cmes-modelLink')[0]), ['Ultra', 'gpt-image-2.5-flare']);
+  assert.deepEqual(collectText(collectClass(tree, 'cmes-triggerEffort')[0]), ['Ultra']);
+  assert.equal(collectClass(tree, 'cmes-fast').length, 1);
+  assert.equal(collectClass(tree, 'cmes-reset').length, 1);
+  const rail = collectClass(tree, 'cmes-rail')[0];
+  assert.equal(rail.props.style['--cmes-pos'], '1');
+  assert.equal(rail.props['aria-disabled'], true);
+  assert.equal(rail.props['aria-valuetext'], 'Ultra');
+  assert.equal(rail.props['aria-valuenow'], rail.props['aria-valuemax']);
+  assert.equal(rail.props['aria-description'], ct('seat.qualityUnsupported'));
+  for (const prop of ['tabIndex', 'onPointerDown', 'onPointerMove', 'onKeyDown']) {
+    assert.equal(rail.props[prop], undefined, prop);
+  }
+  assert.equal(collectClass(tree, 'cmes-dot').length, 0);
+  assert.equal(collectClass(tree, 'cmes-warning').length, 0);
+  assert.doesNotMatch(collectText(popover).join(' '), /质量档位/);
+});
+
+test('both selectors use the active model and Auto provider to decide whether quality is editable', () => {
+  const client = loadClient({ official: true });
+  const supported = 'gpt-image-2.5-flare';
+  const unsupported = 'doubao-seedream-5-5';
+  const providers = [
+    { id: 'mixed', name: 'Mixed', models: [supported, unsupported], names: {} },
+    { id: 'seedream', name: 'Seedream', models: [unsupported], names: {} }
+  ];
+  client.__test.applyCatalog({ capabilities: [
+    { providerId: 'mixed', models: [{ model: supported, quality: railSpec }, { model: unsupported, quality: null }] },
+    { providerId: 'seedream', models: [{ model: unsupported, quality: null }] }
+  ] });
+  for (const [providerId, model, quality] of [
+    ['mixed', supported, true],
+    ['mixed', unsupported, false],
+    ['mixed', 'auto', true],
+    ['seedream', 'auto', false]
+  ]) {
+    const props = { t: ct, store: storeFixture({ providers, active: { providerId, model } }), setStore() {} };
+    const codex = client.render(client.h(client.__test.CodexImageSeat, props), seed({ open: true, pane: 'quality' }));
+    const official = client.render(client.h(client.__test.OfficialImageSeat, props), new Map([[0, true], [1, 'home']]));
+    const qualityRow = collectType(official, 'button').find((button) => collectText(button).includes(ct('seat.menuQuality')));
+    const rail = collectClass(codex, 'cmes-rail')[0];
+    assert.equal(typeof rail.props.onPointerDown === 'function', quality, providerId + '/' + model);
+    assert.equal(rail.props['aria-disabled'], quality ? undefined : true, providerId + '/' + model);
+    assert.equal(Boolean(qualityRow), quality, providerId + '/' + model);
+  }
+
+  // An external capability change can happen while the native quality submenu is open.
+  const props = { t: ct, store: storeFixture({ providers, active: { providerId: 'mixed', model: unsupported } }), setStore() {} };
+  const official = client.render(client.h(client.__test.OfficialImageSeat, props), new Map([[0, true], [1, 'quality']]));
+  assert.ok(collectType(official, 'button').some((button) => collectText(button).includes(ct('seat.menuSize'))));
+  assert.ok(!collectType(official, 'div').some((node) => node.props['aria-label'] === ct('seat.menuQuality')));
+
+  const picker = client.render(client.h(client.__test.CodexImageSeat, props),
+    seed({ open: true, pane: 'models', view: 2, subProvider: 'mixed' }));
+  const unsupportedRow = collectClass(picker, 'cmes-model').find((row) => collectText(row).includes(unsupported));
+  assert.ok(unsupportedRow);
+  assert.equal(collectClass(unsupportedRow, 'cmes-cnt').length, 0);
 });
 
 test('the codex provider list hides Auto when nothing is configured', () => {
@@ -534,6 +554,8 @@ test('the codex provider list hides Auto when nothing is configured', () => {
   const text = collectText(tree).join(' ');
   assert.doesNotMatch(text, /(^|\s)自动(\s|$)/);
   assert.match(text, /还没有模型/);
+  assert.equal(collectClass(tree, 'cmes-rail').length, 0);
+  assert.doesNotMatch(text, /Ultra/);
 });
 
 test('the peak quality lights the codex violet treatment and its dust', () => {
@@ -1100,8 +1122,8 @@ test('the codex rail slides to the released stop instead of teleporting', () => 
     'Fast started from Ultra keeps the ticks hidden for the whole activation');
   assert.match(source, /present \? ' present'/, 'the popover keeps its presented state during close');
   assert.doesNotMatch(source, /playbackRate = 0\.15/, 'the dust does not ramp from a low rate');
-  assert.match(source, /document\.querySelectorAll\('\.cmes-popover'\)/, 'the probe follows the portaled codex popover');
-  assert.doesNotMatch(source, /root\.querySelector\('\.cmes-popover'\)/, 'it does not look only inside .cmes-root');
+  assert.match(source, /const motion = createCodexDustMotion[\s\S]{0,240}\[showRail, sparkles, props\.sessionId\]/,
+    'the dust controller survives popover close and reopen');
 });
 
 test('the seat size value follows the control the model accepts', () => {

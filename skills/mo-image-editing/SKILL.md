@@ -9,7 +9,7 @@ whenToUse: 修改或融合参考图时，需要当前上下文中没有的编辑
 ## 硬性约束（先读）
 
 - 只负责把编辑提示词和参考图交给生图模型，不替用户判断图片好坏。
-- 本会话首次生图或改图前调用 `mo_image_settings`。之后直接调用 `mo_image_edit`，由工具通过 `needsSettings` 返回变更或校准配置。使用返回的完整设置，或在 `baseRevision` 上应用 `changes`、清除 `removed`，然后发起新调用。应用增量时找不到基线才用 `refresh:true` 读取完整配置。
+- 本会话首次生图或改图前，若 `mo_image_settings` 可用就调用一次。工具不可用或返回 `unknown tool` 时，直接用 `mo_image_edit` 接收设置。收到 `needsSettings` 表示还未提交改图请求，应用完整设置，或在 `baseRevision` 上应用 `changes`、清除 `removed`。保留仍适用的提示词和参数，在下一步提交。应用增量时找不到基线才用 `refresh:true` 读取完整配置。
 - 自动模型使用 `editModelIndexes` 从 `models` 选择，也可以省略 `model` 使用首个可改图的候选。需要具体尺寸、质量或参数时，传候选的模型 ID 查询。
 - ComfyUI 若返回 `referenceImages`，按其中的编号、用途和数量传 `images`。自动模式下，若所选候选位于 `referenceModelIndexes`，在缺少该候选详情或 `referenceRevision` 改变时查询一次。图片用途有歧义时向用户确认。
 - `model` 不用传：非 Auto 时用选择器里的模型，传别的值会被拒绝；Auto 必须从当前列表里选一个。

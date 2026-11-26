@@ -9,7 +9,7 @@ whenToUse: 生成或重做图片时，需要当前上下文中没有的模板、
 ## 硬性约束（先读）
 
 - 只负责把提示词交给生图模型，不做提示词以外的加工。
-- 本会话首次生图或改图前调用 `mo_image_settings`。之后直接调用 `mo_image_generate`，由工具通过 `needsSettings` 返回变更或校准配置。使用返回的完整设置，或在 `baseRevision` 上应用 `changes`、清除 `removed`，然后发起新调用。应用增量时找不到基线才用 `refresh:true` 读取完整配置。
+- 本会话首次生图或改图前，若 `mo_image_settings` 可用就调用一次。工具不可用或返回 `unknown tool` 时，直接用 `mo_image_generate` 接收设置。收到 `needsSettings` 表示还未提交生图请求，应用完整设置，或在 `baseRevision` 上应用 `changes`、清除 `removed`。保留仍适用的提示词和参数，在下一步提交。应用增量时找不到基线才用 `refresh:true` 读取完整配置。
 - 自动模型从 `models` 选择。需要确认候选的尺寸、质量或参数时，给 `mo_image_settings` 传入该模型 ID。仅在相应模式为 `auto` 时传 `size` 或 `quality`，质量从 `qualityOptions` 选。
 - `model` 不用传：非 Auto 时用选择器里的模型，传别的值会被拒绝；Auto 必须从当前列表里选一个。
 - 图片返回即交付：最终回复只输出工具给的图片行；不评价画质、不描述画面。除非用户明确要求看图，否则不要打开或读取图片。

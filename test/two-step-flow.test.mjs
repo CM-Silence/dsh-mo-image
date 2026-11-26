@@ -32,7 +32,7 @@ function makeHome(cfg) {
   return home;
 }
 
-function fakeContext(tools) {
+function fakeContext(tools, listeners) {
   const credentials = {
     async resolve() { return { value: 'sk-test-key', source: 'file' }; },
     async describe() { return { configured: true, source: 'file', writable: true }; },
@@ -42,6 +42,7 @@ function fakeContext(tools) {
   const fake = {
     effect(fn) { const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {}; },
     inject(_deps, callback) { callback(fake); },
+    on(name, listener) { listeners.set(name, listener); },
     tools: { register(def) { tools.push(def); return () => {}; }, guard() { return () => {}; } },
     webServer: { register(route) { return () => route; }, getOrigin() { return 'http://127.0.0.1:1'; } },
     get(name) {
@@ -63,8 +64,9 @@ async function harness(t, cfg = config()) {
   process.env.DSH_HOME = home;
 
   const tools = [];
+  const listeners = new Map();
   const mod = await import('../lib/index.js?two-step-' + Math.random().toString(36).slice(2));
-  mod.apply(fakeContext(tools));
+  mod.apply(fakeContext(tools, listeners));
 
   const calls = [];
   const originalFetch = globalThis.fetch;
@@ -82,7 +84,7 @@ async function harness(t, cfg = config()) {
   };
   const tool = (name) => tools.find((item) => item.name === name);
   return {
-    home, calls, exec, tool,
+    home, calls, exec, tool, listeners,
     settings: tool('mo_image_settings'),
     generate: tool('mo_image_generate'),
     edit: tool('mo_image_edit')
@@ -290,6 +292,34 @@ test('generating after reading the settings uses the picked model', async (t) =>
   await generate.execute({ prompt: 'a city at dusk' }, exec);
   assert.equal(calls.length, 1);
   assert.equal(JSON.parse(calls[0].init.body).model, 'flux-2-klein-4b.safetensors');
+});
+
+test('rewriting the system prompt after a handoff allows the next image call to submit', async (t) => {
+  const { generate, calls, exec, listeners } = await harness(t);
+  const { session } = exec.agent;
+  const events = new Map([[46, { type: 'system/message', surfaceOp: 'append' }]]);
+  session.eventAt = (seq) => events.get(seq);
+  const args = { prompt: 'a city at dusk', size: '1024x1536' };
+  const handoff = await generate.execute(args, { ...exec, toolSet: {}, callId: 'first' });
+  assert.equal(handoff.settings.revision, 1);
+  assert.equal(calls.length, 0);
+
+  const resultEvent = listeners.get('session/event');
+  const promptUpdate = { type: 'system/message', surfaceOp: { op: 'replace', startSeq: 46, endSeq: 46 } };
+  session.surface.contentGeneration++;
+  resultEvent(session, promptUpdate);
+  const image = await generate.execute(args, { ...exec, toolSet: {}, callId: 'submit' });
+  assert.ok(image.path);
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(calls[0].init.body).prompt, args.prompt);
+
+  // A single-node replacement can also remove the settings result. Preserve the real recovery path.
+  events.set(56, { type: 'tool/result', surfaceOp: 'append' });
+  session.surface.contentGeneration++;
+  resultEvent(session, { ...promptUpdate, surfaceOp: { op: 'replace', startSeq: 56, endSeq: 56 } });
+  const refresh = await generate.execute(args, { ...exec, toolSet: {}, callId: 'compacted' });
+  assert.deepEqual(refresh.settings, handoff.settings);
+  assert.equal(calls.length, 1);
 });
 
 test('an exposed parameter row is sent and never reported as "unsupported workflow parameters"', async (t) => {
