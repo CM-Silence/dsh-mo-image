@@ -101,6 +101,62 @@ test('Microsoft Foundry serves MAI generation and multipart edits under /mai/v1'
   assert.equal(calls.length, 2);
 });
 
+test('preset models can override explicit request fields and sizing without repeating the preset bindings', async (t) => {
+  const preset = providerPresetManifest().find((entry) => entry.id === 'novita');
+  const models = ['alias/wide', 'alias/string', 'alias/control'];
+  const provider = normalizeConfig({ providers: [{
+    ...preset, presetId: preset.id, key: 'mock-key', models,
+    modelOptions: {
+      [models[0]]: { fields: { prompt: { path: 'caption' } }, size: { field: 'pixels.width' } },
+      [models[1]]: { size: { mode: 'wh-string', field: 'dimensions' } },
+      [models[2]]: { size: { control: 'preset' } }
+    }
+  }] }).providers[0];
+  const cdn = 'https://cdn.invalid/result.png';
+  const expected = [
+    { caption: input.prompt, pixels: { width: 512 }, height: 512 },
+    { prompt: input.prompt, dimensions: '512x512' },
+    { prompt: input.prompt, width: 512, height: 512 }
+  ];
+  const calls = stubFetch(t, ({ url, body }) => {
+    if (url.href === cdn) return png();
+    assert.equal(url.pathname, '/v3beta/flux-1-schnell');
+    assert.deepEqual(JSON.parse(body), { ...expected.shift(), image_num: 1, response_image_format: 'png' });
+    return json({ images: [{ image_url: cdn }] });
+  });
+  for (const model of models) {
+    const result = await callImageApi('generate', resolveAdapter(provider, model), provider, { ...input, model });
+    assert.equal(result.bytes.toString('base64'), PNG);
+  }
+  assert.equal(calls.length, 6);
+});
+
+test('a preset model can override multipart edit fields and the response profile independently', async (t) => {
+  const preset = providerPresetManifest().find((entry) => entry.id === 'azure-mai');
+  const model = 'alias/mai-image';
+  const provider = normalizeConfig({ providers: [{
+    ...preset, presetId: preset.id, key: 'mock-key', models: [model],
+    baseUrl: 'https://demo.services.ai.azure.com/mai/v1',
+    modelOptions: { [model]: {
+      fields: { prompt: { path: 'caption' }, image: { multipart: 'reference[]' } },
+      size: { mode: 'wh-string', field: 'dimensions' },
+      operations: { edit: { output: 'binary' } }
+    } }
+  }] }).providers[0];
+  const image = { buffer: Buffer.from(PNG, 'base64'), contentType: 'image/png', filename: 'image.png' };
+  const calls = stubFetch(t, ({ url, body }) => {
+    assert.equal(url.pathname, '/mai/v1/images/edits');
+    assert.equal(body.get('caption'), input.prompt);
+    assert.equal(body.get('model'), model);
+    assert.equal(body.get('reference[]').name, image.filename);
+    for (const key of ['prompt', 'image', 'width', 'height', 'dimensions']) assert.equal(body.get(key), null);
+    return png();
+  });
+  const result = await callImageApi('edit', resolveAdapter(provider, model), provider, { ...input, model, images: [image] });
+  assert.equal(result.bytes.toString('base64'), PNG);
+  assert.equal(calls.length, 1);
+});
+
 test('TokenHub discovers supported Hy models and downloads final images after generation and edit', async (t) => {
   const preset = providerPresetManifest().find((entry) => entry.id === 'tencent-tokenhub');
   const [model] = preset.models;
@@ -386,7 +442,8 @@ test('custom model operations inherit the provider output on auto while explicit
       }
     },
     modelOptions: {
-      m: { operations: { generate: { path: 'local-json', output: 'auto' } } },
+      m: { fields: { prompt: { path: 'ignored-caption' } }, size: { mode: 'wh-string', field: 'ignored-size' },
+        operations: { generate: { path: 'local-json', output: 'auto' } } },
       n: { operations: { generate: { path: 'local-image', output: 'binary' } } }
     }
   }] }).providers[0];

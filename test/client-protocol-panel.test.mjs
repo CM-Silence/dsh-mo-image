@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+import { adapterManifest, providerPresetManifest } from '../lib/adapters.js';
 import { normalizeConfig } from '../lib/config-store.js';
 import { resolveConfiguredOutput } from '../lib/provider-operations.js';
 
@@ -100,6 +101,7 @@ const LOCAL_DEPLOYER_FIXTURE = [
 function loadClient({
   customMode = false,
   preserveFormState = false,
+  adapters = ADAPTERS,
   providerPresets = [],
   localPresets = []
 } = {}) {
@@ -193,7 +195,7 @@ function loadClient({
     React, render,
     h: React.createElement,
     setCatalog() { api.__test.applyCatalog({
-      adapters: ADAPTERS, providerPresets: providerPresets, localPresets: localPresets, capabilities: [],
+      adapters, providerPresets: providerPresets, localPresets: localPresets, capabilities: [],
       outputPresets: ['auto', 'openai', 'binary', 'task-json']
     }); },
     form() { return api.__test.ImageProviderForm; }
@@ -377,7 +379,7 @@ test('协议确定时锁死这三项：鉴权方式、文生图返回格式、�
   assert.ok(protocolPanelControls(relay)['图生图端点'], '图生图端点跟着协议照常渲染');
 });
 
-test('自定义协议可选返回预设或手写 JSON，未选协议时仍显示协议默认项', () => {
+test('自定义协议可选返回预设或手写 JSON，未选协议时两个返回格式禁用', () => {
   for (const adapter of ['custom', '']) {
     const client = loadClient();
     client.setCatalog();
@@ -395,14 +397,15 @@ test('自定义协议可选返回预设或手写 JSON，未选协议时仍显示
     for (const label of ['文生图返回格式', '图生图返回格式']) {
       const select = controls[label];
       assert.ok(select, (adapter || '(自动)') + '：' + label + ' 要渲染');
-      const defaultOption = adapter === 'custom' ? '' : 'inherit';
       const options = collect(select, (item) => item.type === 'option');
       assert.deepEqual(
         options.map((option) => option.props.value),
-        [defaultOption, 'openai', 'binary', 'task-json', 'custom-json']
+        ['', 'openai', 'binary', 'task-json', 'custom-json']
       );
-      assert.equal(select.props.value, defaultOption);
-      assert.equal(options[0].props.disabled, adapter === 'custom', '自定义协议的未选择状态不能选回去');
+      assert.equal(select.props.value, '');
+      assert.equal(text(options[0]).join(''), '未选择');
+      assert.equal(options[0].props.disabled, true);
+      assert.equal(select.props.disabled, !adapter);
     }
   }
 });
@@ -1912,6 +1915,54 @@ function fetchButton(node) {
   return collect(node, (item) => item.type === 'button' && text(item).join(' ').includes('form.fetchModels')).pop();
 }
 
+test('只有没有实时目录的第三方预设提供「获取预设模型」', () => {
+  const adapters = adapterManifest();
+  const providerPresets = providerPresetManifest();
+  const presetButton = (tree) => collect(tree, (node) => node.type === 'button'
+    && text(node).join(' ').includes('form.fetchPresetModels'))[0];
+  const testClient = (provider) => {
+    const client = loadClient({ adapters, providerPresets, localPresets: LOCAL_DEPLOYER_FIXTURE, preserveFormState: true });
+    client.setCatalog();
+    return () => renderForm(client, provider);
+  };
+  const bfl = providerPresets.find((preset) => preset.id === 'bfl');
+  const render = testClient({ ...bfl, id: 'cloud', presetId: 'bfl', models: ['flux-2-pro'], names: {} });
+  assert.equal(fetchButton(render()), undefined);
+  presetButton(render()).props.onClick();
+  const dialog = collect(render(), (node) => node.props?.role === 'dialog')[0];
+  assert.ok(dialog);
+  assert.match(text(dialog).join(' '), /flux-2-flex/);
+  assert.equal(presetButton(testClient({ ...bfl, id: 'custom', presetId: '', names: {} })()), undefined);
+  const local = testClient({ ...LOCAL_DEPLOYER_FIXTURE[2], id: 'local', presetId: 'comfyui', models: ['my-workflow'], names: {} });
+  assert.equal(presetButton(local()), undefined);
+  assert.ok(fetchButton(local()));
+});
+
+
+test('有实时目录的第三方生图预设也能独立选择内置模型', () => {
+  const adapters = adapterManifest();
+  const providerPresets = providerPresetManifest();
+  const openrouter = providerPresets.find((preset) => preset.id === 'openrouter');
+  const render = (presetId) => {
+    const client = loadClient({ adapters, providerPresets, preserveFormState: true });
+    client.setCatalog();
+    return () => renderForm(client, { ...openrouter, id: 'cloud', presetId, models: ['custom-image-model'], names: {} });
+  };
+  const chooseButton = (tree) => collect(tree, (node) => node.type === 'button'
+    && text(node).includes('form.choosePresetModels'))[0];
+  const provider = render('openrouter');
+  const tree = provider();
+  assert.ok(fetchButton(tree));
+  assert.equal(chooseButton(tree).props.className, fetchButton(tree).props.className);
+  chooseButton(tree).props.onClick();
+  const dialog = collect(provider(), (node) => node.props?.role === 'dialog')[0];
+  assert.ok(dialog);
+  assert.match(text(dialog).join(' '), /google\/gemini-3\.1-flash-image/);
+  const custom = render('')();
+  assert.ok(fetchButton(custom));
+  assert.equal(chooseButton(custom), undefined);
+});
+
 test('自定义协议填了模型列表地址才给出拉取按钮', () => {
   const withUrl = loadClient({ customMode: true });
   withUrl.setCatalog();
@@ -2300,29 +2351,46 @@ test('模型选项分成输入设置与输出设置两块折叠区：默认都�
     'false', '锁图标显示为未锁');
 });
 
-test('云端预设的模型行没有模型选项：预设定死了输入与返回', () => {
+test('云端预设的模型输入输出默认锁定，解锁编辑后保留来源和锁状态', async () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
+  const model = 'gpt-image-1';
   const provider = {
     id: 'p1', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', adapter: 'openai-images',
-    presetId: 'openai', models: ['gpt-image-1'], names: {}
+    presetId: 'openai', models: [model], names: {}
   };
-  const tree = renderForm(client, provider);
-  const row = collect(tree, (item) => String((item.props || {}).className || '').includes('modelRow'))[0];
-  assert.ok(row, '模型行在');
-  // 箭头还在，但禁用：同一份列表里有的行有箭头、有的没有，看着像漏渲染。
-  const toggle = modelOptionsToggle(row);
-  assert.ok(toggle, '箭头照旧渲染');
-  assert.equal(toggle.props.disabled, true, '禁用它（这份配置不由你改）');
-  assert.equal(toggle.props['data-mo-image-model-options'], 'unavailable', '标记成不可用');
-  assert.equal(modelSection(tree, 'data-mo-image-input-settings'), null, '没有输入设置');
-  assert.equal(modelSection(tree, 'data-mo-image-output-settings'), null, '没有输出设置');
-  // 点下去也不会展开（禁用态在浏览器里本来就不触发，这里再挡一次）。
-  toggle.props.onClick({ currentTarget: { focus() {} } });
-  assert.equal(modelSection(renderForm(client, provider), 'data-mo-image-input-settings'), null, '点了也不展开');
+  let saved;
+  const render = () => client.render(client.h(client.form(), {
+    provider, isNew: false, onSave(next) { saved = next; }, onClose() {}, t
+  }));
+  const row = expandModelOptions(client, provider, render);
+  const input = () => modelSection(render(), 'data-mo-image-input-settings');
+  const output = () => modelSection(render(), 'data-mo-image-output-settings');
+  const prompt = () => collect(input(), (item) => item.props['data-param-key'] === 'prompt' && item.type === 'input')[0];
+  const generationOutput = () => collect(output(), (item) => item.props['data-mo-image-output-preset'] === 'generate')[0];
+  const unlock = (section, key) => collect(section(), (item) => item.props[key] !== undefined)[0]
+    .props.onClick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(modelOptionsToggle(row).props['data-mo-image-model-options'], 'available');
+  assert.equal(prompt().props.disabled, true);
+  assert.equal(generationOutput().props.disabled, true);
+  unlock(input, 'data-mo-image-params-lock');
+  assert.equal(prompt().props.disabled, false);
+  assert.equal(generationOutput().props.disabled, true);
+  prompt().props.onChange({ target: { value: 'input_text' } });
+  collect(output(), (item) => item.props['data-lock-key'] === 'operations')[0]
+    .props.onClick({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(generationOutput().props.disabled, false);
+  generationOutput().props.onChange({ target: { value: 'binary' } });
+  await collect(render(), (item) => item.type === 'button' && text(item).join('').includes('form.save')).pop().props.onClick();
+  assert.equal(saved.presetId, 'openai');
+  const entry = JSON.parse(JSON.stringify(saved.modelOptions[model]));
+  assert.equal(entry.fields.prompt.path, 'input_text');
+  assert.equal(entry.operations.generate.output, 'binary');
+  assert.equal(entry.locked.prompt, false);
+  assert.equal(entry.locked.operations, false);
 });
 
-test('云端声明式预设也隐藏自定义端点、模型选项与协议设置', () => {
+test('云端声明式预设允许展开模型选项，提供商级协议和端点仍由预设管理', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -2337,7 +2405,10 @@ test('云端声明式预设也隐藏自定义端点、模型选项与协议设�
   const toggle = collect(tree, (item) => item.type === 'button'
     && typeof item.props['aria-expanded'] === 'boolean')[0];
   assert.ok(toggle, '模型行箭头照旧渲染');
-  assert.equal(toggle.props.disabled, true, '只是禁用');
+  assert.notEqual(toggle.props.disabled, true);
+  toggle.props.onClick({ currentTarget: { focus() {} } });
+  assert.ok(modelSection(renderForm(client, provider), 'data-mo-image-input-settings'));
+  assert.ok(modelSection(renderForm(client, provider), 'data-mo-image-output-settings'));
 });
 
 test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保存后原样带回', async () => {
@@ -2371,7 +2442,7 @@ test('预设来源的锁只影响 UI：已存的返回格式与输入覆盖保�
   assert.deepEqual(entry.params, [{ name: 'seed', type: 'number', default: '1', description: '' }], '参数表原样带回');
 });
 
-test('预设来源的 ComfyUI 输入默认可改，模型返回覆盖默认锁定', () => {
+test('ComfyUI 预设输入与输出默认上锁，工作流解锁后才能编辑', () => {
   const client = loadClient({ preserveFormState: true });
   client.setCatalog();
   const provider = {
@@ -2379,17 +2450,19 @@ test('预设来源的 ComfyUI 输入默认可改，模型返回覆盖默认锁�
     presetId: 'comfyui', models: ['flux.safetensors'], names: {}
   };
   const row = expandModelOptions(client, provider, () => renderForm(client, provider));
-  // 输入参数：工作流的参数映射预设给不了，锁住等于让这个模型配不下去。
   // 第一把 prompt 锁现在在「输入设置」标题行（第二把在「常规」方框里，同一个键）。
   const input = modelSection(row, 'data-mo-image-input-settings');
   assert.ok(input, 'ComfyUI 的「输入设置」折叠区在');
   const inputRow = collect(input, (item) => item.type === 'summary')[0];
   assert.match(text(inputRow).join(''), /输入设置/);
-  assert.equal(collect(inputRow, (item) => item.props['data-lock-key'] === 'prompt')[0].props['aria-pressed'], 'false',
-    'ComfyUI 的输入参数不锁');
+  const inputLock = collect(inputRow, (item) => item.props['data-lock-key'] === 'prompt')[0];
+  assert.equal(inputLock.props['aria-pressed'], 'true');
   const textarea = collect(input, (item) => item.type === 'textarea' && item.props['data-param-workflow']);
   assert.ok(textarea.length, '工作流编辑器还在');
-  assert.notEqual(textarea[0].props.disabled, true, '工作流编辑器可用');
+  assert.equal(textarea[0].props.disabled, true);
+  inputLock.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  const updated = modelSection(renderForm(client, provider), 'data-mo-image-input-settings');
+  assert.equal(collect(updated, (item) => item.type === 'textarea' && item.props['data-param-workflow'])[0].props.disabled, false);
   const output = modelSection(row, 'data-mo-image-output-settings');
   assert.ok(output);
   assert.equal(output.props.open, undefined);

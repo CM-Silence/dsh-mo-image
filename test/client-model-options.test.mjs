@@ -870,12 +870,7 @@ const RELAY_CONFIG = {
   defaults: {}
 };
 
-/**
- * 手动上锁一份配置的当前模型。
- *
- * 预设来源已经没有「模型选项」面板了（预设定死了输入与返回），所以「锁」现在只剩
- * 用户自己按上去这一种用法：把 entry.locked 写进夹具，面板就会按锁态渲染。
- */
+/** 手动上锁一份配置的当前模型。 */
 function lockKeysFor(config, keys) {
   const provider = config.providers[0];
   const model = config.active.model;
@@ -888,7 +883,7 @@ function lockKeysFor(config, keys) {
   return config;
 }
 
-/** 手动上锁的中转站：预设来源没有面板，锁态只能用这种方式构造。 */
+/** 手动上锁的中转站：与预设来源的默认锁定对照。 */
 const LOCKED_RELAY_CONFIG = lockKeysFor(JSON.parse(JSON.stringify(RELAY_CONFIG)), ['size', 'quality', 'prompt', 'image']);
 
 /** 八个键全锁的中转站（整块锁的选中态：`PARAM_KEYS.every(locked)`）。 */
@@ -969,13 +964,13 @@ async function saveAndPosted(harness) {
   return JSON.parse(posted[posted.length - 1].body).config;
 }
 
-test('预设来源没有模型选项：中转站与自定义提供商有，且默认不锁', async () => {
-  // 预设已经把输入与返回定死了，模型行的箭头还在但禁用（不是删掉——列表里有的行有、
-  // 有的没有，看着像漏渲染）。
+test('云端预设的模型选项默认锁定，中转站与自定义提供商默认不锁', async () => {
   const preset = await openEditor(PRESET_CONFIG);
-  const presetToggle = optionsToggle(preset.harness.renderRoot());
-  assert.ok(presetToggle, '预设来源：箭头照旧渲染');
-  assert.equal(presetToggle.props.disabled, true, '预设来源：只是禁用');
+  const input = openModelPanel(preset.harness);
+  assert.notEqual(optionsToggle(preset.harness.renderRoot()).props.disabled, true);
+  assert.equal(paramLock(input, 'prompt').props['aria-pressed'], 'true');
+  assert.equal(paramInput(input, 'size').props.disabled, true);
+  assert.equal(paramLock(settingsSection(preset.harness.renderRoot(), 'data-mo-image-output-settings'), 'operations').props['aria-pressed'], 'true');
 
   // adapter 为空的中转站是最常见的一档：以前按 adapter 判会把它一起锁死，现在看 presetId。
   const relay = await openEditor(RELAY_CONFIG);
@@ -991,14 +986,13 @@ test('预设来源没有模型选项：中转站与自定义提供商有，且�
   assert.notEqual(paramInput(customPanel, 'image').props.disabled, true);
 });
 
-test('锁状态只存与默认不同的键：预设上锁、自配解锁、ComfyUI 的输入键不锁', () => {
+test('锁状态只存与默认不同的键：云端与本地预设上锁，自配解锁', () => {
   const { api } = createHarness({ config: PRESET_CONFIG });
   // 跨 vm 边界的对象走一趟 JSON：deepEqual 会比对原型，vm 里的 Object 与本进程不是同一个。
   const plain = (value) => JSON.parse(JSON.stringify(value));
   const preset = { presetId: 'openai', adapter: 'openai-images' };
   const relay = { adapter: '' };
   const custom = { adapter: 'custom' };
-  // ComfyUI 的参数是用户自己接到工作流上的：输入键不锁，但返回格式仍是协议定的，照锁。
   const comfy = { presetId: 'comfyui', adapter: 'comfyui' };
 
   const customEntry = {};
@@ -1018,36 +1012,24 @@ test('锁状态只存与默认不同的键：预设上锁、自配解锁、Comfy
       size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false, operations: false
     });
   }
-  assert.deepEqual(plain(api.__test.lockedMapOf({}, comfy)), {
-    size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false, operations: true
-  }, 'ComfyUI：输入参数不锁，输出设置照预设来源锁');
+  assert.deepEqual(plain(api.__test.lockedMapOf({}, comfy)),
+    plain(api.__test.lockedMapOf({}, preset)), '本地预设同样默认全锁');
+  assert.equal(api.__test.lockedMapOf({ locked: { prompt: false } }, comfy).prompt, false,
+    '用户显式解锁优先于默认值');
   // 老配置没有 presetId：按自配处理（放宽），一升级不该发现改不了尺寸。
   assert.equal(plain(api.__test.lockedMapOf({}, {})).size, false);
 });
 
-test('本地部署三条（ComfyUI / A1111 / SwarmUI）默认不锁输入键，OpenAI 兼容的 sd-server 仍锁', () => {
+test('所有本地生图预设的输入和输出默认锁定', () => {
   const { api } = createHarness({ config: PRESET_CONFIG });
-  const unlockedInputs = {
-    size: false, quality: false, prompt: false, negative: false, model: false, n: false, image: false
-  };
-  // 参数清单由部署端决定（装了哪个 sampler、模型目录里有哪几个 checkpoint、工作流接了什么），
-  // 预设给不了映射：锁住这些键等于让这个模型配不下去。返回格式仍是协议定的，三种都照锁。
-  for (const adapter of ['comfyui', 'a1111', 'swarmui']) {
-    assert.deepEqual(plainValue(api.__test.lockDefaultsFor({ presetId: adapter, adapter })),
-      { ...unlockedInputs, operations: true },
-      adapter + '：输入键默认不锁，返回格式仍按预设来源锁');
+  for (const [presetId, adapter] of [
+    ['comfyui', 'comfyui'], ['a1111', ' A1111 '], ['swarmui', 'swarmui'],
+    ['sd-server', 'openai-images'], ['localai', 'openai-images'], ['openai-gateway', 'openai-images']
+  ]) {
+    assert.deepEqual(plainValue(api.__test.lockDefaultsFor({ presetId, adapter })), {
+      size: true, quality: true, prompt: true, negative: true, model: true, n: true, image: true, operations: true
+    }, presetId);
   }
-  // sd-server / localai / openai-gateway 走 OpenAI 兼容字段（adapter 是 openai-images）：
-  // 尺寸、质量、字段模板都有规则可写，和云端预设同一档，照旧全锁。
-  for (const presetId of ['sd-server', 'localai', 'openai-gateway']) {
-    const defaults = plainValue(api.__test.lockDefaultsFor({ presetId, adapter: 'openai-images' }));
-    for (const key of ['size', 'quality', 'prompt', 'negative', 'model', 'n', 'image', 'operations']) {
-      assert.equal(defaults[key], true, presetId + ' 的 ' + key + ' 仍锁');
-    }
-  }
-  // 协议 id 是配置里的字符串（可能是手写的）：大小写与空白不该决定锁不锁。
-  assert.deepEqual(plainValue(api.__test.lockDefaultsFor({ presetId: 'a1111', adapter: ' A1111 ' })),
-    { ...unlockedInputs, operations: true });
 });
 
 /** 本地部署预设：presetId 在，但参数由部署端决定。 */
@@ -1063,29 +1045,25 @@ function localPresetConfig(presetId, adapter, baseUrl) {
   };
 }
 
-test('A1111 / SwarmUI 的输入键可改，sd-server 只提供默认锁定的输出设置', async () => {
-  // A1111 的模型面板只有参数表（尺寸 / 采样器全走 sdapi 参数），锁在表标题那一行。
-  const a1111 = await openEditor(localPresetConfig('a1111', 'a1111', 'http://127.0.0.1:7860'));
-  const a1111Panel = openModelPanel(a1111.harness);
-  assert.ok(paramBox(a1111Panel, 'common'), 'A1111 的参数表在');
-  assert.equal(paramLock(a1111Panel, 'prompt').props['aria-pressed'], 'false', 'A1111 的参数表默认不锁');
-  assert.notEqual(paramCell(commonRows(a1111Panel)[0], 'name').props.disabled, true, 'A1111 的参数行能直接改');
-
-  // SwarmUI 走模型选项面板：尺寸方框的锁也默认松着。
-  const swarm = await openEditor(localPresetConfig('swarmui', 'swarmui', 'http://127.0.0.1:7801'));
-  const swarmPanel = openModelPanel(swarm.harness);
-  assert.equal(paramLock(swarmPanel, 'size').props['aria-pressed'], 'false', 'SwarmUI 的尺寸不锁');
-  const sizeMode = findAll(swarmPanel, (node) => node.type === 'select'
-    && node.props['data-param-key'] === 'size')[0];
-  assert.notEqual(sizeMode.props.disabled, true, 'SwarmUI 的尺寸控件能直接改');
-
-  // sd-server 的输入沿用 OpenAI 兼容字段。模型可覆盖部署端返回格式。
-  const sd = await openEditor(localPresetConfig('sd-server', 'openai-images', 'http://127.0.0.1:8080/v1'));
-  const sdPanel = openModelPanel(sd.harness);
-  assert.equal(findAll(sdPanel, (node) => node.props['data-mo-image-input-settings'] !== undefined).length, 0);
-  const output = findAll(sdPanel, (node) => node.props['data-mo-image-output-settings'] !== undefined)[0];
-  assert.ok(output);
-  assert.equal(paramLock(output, 'operations').props['aria-pressed'], 'true');
+test('本地预设显示输入和输出，解锁后才能改输入', async () => {
+  const cases = [
+    ['a1111', 'a1111', 'http://127.0.0.1:7860', 'prompt'],
+    ['swarmui', 'swarmui', 'http://127.0.0.1:7801', 'size'],
+    ['sd-server', 'openai-images', 'http://127.0.0.1:8080/v1', 'size']
+  ];
+  for (const [presetId, adapter, baseUrl, key] of cases) {
+    const { harness } = await openEditor(localPresetConfig(presetId, adapter, baseUrl));
+    const input = openModelPanel(harness);
+    const field = (panel) => key === 'prompt' ? paramCell(commonRows(panel)[0], 'name')
+      : findAll(panel, (node) => node.type === 'select' && node.props['data-param-key'] === 'size')[0];
+    assert.equal(field(input).props.disabled, true, presetId);
+    const lock = paramLock(input, key);
+    assert.equal(lock.props['aria-pressed'], 'true', presetId);
+    const output = settingsSection(harness.renderRoot(), 'data-mo-image-output-settings');
+    assert.equal(paramLock(output, 'operations').props['aria-pressed'], 'true', presetId);
+    lock.props.onClick(fakeEvent());
+    assert.equal(field(settingsSection(harness.renderRoot(), 'data-mo-image-input-settings')).props.disabled, false, presetId);
+  }
 });
 
 test('一键配置把命中的尺寸与字段写进去，并把整块输入设置锁上', async () => {
@@ -1272,6 +1250,14 @@ test('整块锁：一键全锁 / 一键全解，都走标题行那一把锁', as
   let opened = openModelPanel(harness);
   const masterLock = () => findAll(opened, (node) => node.type === 'button'
     && node.props['data-mo-image-params-lock'] !== undefined)[0];
+  const single = () => findButton(opened, (node) => textOf(node).join('') === 'Configure');
+  const bulk = () => findButton(opened, (node) => textOf(node).join('') === 'Configure every model');
+  assert.equal(single().props.disabled, true, '输入整块锁定时禁用单模型配置');
+  assert.equal(bulk().props.disabled, true, '所有模型输入都锁定时禁用批量配置');
+  const count = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length;
+  await single().props.onClick(fakeEvent());
+  await bulk().props.onClick(fakeEvent());
+  assert.equal(harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule')).length, count);
   assert.ok(masterLock(), '「输入设置」标题行上有整块锁');
   assert.equal(masterLock().props['aria-pressed'], 'true', '这四个键都锁着 → 显示已上锁');
   masterLock().props.onClick(fakeEvent());
@@ -1281,6 +1267,8 @@ test('整块锁：一键全锁 / 一键全解，都走标题行那一把锁', as
     assert.notEqual(paramInput(opened, key).props.disabled, true, key + ' 应该已解锁');
   }
   assert.equal(masterLock().props['aria-pressed'], 'false', '全解开之后显示未上锁');
+  assert.equal(single().props.disabled, false);
+  assert.equal(bulk().props.disabled, false);
 
   // 再点一次：全部锁回去。
   masterLock().props.onClick(fakeEvent());
@@ -1302,6 +1290,7 @@ test('「输入设置」里的「一键配置」只配这一个模型，并把�
   opened = harness.renderRoot();
   const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
   assert.deepEqual(JSON.parse(asked[asked.length - 1].body).models, ['Qwen/Qwen-Image'], '只问这一个模型');
+  assert.equal(findButton(opened, (node) => textOf(node).join('') === 'Configure').props.disabled, true);
   // 配好的模型整块输入设置锁上：锁图标变成「已上锁」，框里的控件随之禁用。
   assert.equal(findAll(opened, (node) => node.props && node.props['data-mo-image-params-lock'] !== undefined)[0]
     .props['aria-pressed'], 'true', '配完显示已上锁');
@@ -1327,11 +1316,36 @@ test('手填的输入框收在默认折叠的「输入设置」里', async () =>
   }
 });
 
-test('「一键配置所有模型」在中转站与自定义提供商上出现，预设来源不出现', async () => {
-  const hasBulk = (tree) => Boolean(findButton(tree, (node) => /Configure every model/i.test(textOf(node).join(''))));
-  assert.ok(hasBulk((await openEditor(RELAY_CONFIG)).tree), 'adapter 为空的中转站最需要一键配置');
-  assert.ok(hasBulk((await openEditor(CUSTOM_RELAY_CONFIG)).tree), '自定义协议也要有');
-  assert.ok(!hasBulk((await openEditor(PRESET_CONFIG)).tree), '预设来源开箱即用，不出现');
+test('云端与兼容本地预设显示批量配置，所有输入锁定时禁用', async () => {
+  const bulk = (tree) => findButton(tree, (node) => textOf(node).join('') === 'Configure every model');
+  for (const config of [RELAY_CONFIG, CUSTOM_RELAY_CONFIG]) {
+    assert.equal(bulk((await openEditor(config)).tree).props.disabled, false);
+  }
+  for (const config of [PRESET_CONFIG, localPresetConfig('localai', 'openai-images', 'http://127.0.0.1:8080/v1')]) {
+    const { harness } = await openEditor(config);
+    const input = openModelPanel(harness);
+    assert.equal(bulk(input).props.disabled, true);
+    assert.equal(findButton(input, (node) => textOf(node).join('') === 'Configure').props.disabled, true);
+    const masterLock = findAll(input, (node) => node.type === 'button' && 'data-mo-image-params-lock' in node.props)[0];
+    masterLock.props.onClick(fakeEvent());
+    assert.equal(bulk(harness.renderRoot()).props.disabled, false);
+  }
+});
+
+test('预设批量配置只请求有未锁输入的模型', async () => {
+  const model = 'Qwen/Qwen-Image';
+  const provider = { ...PRESET_CONFIG.providers[0], models: ['fully-locked', model],
+    modelOptions: { [model]: { locked: { size: false } } } };
+  const config = { ...PRESET_CONFIG, providers: [provider], active: { providerId: provider.id, model } };
+  const { harness } = await openEditor(config, { detect: DETECTED_QWEN });
+  const opened = await configureAll(harness);
+  const asked = harness.fetchCalls.filter((call) => call.url.includes('/detect-model-rule'));
+  assert.equal(asked.length, 1);
+  assert.deepEqual(JSON.parse(asked[0].body).models, [model]);
+  assert.equal(findButton(opened, (node) => textOf(node).join('') === 'Configure every model').props.disabled, true);
+  const saved = (await saveAndPosted(harness)).providers[0].modelOptions;
+  assert.equal(saved[model].size.field, 'image_size');
+  assert.equal(saved['fully-locked'], undefined);
 });
 
 test('选预设就记 presetId（来源），手改 API 地址不动它', async () => {
@@ -3297,6 +3311,23 @@ test('切策略时字段名与传法不丢', async () => {
   }
 });
 
+test('首次修改预设参考图字段名保留 multipart 与多图编号', async () => {
+  const { providerId, model } = PRESET_CONFIG.active;
+  for (const [template, expected] of [
+    [{ multipart: 'image[]' }, { multipart: 'new_images[]' }],
+    [{ numbered: 'image', as: 'dataUrl' }, { numbered: 'new_images', as: 'dataUrl' }]
+  ]) {
+    const { harness } = await openEditor(PRESET_CONFIG, {
+      capabilities: [{ providerId, models: [{ model, image: template }] }]
+    });
+    const input = openModelPanel(harness);
+    paramLock(input, 'image').props.onClick(fakeEvent());
+    typeFieldName(harness, 'new_images');
+    const saved = await saveAndPosted(harness);
+    assert.deepEqual(saved.providers[0].modelOptions[model].fields.image, expected);
+  }
+});
+
 test('multipart 端点不提供「按序号」：那个形状写不进表单，选了会静默丢图', async () => {
   const optionsOf = (tree) => findAll(imageModeSelect(tree), (node) => node.type === 'option')
     .map((node) => ({ value: String(node.props.value), disabled: node.props.disabled === true }));
@@ -3692,10 +3723,6 @@ test('老形状的质量覆盖（字符串挡位 + 顶层 default）在面板里
 
 /* ───────────── workflow 类适配器（ComfyUI / A1111）：输入设置折叠区 ───────────── */
 
-/**
- * 预设来源的两条本地部署：presetId 在，但参数归部署端——输入键默认不锁、返回格式照锁
- * （见 lockDefaultsFor）。拿它们当夹具，「默认未上锁」才不是「碰巧没有 presetId」。
- */
 const COMFY_PRESET_CONFIG = {
   providers: [{ ...CONFIG.providers[0], presetId: 'comfyui' }],
   active: CONFIG.active,
@@ -3743,11 +3770,11 @@ test('ComfyUI / A1111 的输入内容也收进「输入设置」：标题行与�
       { display: 'flex', alignItems: 'center', gap: 6, flex: 'none' },
       item.label + '：操作区同一份样式');
 
-    // 右端只有一把锁（默认未上），没有「自动检测」：workflow 参数不来自规则表。
+    // 右端只有一把默认上锁的锁。
     const actions = findAll(row.children[1], (node) => node.type === 'button');
     assert.equal(actions.length, 1, item.label + '：右端只放一个控件');
     assert.equal(actions[0].props['data-lock-key'], 'prompt', item.label + '：锁复用「常规」参数表的键');
-    assert.equal(actions[0].props['aria-pressed'], 'false', item.label + '：默认未上锁');
+    assert.equal(actions[0].props['aria-pressed'], 'true', item.label + '：默认上锁');
     assert.equal(textOf(row.children[1]).join(''), '', item.label + '：右端是图标，没有按钮文案');
     assert.doesNotMatch(textOf(input).join(' '), /Auto-detect/, item.label + '：输入设置里没有自动检测');
 
@@ -3759,7 +3786,7 @@ test('ComfyUI / A1111 的输入内容也收进「输入设置」：标题行与�
     const textareas = findAll(input, (node) => node.type === 'textarea');
     if (item.workflow) {
       assert.equal(textareas.length, 1, 'ComfyUI：工作流编辑器在 details 里');
-      assert.notEqual(textareas[0].props.disabled, true, 'ComfyUI：工作流编辑器仍可编辑');
+      assert.equal(textareas[0].props.disabled, true, 'ComfyUI：解锁前禁止编辑工作流');
       // 顺序：工作流编辑器在前、解析出的参数表在后。
       const inside = findAll(input, () => true);
       const table = findAll(input, (node) => node.props && node.props['data-param-table'] === 'common')[0];
@@ -3846,24 +3873,46 @@ test('输入设置与输出设置是 .modelRow 同一层的兄弟节点：同一
   }
 });
 
-test('workflow 适配器的输入设置锁默认未上：预设来源也能直接改，点锁才锁住参数表', async () => {
+test('点击本地预设的输入锁后，参数表与标题行同步解锁并写入配置', async () => {
   const { harness } = await openEditor(A1111_PRESET_CONFIG);
-  let opened = openModelPanel(harness);
-  let input = settingsSection(opened, 'data-mo-image-input-settings');
-  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'false',
-    '标题行的锁默认未上');
-  assert.equal(lockWithKey(commonBox(input), 'prompt').props['aria-pressed'], 'false',
-    '「常规」方框的锁是同一个键，也是未上');
-  const nameInput = () => findAll(input, (node) => node.props
-    && node.props['data-param-field'] === 'name')[0];
-  assert.notEqual(nameInput().props.disabled, true, '没上锁：参数表直接能改');
+  openModelPanel(harness);
+  let input = settingsSection(harness.renderRoot(), 'data-mo-image-input-settings');
+  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'true');
+  assert.equal(lockWithKey(commonBox(input), 'prompt').props['aria-pressed'], 'true');
+  assert.equal(paramCell(commonRows(input)[0], 'name').props.disabled, true);
+  lockWithKey(settingsRow(input), 'prompt').props.onClick(fakeEvent());
+  input = settingsSection(harness.renderRoot(), 'data-mo-image-input-settings');
+  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'false');
+  assert.equal(lockWithKey(commonBox(input), 'prompt').props['aria-pressed'], 'false');
+  assert.equal(paramCell(commonRows(input)[0], 'name').props.disabled, false);
 
-  // 点标题行的锁：和点「常规」方框的锁是同一个状态（同一个键、同一套落盘）。
-  lockWithKey(settingsRow(input), 'prompt').props.onClick({ preventDefault() {}, stopPropagation() {} });
-  opened = harness.renderRoot();
-  input = settingsSection(opened, 'data-mo-image-input-settings');
-  assert.equal(lockWithKey(settingsRow(input), 'prompt').props['aria-pressed'], 'true', '点了就锁上');
-  assert.equal(nameInput().props.disabled, true, '上锁后参数表禁用');
+  const config = await saveAndPosted(harness);
+  const provider = config.providers[0];
+  const entry = provider.modelOptions[provider.models[0]];
+  assert.deepEqual(entry.locked, { prompt: false, negative: false, model: false, n: false });
+});
+
+test('清空 ComfyUI 预设的工作流不会清空输出覆盖和显式解锁', async () => {
+  const config = structuredClone(COMFY_PRESET_CONFIG);
+  const [provider] = config.providers;
+  const model = config.active.model;
+  provider.modelOptions = { [model]: {
+    workflow: '{"1":{"class_type":"SaveImage"}}',
+    mapping: { prompt: { node: '1', input: 'text' } },
+    params: [{ name: 'text', node: '1', input: 'text' }],
+    locked: { prompt: false, operations: false },
+    operations: { version: 1, generate: { output: 'binary' } }
+  } };
+  const { harness } = await openEditor(config);
+  const input = openModelPanel(harness);
+  const textarea = findAll(input, (node) => node.props['data-param-workflow'] === 'input')[0];
+  assert.equal(textarea.props.disabled, false);
+  textarea.props.onChange({ target: { value: '' } });
+  const saved = await saveAndPosted(harness);
+  assert.deepEqual(saved.providers[0].modelOptions[model], {
+    locked: { prompt: false, operations: false },
+    operations: { version: 1, generate: { output: 'binary' } }
+  });
 });
 
 test('ComfyUI 解析出的参数行也收在「输入设置」里，工作流编辑器照旧可编辑并能保存', async () => {
