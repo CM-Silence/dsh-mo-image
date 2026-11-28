@@ -18,6 +18,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compareVersions, isHiddenPrerelease, parseChangelogFor } from '../lib/update.js';
+import { NPM_REGISTRY, npmPublicationReady, remoteReleaseTag, rollbackUnpushedTag, runNpm, verifyProjectTests } from './release-checks.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
@@ -139,8 +140,8 @@ export function releasePlan(version) {
   ];
 }
 
-export function isPreparedRelease(current, next, head, tagCommit) {
-  return current === next && Boolean(head) && tagCommit === head;
+export function isPreparedRelease(current, next, head, tagCommit, untaggedReleaseCommit = '') {
+  return current === next && Boolean(head) && (tagCommit ? tagCommit === head : Boolean(untaggedReleaseCommit));
 }
 
 function run(command, args, options = {}) {
@@ -202,6 +203,18 @@ function hasGhInstalled() {
 
 function readVersion() {
   return JSON.parse(readFileSync(PACKAGE_PATH, 'utf8')).version;
+}
+
+function preparedReleaseCommit(tag) {
+  const subject = 'chore(release): ' + tag;
+  const history = capture('git', ['log', '--first-parent', '--fixed-strings', '--grep=' + subject, '--format=%H%x09%s', 'HEAD']);
+  return history.split(/\r?\n/).find((entry) => entry.slice(entry.indexOf('\t') + 1) === subject)?.split('\t')[0] || '';
+}
+
+export function pendingReleaseTag() {
+  const tag = 'v' + readVersion();
+  const localTag = run('git', ['show-ref', '--verify', '--quiet', 'refs/tags/' + tag], { capture: true });
+  return SEMVER.test(tag) && localTag.status === 1 && preparedReleaseCommit(tag) ? tag : '';
 }
 
 function lastTag(ref = 'HEAD') {
@@ -387,22 +400,69 @@ export function upsertChangelog(text, version, notes) {
  */
 function publishToNpm(version) {
   const tag = distTag(version);
-  const args = ['publish', '--tag', tag, '--access', 'public'];
+  const args = ['publish', '--tag', tag, '--access', 'public', '--registry', NPM_REGISTRY];
   console.log(`\n发布到 npm（dist-tag: ${tag}）…`);
-  // Windows 上 npm 是 .cmd，不能直接 spawn；优先用 npm-cli.js 走 node。
-  const cli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  const result = existsSync(cli) ? run(process.execPath, [cli, ...args]) : run('npm', args);
+  const result = runNpm(ROOT, args);
   if (!result.error && result.status === 0) {
     console.log(`npm 已发布 ${version}`);
     return true;
   }
-  console.error(`npm publish 失败。修复后用明确版本重试：npm run release -- ${version} --publish`);
+  console.error('npm publish 失败。Git 标签已推送。请检查登录、包权限或双重验证。');
+  console.error('修复后从原发版提交执行 npm publish --tag ' + tag + ' --access public --registry ' + NPM_REGISTRY + '，成功后用 --release-only 补建 GitHub Release。');
   return false;
 }
 
 export function publishReleaseArtifacts(version, notes, { publish = false, npm = publishToNpm, github = createRelease } = {}) {
   if (publish && !npm(version)) return 'npm-failed';
   return github(version, notes) ? 'released' : 'github-failed';
+}
+
+
+function workspaceStatus() {
+  const status = run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { capture: true });
+  if (status.error || status.status !== 0) throw new Error('无法读取 Git 工作区状态。');
+  return status.stdout.split('\0').filter(Boolean);
+}
+
+function sameCheckout(head, branch) {
+  return capture('git', ['rev-parse', '--verify', 'HEAD']) === head
+    && capture('git', ['rev-parse', '--abbrev-ref', 'HEAD']) === branch;
+}
+
+function commitRelease(version, notes, changelogPath, changelogText, step, head, branch) {
+  const packageText = readFileSync(PACKAGE_PATH, 'utf8');
+  const pkg = { ...JSON.parse(packageText), version };
+  const files = [
+    { name: 'package.json', file: PACKAGE_PATH, previous: packageText, next: JSON.stringify(pkg, null, 2) + '\n' },
+    { name: 'CHANGELOG.md', file: changelogPath, previous: existsSync(changelogPath) ? changelogText : undefined,
+      next: upsertChangelog(changelogText, version, notes) }
+  ];
+  let committed = false;
+  try {
+    for (const { file, next } of files) writeFileSync(file, next, 'utf8');
+    if (!verifyProjectTests(ROOT)) {
+      console.error('tests failed; release aborted');
+      return false;
+    }
+    const expected = new Set(files.map(({ name, previous }) => (previous === undefined ? '?? ' : ' M ') + name));
+    if (!sameCheckout(head, branch) || workspaceStatus().some((entry) => !expected.has(entry))
+        || files.some(({ file, next }) => readFileSync(file, 'utf8') !== next)) {
+      console.error('准备发版时分支、提交或工作区发生变化，请检查后重试。');
+      return false;
+    }
+    committed = run(step.command, step.args).status === 0;
+    if (!committed) console.error('创建本地发版提交失败。');
+    return committed;
+  } finally {
+    if (!committed && sameCheckout(head, branch)) {
+      for (const { name, file, previous, next } of files) {
+        if (!existsSync(file) || readFileSync(file, 'utf8') !== next
+            || run('git', ['diff', '--cached', '--quiet', '--', name], { capture: true }).status !== 0) continue;
+        if (previous === undefined) rmSync(file);
+        else writeFileSync(file, previous, 'utf8');
+      }
+    }
+  }
 }
 
 /**
@@ -427,13 +487,15 @@ export function main(argv = process.argv.slice(2)) {
   const tag = `v${next}`;
   const tagRef = `refs/tags/${tag}`;
   const head = capture('git', ['rev-parse', '--verify', 'HEAD']);
-  const tagCommit = capture('git', ['rev-parse', '--verify', `${tagRef}^{commit}`]);
-  const resume = isPreparedRelease(current, next, head, tagCommit);
+  const tagObject = capture('git', ['rev-parse', '--verify', tagRef]);
+  const tagCommit = tagObject ? capture('git', ['rev-parse', '--verify', tagRef + '^{commit}']) : '';
+  const releaseCommit = current === next && !tagObject ? preparedReleaseCommit(tag) : '';
+  const resume = isPreparedRelease(current, next, head, tagCommit, releaseCommit);
   if (next === current && !resume) {
-    console.error(`继续发版需要 ${tag} 指向当前 HEAD，并且 package.json 使用同一个版本。`);
+    console.error('继续发布 ' + tag + ' 需要匹配当前 HEAD 的标签，或该版本已有的本地发版提交。');
     return 1;
   }
-  if (!resume && capture('git', ['tag', '--list', tag])) {
+  if (!resume && tagObject) {
     console.error(`tag ${tag} already exists`);
     return 1;
   }
@@ -449,7 +511,7 @@ export function main(argv = process.argv.slice(2)) {
     notes: args.notes,
     notesFileText: args.notesFile ? readFileSync(path.resolve(ROOT, args.notesFile), 'utf8') : '',
     changelog: changelogText,
-    commits: collectCommits(lastTag(resume ? `${tag}^` : 'HEAD'))
+    commits: collectCommits(lastTag(resume ? (tagCommit || releaseCommit) + '^' : 'HEAD'))
   });
   if (!args.notes.trim() && !args.notesFile && parseChangelogFor(changelogText, next)) {
     console.log(`使用 CHANGELOG.md 里 v${next} 的说明`);
@@ -459,8 +521,11 @@ export function main(argv = process.argv.slice(2)) {
 
   if (args.dryRun) {
     console.log(resume ? `resume release ${tag}` : `release ${current} → ${next}`);
-    console.log(`  node --test    (tests)`);
-    for (const step of resume ? [push] : plan) console.log(`  ${step.command} ${step.args.join(' ')}`);
+    if (resume) verifyProjectTests(ROOT, { dryRun: true });
+    else console.log('  node --test    (待发布文件)');
+    for (const step of resume ? (tagObject ? [push] : plan.slice(1)) : plan) {
+      console.log('  ' + step.command + ' ' + step.args.join(' '));
+    }
     if (args.publish) console.log(`  npm publish --tag ${distTag(next)}`);
     console.log(`  (github release ${tag})\n`);
     console.log(notes || '(no notes)');
@@ -472,57 +537,62 @@ export function main(argv = process.argv.slice(2)) {
     console.error(`release from ${BRANCH}, not ${branch || 'detached HEAD'}`);
     return 1;
   }
-  if (capture('git', ['status', '--porcelain'])) {
+  if (workspaceStatus().length) {
     console.error('working tree is not clean; commit or stash first');
     return 1;
   }
 
-  if (resume) console.log(`继续发布已准备好的 ${tag}。`);
+  const remote = remoteReleaseTag(ROOT, tagRef);
+  if (remote !== 'absent') {
+    console.error(remote === 'present' ? '远端已存在 ' + tag + '，不能重复推送同一版本。'
+      : '无法确认远端标签状态，本地标签会保留。连接恢复后可用同一版本继续。');
+    return 1;
+  }
+  if (args.publish && !npmPublicationReady(ROOT)) return 1;
+  if (resume) console.log('继续发布已准备好的 ' + tag + '。');
   const ghCli = ghReady();
   if (ghCli && run(ghCli, ['release', 'view', tag], { capture: true }).status === 0) {
     console.error(`release ${tag} already exists`);
     return 1;
   }
 
-  if (run(process.execPath, ['--test']).status !== 0) {
-    console.error('tests failed; release aborted');
-    if (resume) console.error(`版本号已经是 ${next}；修好测试后重跑本命令会从推送继续`);
+  if (!sameCheckout(head, branch) || workspaceStatus().length) {
+    console.error('预检期间分支、提交或工作区发生变化，请检查后重试。');
     return 1;
   }
-  if (capture('git', ['rev-parse', '--verify', 'HEAD']) !== head
-    || capture('git', ['rev-parse', '--abbrev-ref', 'HEAD']) !== branch
-    || capture('git', ['status', '--porcelain'])) {
-    console.error('测试期间分支、提交或工作区发生了变化，请检查后重新执行发版。');
-    return 1;
-  }
-
-  if (!resume) {
-    const pkg = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8'));
-    pkg.version = next;
-    writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
-    // 说明同时写进 CHANGELOG.md：它会随包发布，更新对话框从那里读。
-    writeFileSync(changelogPath, upsertChangelog(changelogText, next, notes), 'utf8');
-
-    for (const step of plan.slice(0, -1)) {
-      if (run(step.command, step.args).status !== 0) {
-        console.error(`${step.command} ${step.args[0]} 失败，本地保留当前状态。检查发版文件和提交，准备好 ${tag} 后用明确版本继续。`);
-        return 1;
-      }
+  if (resume) {
+    if (!verifyProjectTests(ROOT)) {
+      console.error('tests failed; release aborted');
+      return 1;
     }
-  }
+    if (!sameCheckout(head, branch) || workspaceStatus().length) {
+      console.error('测试期间分支、提交或工作区发生变化，请检查后重试。');
+      return 1;
+    }
+  } else if (!commitRelease(next, notes, changelogPath, changelogText, plan[0], head, branch)) return 1;
 
+  if (!tagObject && run(plan[1].command, plan[1].args).status !== 0) {
+    console.error('无法创建本地标签 ' + tag + '。请检查后用同一版本重试。');
+    return 1;
+  }
+  const preparedObject = capture('git', ['rev-parse', '--verify', tagRef]);
   const preparedCommit = capture('git', ['rev-parse', '--verify', `${tagRef}^{commit}`]);
-  if (!isPreparedRelease(readVersion(), next, capture('git', ['rev-parse', '--verify', 'HEAD']), preparedCommit)) {
+  if (!preparedCommit || !preparedObject || (tagObject && tagObject !== preparedObject) || workspaceStatus().length
+      || !sameCheckout(preparedCommit, branch) || readVersion() !== next) {
     console.error(`当前版本或提交与 ${tag} 不一致，请检查本地发版状态。`);
     return 1;
   }
   if (run(push.command, push.args).status !== 0) {
-    console.error(`无法确认分支与 ${tag} 的推送结果，已保留本地提交和标签。`);
+    const rollback = rollbackUnpushedTag(ROOT, tagRef, preparedObject);
+    if (rollback === 'removed') console.error('远端没有 ' + tag + '，已撤回本地标签。发版提交供续跑。');
+    else if (rollback === 'present') console.error('远端已有 ' + tag + '，请核对推送结果。本地标签仍可用于续跑。');
+    else if (rollback === 'changed') console.error('无法安全撤回本地标签，请核对标签状态和 Git 权限。');
+    else console.error('无法确认远端标签，已保留本地提交和标签。');
     console.error(`检查远端后用明确版本重试：npm run release -- ${next}${args.publish ? ' --publish' : ''}`);
     return 1;
   }
   if (args.publish && (capture('git', ['rev-parse', '--verify', 'HEAD']) !== preparedCommit
-    || capture('git', ['status', '--porcelain']))) {
+    || workspaceStatus().length)) {
     console.error('推送期间提交或工作区发生了变化。请检查后从原发版提交继续发布 npm 包。');
     return 1;
   }

@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { rollbackUnpushedTag } from '../scripts/release-checks.mjs';
 import {
   parseArgs, nextVersion, renderNotes, releasePlan, commandAvailable, distTag,
   upsertChangelog, notesForRelease, isPreparedRelease, publishReleaseArtifacts
@@ -110,11 +115,13 @@ test('releasePlan commits only the release files and atomically pushes the tagge
   ]);
 });
 
-test('an explicit current version resumes only from the matching tagged HEAD', () => {
+test('an explicit current version resumes from the matching tag or an untagged release commit', () => {
   const version = nextVersion('0.4.1-rc2', 'v0.4.1-rc2');
   assert.equal(version, '0.4.1-rc2');
   assert.ok(isPreparedRelease('0.4.1-rc2', version, 'abc', 'abc'));
-  assert.equal(isPreparedRelease('0.4.1-rc2', version, 'abc', 'def'), false);
+  assert.equal(isPreparedRelease('0.4.1-rc2', version, 'abc', 'def', 'prepared'), false);
+  assert.ok(isPreparedRelease('0.4.1-rc2', version, 'abc', '', 'prepared'));
+  assert.equal(isPreparedRelease('0.4.1-rc2', version, 'abc', ''), false);
   assert.equal(isPreparedRelease('0.4.1-rc2', version, '', ''), false);
   assert.equal(isPreparedRelease('0.4.1-rc1', version, 'abc', 'abc'), false);
 });
@@ -127,4 +134,144 @@ test('failed requested npm publication prevents a GitHub announcement', () => {
   assert.deepEqual(calls, [['npm', '0.4.0']]);
   assert.equal(publishReleaseArtifacts('0.4.0', 'notes', { npm, github }), 'released');
   assert.deepEqual(calls.at(-1), ['github', '0.4.0', 'notes']);
+});
+
+function releaseFixture(t) {
+  const temp = realpathSync(os.tmpdir());
+  const folder = mkdtempSync(path.join(temp, 'dsh-release-regression-'));
+  t.after(() => {
+    const real = realpathSync(folder);
+    if (path.dirname(real) === temp && path.basename(real).startsWith('dsh-release-regression-')) {
+      rmSync(real, { recursive: true, force: true });
+    }
+  });
+  const root = path.join(folder, 'project');
+  const remote = path.join(folder, 'origin');
+  mkdirSync(root);
+  const git = (args, cwd = root) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git(['init', '-b', 'master']);
+  git(['config', 'user.name', 'Release Test']);
+  git(['config', 'user.email', 'release-test@example.invalid']);
+  for (const name of ['lib', 'scripts', 'test']) mkdirSync(path.join(root, name));
+  for (const name of ['lib/update.js', 'scripts/release.mjs', 'scripts/release-checks.mjs']) {
+    copyFileSync(new URL('../' + name, import.meta.url), path.join(root, name));
+  }
+  const packageFile = path.join(root, 'package.json');
+  const changelog = path.join(root, 'CHANGELOG.md');
+  writeFileSync(packageFile, JSON.stringify({ type: 'module', name: 'fixture', version: '1.0.0' }, null, 2) + '\n');
+  writeFileSync(changelog, '# Changes\n');
+  writeFileSync(path.join(root, 'test', 'smoke.test.mjs'), [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { appendFileSync, existsSync, readFileSync } from 'node:fs';",
+    "test('record the actual tested version', () => {",
+    "  appendFileSync('.git/tested', JSON.parse(readFileSync('package.json', 'utf8')).version + '\\n');",
+    "  assert.equal(existsSync('.git/fail-tests'), false);",
+    "});"
+  ].join('\n'));
+  git(['add', '-A']);
+  git(['commit', '-m', 'chore: initial release fixture']);
+  git(['clone', root, remote]);
+  git(['config', 'receive.denyCurrentBranch', 'refuse'], remote);
+  git(['remote', 'add', 'origin', remote]);
+  const env = { ...process.env, GH_CONFIG_DIR: path.join(folder, 'gh'), GH_TOKEN: '', GITHUB_TOKEN: '',
+    GH_ENTERPRISE_TOKEN: '', GITHUB_ENTERPRISE_TOKEN: '', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' };
+  const release = (args, extra = {}) => {
+    const result = spawnSync(process.execPath, ['scripts/release.mjs', ...args],
+      { cwd: root, encoding: 'utf8', env: { ...env, ...extra }, timeout: 20000 });
+    return { status: result.status, output: result.stdout + result.stderr };
+  };
+  return { root, remote, git, release, packageFile, changelog, version: () => JSON.parse(readFileSync(packageFile, 'utf8')).version };
+}
+
+test('a refused atomic push rolls back the local tag and retries the same tested release', (t) => {
+  const { root, remote, git, release, version, changelog } = releaseFixture(t);
+  const firstHead = git(['rev-parse', 'HEAD']);
+  const failTests = path.join(root, '.git', 'fail-tests');
+  writeFileSync(failTests, '');
+  const testFailure = release(['1.0.1']);
+  assert.equal(testFailure.status, 1, testFailure.output);
+  assert.match(testFailure.output, /tests failed; release aborted/);
+  assert.equal(version(), '1.0.0');
+  assert.equal(readFileSync(changelog, 'utf8'), '# Changes\n');
+  assert.equal(git(['status', '--porcelain']), '');
+  assert.equal(git(['rev-parse', 'HEAD']), firstHead);
+  rmSync(failTests);
+
+  const rejected = release(['1.0.1']);
+  assert.equal(rejected.status, 1, rejected.output);
+  assert.match(rejected.output, /已撤回本地标签/);
+  assert.equal(version(), '1.0.1');
+  assert.equal(git(['log', '-1', '--format=%s']), 'chore(release): v1.0.1');
+  assert.equal(git(['tag', '--list', 'v1.0.1']), '');
+  assert.equal(git(['tag', '--list', 'v1.0.1'], remote), '');
+  const releaseHead = git(['rev-parse', 'HEAD']);
+  git(['tag', '-a', 'v1.0.1', '-m', 'retained after an unconfirmed push']);
+  const retry = release(['1.0.1']);
+  assert.equal(retry.status, 1, retry.output);
+  assert.match(retry.output, /复用上次通过的测试/);
+  assert.match(retry.output, /已撤回本地标签/);
+  assert.equal(git(['rev-parse', 'HEAD']), releaseHead);
+  assert.equal(readFileSync(path.join(root, '.git', 'tested'), 'utf8'), '1.0.1\n1.0.1\n');
+  assert.equal(git(['status', '--porcelain']), '');
+
+  writeFileSync(path.join(root, 'test-input.txt'), 'file changed');
+  git(['add', 'test-input.txt']);
+  git(['commit', '-m', 'chore: update release inputs']);
+  const changed = release(['1.0.1']);
+  assert.equal(changed.status, 1, changed.output);
+  assert.match(changed.output, /已撤回本地标签/);
+  assert.doesNotMatch(changed.output, /复用上次通过的测试/);
+  assert.equal(readFileSync(path.join(root, '.git', 'tested'), 'utf8'), '1.0.1\n1.0.1\n1.0.1\n');
+
+  git(['tag', '-a', 'v1.0.1', '-m', 'retained locally']);
+  const retained = git(['rev-parse', 'refs/tags/v1.0.1']);
+  git(['tag', 'v1.0.1'], remote);
+  const duplicate = release(['1.0.1', '--publish']);
+  assert.equal(duplicate.status, 1, duplicate.output);
+  assert.match(duplicate.output, /远端已存在 v1\.0\.1/);
+  assert.equal(git(['rev-parse', 'refs/tags/v1.0.1']), retained);
+  git(['remote', 'set-url', 'origin', path.join(remote, 'does-not-exist')]);
+  const unconfirmed = release(['1.0.1']);
+  assert.equal(unconfirmed.status, 1, unconfirmed.output);
+  assert.match(unconfirmed.output, /无法确认远端标签状态，本地标签会保留/);
+  assert.equal(git(['rev-parse', 'refs/tags/v1.0.1']), retained);
+  assert.equal(readFileSync(path.join(root, '.git', 'tested'), 'utf8'), '1.0.1\n1.0.1\n1.0.1\n');
+});
+
+test('missing npm authentication stops before tests, a commit or a tag', (t) => {
+  const { root, git, release, version } = releaseFixture(t);
+  const stub = path.join(root, '.git', 'npm-stub.cjs');
+  writeFileSync(stub, [
+    "const args = process.argv.slice(2);",
+    "if (args[0] !== 'whoami' || args[args.indexOf('--registry') + 1] !== 'https://registry.npmjs.org/') process.exit(4);",
+    "console.error('npm error code ENEEDAUTH');",
+    "process.exit(1);"
+  ].join('\n'));
+  const original = git(['rev-parse', 'HEAD']);
+  const result = release(['1.0.1', '--publish'], { npm_execpath: stub });
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /npm login --registry https:\/\/registry\.npmjs\.org\//);
+  assert.equal(version(), '1.0.0');
+  assert.equal(git(['rev-parse', 'HEAD']), original);
+  assert.equal(git(['tag', '--list']), '');
+  assert.throws(() => readFileSync(path.join(root, '.git', 'tested')), { code: 'ENOENT' });
+});
+
+test('rollback preserves a remote, unverified or independently changed tag', (t) => {
+  const { root, remote, git } = releaseFixture(t);
+  const ref = 'refs/tags/v1.0.1';
+  git(['tag', '-a', 'v1.0.1', '-m', 'local']);
+  const object = git(['rev-parse', ref]);
+  git(['tag', 'v1.0.1'], remote);
+  assert.equal(rollbackUnpushedTag(root, ref, object), 'present');
+  git(['tag', '-d', 'v1.0.1'], remote);
+  assert.equal(rollbackUnpushedTag(root, ref, git(['rev-parse', 'HEAD'])), 'changed');
+  git(['remote', 'set-url', 'origin', path.join(remote, 'does-not-exist')]);
+  assert.equal(rollbackUnpushedTag(root, ref, object), 'unknown');
+  assert.equal(git(['rev-parse', ref]), object);
 });
